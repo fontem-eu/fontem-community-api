@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gmr-community-api
+  namespace: gmr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gmr-community-api
+  template:
+    metadata:
+      labels:
+        app: gmr-community-api
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: api
+          image: contribute.void42.internal/golden/gmr-community-api:{{ .Values.version }}
+          ports:
+            - containerPort: 8001
+          env:
+            - name: JWT_SECRET
+              value: "gmr-community-jwt-secret-2026"
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://postgres:postgres@postgresql:5432/gmr_app"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "1"

@@ -1,0 +1,4 @@
+apiVersion: v1
+name: gmr-community-api
+version: 1.0.0
+description: Community collaboration API — reports, issues, moderation

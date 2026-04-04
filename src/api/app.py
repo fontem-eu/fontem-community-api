@@ -53,3 +53,9 @@ app.include_router(issues.router)
 app.include_router(users.router)
 app.include_router(groups.router)
 app.include_router(moderation.router)
+
+
+@app.get("/health", tags=["Health"])
+async def health() -> dict:
+    """Liveness/readiness probe."""
+    return {"status": "ok"}

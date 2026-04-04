@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gmr-community-api
+  namespace: gmr
+spec:
+  selector:
+    app: gmr-community-api
+  ports:
+    - port: 8001
+      targetPort: 8001
