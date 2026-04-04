@@ -25,6 +25,10 @@ _permission_repo: PermissionRepository | None = None
 _issue_repo: IssueRepository | None = None
 _moderation_repo: ModerationRepository | None = None
 
+# When True, each request gets repos backed by an AsyncSession from the pool
+_use_postgres: bool = False
+_pg_session_factory = None
+
 
 def _init_defaults() -> None:
     global _group_repo, _user_repo, _report_repo, _permission_repo, _issue_repo, _moderation_repo
@@ -43,21 +47,68 @@ def _init_defaults() -> None:
 
 
 def configure_postgres(
-    user_repo: UserRepository,
-    report_repo: ReportRepository,
-    permission_repo: PermissionRepository,
-    issue_repo: IssueRepository,
-    group_repo: GroupRepository,
-    moderation_repo: ModerationRepository,
+    user_repo: UserRepository | None = None,
+    report_repo: ReportRepository | None = None,
+    permission_repo: PermissionRepository | None = None,
+    issue_repo: IssueRepository | None = None,
+    group_repo: GroupRepository | None = None,
+    moderation_repo: ModerationRepository | None = None,
+    *,
+    database_url: str | None = None,
 ) -> None:
-    """Replace in-memory repos with Postgres implementations for production."""
-    global _group_repo, _user_repo, _report_repo, _permission_repo, _issue_repo, _moderation_repo
-    _user_repo = user_repo
-    _report_repo = report_repo
-    _permission_repo = permission_repo
-    _issue_repo = issue_repo
-    _group_repo = group_repo
-    _moderation_repo = moderation_repo
+    """Replace in-memory repos with Postgres implementations for production.
+
+    Can be called in two ways:
+      1. With explicit repo instances (for testing or custom wiring).
+      2. With no repos + optional database_url to auto-create the async
+         engine / session factory and build per-request Pg repos.
+    """
+    global _group_repo, _user_repo, _report_repo, _permission_repo
+    global _issue_repo, _moderation_repo, _use_postgres, _pg_session_factory
+
+    if user_repo is not None:
+        # Explicit repo instances provided — use them directly
+        _user_repo = user_repo
+        _report_repo = report_repo
+        _permission_repo = permission_repo
+        _issue_repo = issue_repo
+        _group_repo = group_repo
+        _moderation_repo = moderation_repo
+        return
+
+    # Auto-configure: create engine + session factory from DATABASE_URL
+    import os
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    url = database_url or os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/gmr_app",
+    )
+    engine = create_async_engine(url, echo=False)
+    _pg_session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    _use_postgres = True
+
+
+def _make_pg_repos(session):  # type: ignore[no-untyped-def]
+    """Build all Pg repo instances sharing a single AsyncSession."""
+    from src.infra.postgres.pg_group_repo import PgGroupRepository
+    from src.infra.postgres.pg_issue_repo import PgIssueRepository
+    from src.infra.postgres.pg_moderation_repo import PgModerationRepository
+    from src.infra.postgres.pg_permission_repo import PgPermissionRepository
+    from src.infra.postgres.pg_report_repo import PgReportRepository
+    from src.infra.postgres.pg_user_repo import PgUserRepository
+
+    return {
+        "user": PgUserRepository(session),
+        "report": PgReportRepository(session),
+        "permission": PgPermissionRepository(session),
+        "issue": PgIssueRepository(session),
+        "group": PgGroupRepository(session),
+        "moderation": PgModerationRepository(session),
+    }
 
 
 def get_user_repo() -> UserRepository:
