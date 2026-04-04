@@ -1,0 +1,97 @@
+"""
+Shared fixtures for unit tests.
+All tests use InMemory repositories — 0 I/O, sub-millisecond.
+"""
+from __future__ import annotations
+
+import pytest
+from jose import jwt
+
+from starlette.testclient import TestClient
+
+from src.api.app import app
+from src.api.auth import JWT_SECRET, JWT_ALGORITHM
+from src.api.dependencies import get_user_repo, get_report_service, get_issue_service, get_moderation_service, get_group_repo, get_permission_service
+
+from src.infra.memory.mem_user_repo import InMemoryUserRepository
+from src.infra.memory.mem_report_repo import InMemoryReportRepository
+from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
+from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
+from src.infra.memory.mem_group_repo import InMemoryGroupRepository
+from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
+
+from src.services.permission_service import PermissionService
+from src.services.report_service import ReportService
+from src.services.issue_service import IssueService
+from src.services.moderation_service import ModerationService
+
+from src.domain.user import User
+
+
+def make_token(user_id: str = "user-1", email: str = "test@test.com",
+               name: str = "Test User") -> str:
+    return jwt.encode(
+        {"sub": user_id, "email": email, "name": name},
+        JWT_SECRET, algorithm=JWT_ALGORITHM,
+    )
+
+
+def make_headers(user_id: str = "user-1", **kwargs) -> dict:
+    return {"Authorization": f"Bearer {make_token(user_id, **kwargs)}"}
+
+
+@pytest.fixture()
+def services():
+    """Create a fresh set of InMemory services for each test."""
+    user_repo = InMemoryUserRepository()
+    group_repo = InMemoryGroupRepository()
+    report_repo = InMemoryReportRepository()
+    permission_repo = InMemoryPermissionRepository(group_repo, report_repo)
+    issue_repo = InMemoryIssueRepository()
+    mod_repo = InMemoryModerationRepository()
+
+    perm_svc = PermissionService(permission_repo, user_repo, group_repo)
+    report_svc = ReportService(report_repo, perm_svc)
+    issue_svc = IssueService(issue_repo, user_repo)
+    mod_svc = ModerationService(mod_repo, user_repo)
+
+    return {
+        "user_repo": user_repo,
+        "group_repo": group_repo,
+        "report_repo": report_repo,
+        "permission_repo": permission_repo,
+        "issue_repo": issue_repo,
+        "mod_repo": mod_repo,
+        "perm_svc": perm_svc,
+        "report_svc": report_svc,
+        "issue_svc": issue_svc,
+        "mod_svc": mod_svc,
+    }
+
+
+@pytest.fixture()
+def client(services):
+    """TestClient with InMemory repos injected."""
+    app.dependency_overrides[get_user_repo] = lambda: services["user_repo"]
+    app.dependency_overrides[get_report_service] = lambda: services["report_svc"]
+    app.dependency_overrides[get_issue_service] = lambda: services["issue_svc"]
+    app.dependency_overrides[get_moderation_service] = lambda: services["mod_svc"]
+    app.dependency_overrides[get_group_repo] = lambda: services["group_repo"]
+    app.dependency_overrides[get_permission_service] = lambda: services["perm_svc"]
+
+    with TestClient(app) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+
+
+async def seed_user(user_repo: InMemoryUserRepository, user_id: str,
+                    trust_level: str = "contributor",
+                    roles: list[str] | None = None) -> User:
+    """Create a user with given trust level and roles."""
+    user = User(id=user_id, email=f"{user_id}@test.com", name=user_id,
+                trust_level=trust_level)
+    user = await user_repo.upsert(user)
+    if roles:
+        await user_repo.set_roles(user_id, roles)
+    return user
