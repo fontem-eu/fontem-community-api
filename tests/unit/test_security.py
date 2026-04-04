@@ -176,7 +176,7 @@ class TestDataSecurity:
         # user-2 tries to edit — should fail due to lock
         r = client.put(
             f"/reports/{report.id}/sections/{section.id}",
-            json={"content": {"text": "hacked"}},
+            json={"content": "<p>hacked</p>"},
             headers=make_headers("user-2"),
         )
         assert r.status_code in (409, 403)

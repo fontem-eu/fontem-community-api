@@ -91,6 +91,9 @@ class ReportService:
     async def release_lock(self, user_id: str, section_id: str) -> None:
         await self._reports.release_lock(section_id, user_id)
 
+    async def get_sections(self, report_id: str) -> list[Section]:
+        return await self._reports.get_sections(report_id)
+
     async def list_my_reports(self, user_id: str, limit: int, offset: int) -> list[Report]:
         return await self._reports.list_for_user(user_id, limit, offset)
 

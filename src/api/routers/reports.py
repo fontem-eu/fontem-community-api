@@ -26,11 +26,11 @@ class UpdateReportRequest(BaseModel):
 
 
 class CreateSectionRequest(BaseModel):
-    content_json: dict[str, Any] = {}
+    content: str = ""
 
 
 class UpdateSectionRequest(BaseModel):
-    content_json: dict[str, Any] = {}
+    content: str = ""
 
 
 @router.post("", status_code=201)
@@ -65,7 +65,13 @@ async def get_report(
     svc: ReportService = Depends(get_report_service),
 ) -> dict:
     report = await svc.get(user.id, report_id)
-    return asdict(report)
+    result = asdict(report)
+    sections = await svc.get_sections(report_id)
+    result["sections"] = [
+        {**asdict(s), "content": s.content_json.get("html", "")}
+        for s in sections
+    ]
+    return result
 
 
 @router.put("/{report_id}")
@@ -95,8 +101,10 @@ async def add_section(
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(get_report_service),
 ) -> dict:
-    section = await svc.add_section(user.id, report_id, body.content_json)
-    return asdict(section)
+    section = await svc.add_section(user.id, report_id, {"html": body.content})
+    result = asdict(section)
+    result["content"] = result.get("content_json", {}).get("html", "")
+    return result
 
 
 @router.put("/{report_id}/sections/{section_id}")
@@ -107,8 +115,10 @@ async def update_section(
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(get_report_service),
 ) -> dict:
-    section = await svc.edit_section(user.id, section_id, body.content_json)
-    return asdict(section)
+    section = await svc.edit_section(user.id, section_id, {"html": body.content})
+    result = asdict(section)
+    result["content"] = result.get("content_json", {}).get("html", "")
+    return result
 
 
 @router.delete("/{report_id}/sections/{section_id}", status_code=204)
