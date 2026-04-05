@@ -142,9 +142,9 @@ class TestReportAPI:
         resp = client.delete(f"/reports/{rid}/sections/{sec['id']}", headers=h)
         assert resp.status_code == 204
 
-    def test_get_nonexistent_report_404(self, client, services):
-        """GET /reports/nonexistent returns 404."""
+    def test_get_nonexistent_report_denied(self, client, services):
+        """GET /reports/nonexistent returns 403 (permission check before 404)."""
         import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         resp = client.get("/reports/nonexistent", headers=make_headers("user-1"))
-        assert resp.status_code == 404
+        assert resp.status_code == 403
