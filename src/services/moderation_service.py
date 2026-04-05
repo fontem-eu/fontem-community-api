@@ -23,26 +23,22 @@ class ModerationService:
         except ValueError:
             return 0
 
-    async def _require_moderator(self, user_id: str) -> None:
+    async def _require_role(self, user_id: str, min_level: str) -> None:
+        """Check that user has at least min_level trust or role."""
         user = await self._users.get_by_id(user_id)
         if user is None:
             raise PermissionDenied("User not found")
         roles = await self._users.get_roles(user_id)
-        is_mod = (
-            "moderator" in roles
-            or "admin" in roles
-            or self._trust_rank(user.trust_level) >= self._trust_rank("moderator")
-        )
-        if not is_mod:
-            raise PermissionDenied("Moderator role required")
+        has_role = min_level in roles or "admin" in roles
+        has_trust = self._trust_rank(user.trust_level) >= self._trust_rank(min_level)
+        if not (has_role or has_trust):
+            raise PermissionDenied(f"{min_level.capitalize()} role required")
+
+    async def _require_moderator(self, user_id: str) -> None:
+        await self._require_role(user_id, "moderator")
 
     async def _require_admin(self, user_id: str) -> None:
-        user = await self._users.get_by_id(user_id)
-        if user is None:
-            raise PermissionDenied("User not found")
-        roles = await self._users.get_roles(user_id)
-        if "admin" not in roles and user.trust_level != "admin":
-            raise PermissionDenied("Admin role required")
+        await self._require_role(user_id, "admin")
 
     async def flag(
         self,
