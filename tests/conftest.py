@@ -11,7 +11,7 @@ from starlette.testclient import TestClient
 
 from src.api.app import app
 from src.api.auth import JWT_SECRET, JWT_ALGORITHM
-from src.api.dependencies import get_user_repo, get_report_service, get_issue_service, get_moderation_service, get_group_repo, get_permission_service
+from src.api.dependencies import get_user_repo, get_report_service, get_issue_service, get_moderation_service, get_group_repo, get_permission_service, get_permission_repo
 
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
 from src.infra.memory.mem_report_repo import InMemoryReportRepository
@@ -78,6 +78,7 @@ def client(services):
     app.dependency_overrides[get_moderation_service] = lambda: services["mod_svc"]
     app.dependency_overrides[get_group_repo] = lambda: services["group_repo"]
     app.dependency_overrides[get_permission_service] = lambda: services["perm_svc"]
+    app.dependency_overrides[get_permission_repo] = lambda: services["permission_repo"]
 
     with TestClient(app) as c:
         yield c

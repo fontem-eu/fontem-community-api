@@ -38,13 +38,15 @@ class TestSharingAPI:
         """After granting access, viewer can read the report."""
         asyncio.get_event_loop().run_until_complete(self._setup(services))
         ho = make_headers("owner-1")
+        hv = make_headers("viewer-1")
+        # Auto-create viewer-1 via any authenticated call
+        client.get("/users/me", headers=hv)
         r = client.post("/reports", json={"title": "Shared"}, headers=ho).json()
         client.post(
             f"/reports/{r['id']}/access",
             json={"user_id": "viewer-1", "level": "viewer"},
             headers=ho,
         )
-        hv = make_headers("viewer-1")
         resp = client.get(f"/reports/{r['id']}", headers=hv)
         assert resp.status_code == 200
 
