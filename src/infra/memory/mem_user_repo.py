@@ -55,6 +55,6 @@ class InMemoryUserRepository(UserRepository):
             return deepcopy(sanction)
         return None
 
-    def _add_sanction(self, sanction: Sanction) -> None:
-        """Internal helper used by the moderation repo to keep sanctions in sync."""
+    def add_sanction_sync(self, sanction: Sanction) -> None:
+        """Add a sanction directly (used by moderation service and tests)."""
         self._sanctions.setdefault(sanction.user_id, []).append(deepcopy(sanction))

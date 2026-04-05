@@ -90,8 +90,8 @@ class ModerationService:
         )
         result = await self._mod.add_sanction(s)
         # Sync to user repo so permission checks can find it
-        if hasattr(self._users, '_add_sanction'):
-            self._users._add_sanction(result)
+        if hasattr(self._users, 'add_sanction_sync'):
+            self._users.add_sanction_sync(result)
         return result
 
     async def lift(self, moderator_id: str, sanction_id: str) -> None:

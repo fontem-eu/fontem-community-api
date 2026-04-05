@@ -9,10 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/gmr_app",
-)
+DATABASE_URL = os.environ["DATABASE_URL"]  # no fallback — must be set in env
 
 async_engine = create_async_engine(DATABASE_URL, echo=False)
 

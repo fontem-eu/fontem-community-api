@@ -1,0 +1,150 @@
+"""HTTP-level tests for report endpoints (covers routers/reports.py)."""
+from __future__ import annotations
+
+import pytest
+from tests.conftest import make_headers, seed_user
+
+
+@pytest.mark.asyncio
+class TestReportAPI:
+    """Cover report CRUD via the HTTP API."""
+
+    async def _setup_user(self, services):
+        await seed_user(services["user_repo"], "user-1")
+
+    def test_create_report(self, client, services):
+        """POST /reports creates a report and returns 201."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        resp = client.post(
+            "/reports",
+            json={"title": "Test Report", "abstract": "An abstract"},
+            headers=make_headers("user-1"),
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["title"] == "Test Report"
+        assert data["abstract"] == "An abstract"
+        assert data["id"] is not None
+
+    def test_list_reports(self, client, services):
+        """GET /reports returns user's reports."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        client.post("/reports", json={"title": "R1"}, headers=h)
+        client.post("/reports", json={"title": "R2"}, headers=h)
+        resp = client.get("/reports", headers=h)
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    def test_get_report(self, client, services):
+        """GET /reports/:id returns report with sections."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        create = client.post("/reports", json={"title": "R"}, headers=h)
+        rid = create.json()["id"]
+        resp = client.get(f"/reports/{rid}", headers=h)
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "R"
+        assert "sections" in resp.json()
+
+    def test_update_report(self, client, services):
+        """PUT /reports/:id updates title and visibility."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        create = client.post("/reports", json={"title": "Old"}, headers=h)
+        rid = create.json()["id"]
+        resp = client.put(
+            f"/reports/{rid}",
+            json={"title": "New", "visibility": "public"},
+            headers=h,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "New"
+
+    def test_delete_report(self, client, services):
+        """DELETE /reports/:id returns 204."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        create = client.post("/reports", json={"title": "Doomed"}, headers=h)
+        rid = create.json()["id"]
+        resp = client.delete(f"/reports/{rid}", headers=h)
+        assert resp.status_code == 204
+
+    def test_add_section(self, client, services):
+        """POST /reports/:id/sections creates a section."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        create = client.post("/reports", json={"title": "R"}, headers=h)
+        rid = create.json()["id"]
+        resp = client.post(
+            f"/reports/{rid}/sections",
+            json={"content": "<p>Hello</p>"},
+            headers=h,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["content"] == "<p>Hello</p>"
+
+    def test_section_persists_on_reload(self, client, services):
+        """Section content is returned when fetching the report."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        create = client.post("/reports", json={"title": "R"}, headers=h)
+        rid = create.json()["id"]
+        client.post(
+            f"/reports/{rid}/sections",
+            json={"content": "<p>Persistent</p>"},
+            headers=h,
+        )
+        resp = client.get(f"/reports/{rid}", headers=h)
+        sections = resp.json()["sections"]
+        assert len(sections) == 1
+        assert sections[0]["content"] == "<p>Persistent</p>"
+
+    def test_update_section(self, client, services):
+        """PUT /reports/:id/sections/:sid updates content."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        create = client.post("/reports", json={"title": "R"}, headers=h)
+        rid = create.json()["id"]
+        sec = client.post(
+            f"/reports/{rid}/sections",
+            json={"content": "<p>v1</p>"},
+            headers=h,
+        ).json()
+        resp = client.put(
+            f"/reports/{rid}/sections/{sec['id']}",
+            json={"content": "<p>v2</p>"},
+            headers=h,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "<p>v2</p>"
+
+    def test_delete_section(self, client, services):
+        """DELETE /reports/:id/sections/:sid returns 204."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        create = client.post("/reports", json={"title": "R"}, headers=h)
+        rid = create.json()["id"]
+        sec = client.post(
+            f"/reports/{rid}/sections",
+            json={"content": "<p>gone</p>"},
+            headers=h,
+        ).json()
+        resp = client.delete(f"/reports/{rid}/sections/{sec['id']}", headers=h)
+        assert resp.status_code == 204
+
+    def test_get_nonexistent_report_404(self, client, services):
+        """GET /reports/nonexistent returns 404."""
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        resp = client.get("/reports/nonexistent", headers=make_headers("user-1"))
+        assert resp.status_code == 404

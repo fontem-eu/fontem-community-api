@@ -1,10 +1,12 @@
 """Tests for Google OAuth token exchange (AUTH-GOOGLE)."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
-import pytest
-from tests.conftest import make_headers
+from fastapi import HTTPException
+
+from src.domain.moderation import Sanction
 
 
 # Fake Google payload returned after token verification
@@ -49,7 +51,6 @@ class TestGoogleAuth:
             resp1 = client.post("/auth/google", json={"credential": "fake-token-1"})
         user_id_1 = resp1.json()["user"]["id"]
 
-        # Login again with updated name
         updated_payload = {**_GOOGLE_PAYLOAD, "name": "Alice Updated"}
         with _patch_verify(updated_payload):
             resp2 = client.post("/auth/google", json={"credential": "fake-token-2"})
@@ -59,24 +60,19 @@ class TestGoogleAuth:
 
     def test_banned_user_rejected(self, client, services):
         """Banned user gets 401 on Google login."""
-        from src.domain.moderation import Sanction
-        from datetime import datetime, timezone
-
         user_repo = services["user_repo"]
 
-        # Create user first
         with _patch_verify():
             resp = client.post("/auth/google", json={"credential": "fake"})
         user_id = resp.json()["user"]["id"]
 
-        # Ban the user (sync helper on InMemory repo)
-        user_repo._add_sanction(Sanction(
+        # Ban the user via the repo's test helper
+        user_repo.add_sanction_sync(Sanction(
             id="s1", user_id=user_id, type="ban",
             reason="test", applied_by="admin",
             starts_at=datetime.now(timezone.utc),
         ))
 
-        # Try to login again
         with _patch_verify():
             resp = client.post("/auth/google", json={"credential": "fake"})
         assert resp.status_code == 401
@@ -92,17 +88,6 @@ class TestGoogleAuth:
         with patch(
             "src.api.routers.auth._verify_google_token",
             new_callable=AsyncMock,
-            side_effect=Exception("Invalid Google token"),
-        ):
-            # The endpoint catches HTTPException from verify, but if verify
-            # raises a raw exception, FastAPI will return 500. The actual
-            # verify function raises HTTPException(401) on bad tokens.
-            pass
-
-        from fastapi import HTTPException
-        with patch(
-            "src.api.routers.auth._verify_google_token",
-            new_callable=AsyncMock,
             side_effect=HTTPException(status_code=401, detail="Invalid Google token"),
         ):
             resp = client.post("/auth/google", json={"credential": "bad-token"})
@@ -114,7 +99,6 @@ class TestGoogleAuth:
             resp = client.post("/auth/google", json={"credential": "fake"})
         token = resp.json()["access_token"]
 
-        # Use the token to call /users/me
         me_resp = client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
         assert me_resp.status_code == 200
         assert me_resp.json()["email"] == "alice@gmail.com"
