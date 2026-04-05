@@ -24,3 +24,9 @@ class UserRepository(ABC):
 
     @abstractmethod
     async def get_active_sanction(self, user_id: str) -> Sanction | None: ...
+
+    @abstractmethod
+    async def add_sanction(self, sanction: Sanction) -> None: ...
+
+    @abstractmethod
+    async def lift_sanction(self, sanction_id: str) -> None: ...

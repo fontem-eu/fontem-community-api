@@ -20,7 +20,7 @@ class ReportService:
     async def create(self, user_id: str, title: str, abstract: str | None = None) -> Report:
         report = Report(title=title, abstract=abstract, created_by=user_id)
         report = await self._reports.create(report)
-        await self._perms._perms.set_user_access(report.id, user_id, "owner")
+        await self._perms.grant_access(report.id, user_id, "owner")
         return report
 
     async def get(self, user_id: str, report_id: str) -> Report:

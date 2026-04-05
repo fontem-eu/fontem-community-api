@@ -89,22 +89,13 @@ class ModerationService:
             applied_by=moderator_id,
         )
         result = await self._mod.add_sanction(s)
-        # Sync to user repo so permission checks can find it
-        if hasattr(self._users, 'add_sanction_sync'):
-            self._users.add_sanction_sync(result)
+        await self._users.add_sanction(result)
         return result
 
     async def lift(self, moderator_id: str, sanction_id: str) -> None:
         await self._require_moderator(moderator_id)
         await self._mod.lift_sanction(sanction_id)
-        # Sync to user repo
-        if hasattr(self._users, '_sanctions'):
-            for uid, sanctions in self._users._sanctions.items():
-                for s in sanctions:
-                    if s.id == sanction_id:
-                        s.lifted_at = __import__('datetime').datetime.now(
-                            __import__('datetime').timezone.utc
-                        )
+        await self._users.lift_sanction(sanction_id)
 
     async def get_queue(self, moderator_id: str, limit: int, offset: int) -> list[Flag]:
         await self._require_moderator(moderator_id)

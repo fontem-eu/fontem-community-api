@@ -113,3 +113,25 @@ class PgUserRepository(UserRepository):
             applied_by=row.applied_by,
             lifted_at=row.lifted_at,
         )
+
+    async def add_sanction(self, sanction: Sanction) -> None:
+        row = SanctionModel(
+            id=sanction.id or str(__import__("uuid").uuid4()),
+            user_id=sanction.user_id,
+            type=sanction.type,
+            reason=sanction.reason,
+            starts_at=sanction.starts_at,
+            expires_at=sanction.expires_at,
+            applied_by=sanction.applied_by,
+        )
+        self._session.add(row)
+        await self._session.flush()
+
+    async def lift_sanction(self, sanction_id: str) -> None:
+        result = await self._session.execute(
+            select(SanctionModel).where(SanctionModel.id == sanction_id)
+        )
+        row = result.scalar_one_or_none()
+        if row is not None:
+            row.lifted_at = datetime.now(timezone.utc)
+            await self._session.flush()

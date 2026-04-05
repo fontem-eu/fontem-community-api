@@ -57,3 +57,9 @@ class PermissionService:
             raise PermissionDenied(
                 f"User {user_id} lacks '{required_level}' access to report {report_id}"
             )
+
+    async def grant_access(
+        self, report_id: str, user_id: str, level: str = "owner",
+    ) -> None:
+        """Grant a user access to a report (used by ReportService on create)."""
+        await self._perms.set_user_access(report_id, user_id, level)
