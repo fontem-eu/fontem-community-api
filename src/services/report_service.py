@@ -17,8 +17,12 @@ class ReportService:
         self._reports = reports
         self._perms = perms
 
-    async def create(self, user_id: str, title: str, abstract: str | None = None) -> Report:
-        report = Report(title=title, abstract=abstract, created_by=user_id)
+    async def create(
+        self, user_id: str, title: str,
+        abstract: str | None = None,
+        parent_id: str | None = None,
+    ) -> Report:
+        report = Report(title=title, abstract=abstract, parent_id=parent_id, created_by=user_id)
         report = await self._reports.create(report)
         await self._perms.grant_access(report.id, user_id, "owner")
         return report
@@ -99,3 +103,7 @@ class ReportService:
 
     async def list_public(self, limit: int, offset: int) -> list[Report]:
         return await self._reports.list_public(limit, offset)
+
+    async def list_children(self, parent_id: str) -> list[Report]:
+        """List child reports (dossier sub-pages)."""
+        return await self._reports.list_children(parent_id)

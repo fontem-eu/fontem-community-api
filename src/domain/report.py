@@ -10,6 +10,7 @@ class Report:
     title: str = ""
     abstract: str | None = None
     visibility: str = "private"  # private, group, public_auth, public_open
+    parent_id: str | None = None  # for dossier tree structure (None = root)
     created_by: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None

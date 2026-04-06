@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.routers import auth, groups, issues, moderation, reports, sharing, users
+from src.api.routers import assist, auth, groups, issues, moderation, reports, sharing, users
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
 
@@ -47,6 +47,7 @@ async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
 
 
 # Include routers
+app.include_router(assist.router)
 app.include_router(auth.router)
 app.include_router(reports.router)
 app.include_router(sharing.router)

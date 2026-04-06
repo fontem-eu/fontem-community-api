@@ -53,3 +53,6 @@ class ReportRepository(ABC):
 
     @abstractmethod
     async def get_versions(self, section_id: str, limit: int) -> list[SectionVersion]: ...
+
+    @abstractmethod
+    async def list_children(self, parent_id: str) -> list[Report]: ...

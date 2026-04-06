@@ -17,6 +17,7 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 class CreateReportRequest(BaseModel):
     title: str
     abstract: str | None = None
+    parent_id: str | None = None  # for dossier nesting
 
 
 class UpdateReportRequest(BaseModel):
@@ -39,7 +40,7 @@ async def create_report(
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(get_report_service),
 ) -> dict:
-    report = await svc.create(user.id, body.title, body.abstract)
+    report = await svc.create(user.id, body.title, body.abstract, body.parent_id)
     return asdict(report)
 
 
@@ -71,6 +72,9 @@ async def get_report(
         {**asdict(s), "content": s.content_json.get("html", "")}
         for s in sections
     ]
+    # Include child reports for dossier tree navigation
+    children = await svc.list_children(report_id)
+    result["children"] = [{"id": c.id, "title": c.title} for c in children]
     return result
 
 

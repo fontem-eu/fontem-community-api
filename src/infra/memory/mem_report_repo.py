@@ -127,3 +127,8 @@ class InMemoryReportRepository(ReportRepository):
         versions = self._versions.get(section_id, [])
         sorted_v = sorted(versions, key=lambda v: v.saved_at or datetime.min, reverse=True)
         return [deepcopy(v) for v in sorted_v[:limit]]
+
+    async def list_children(self, parent_id: str) -> list[Report]:
+        results = [deepcopy(r) for r in self._reports.values() if r.parent_id == parent_id]
+        results.sort(key=lambda r: r.created_at or datetime.min)
+        return results
