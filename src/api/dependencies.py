@@ -108,37 +108,67 @@ def _make_pg_repos(session):  # type: ignore[no-untyped-def]
     }
 
 
+_request_session = None
+
+
+def _get_or_create_session():
+    """Get a session for the current request context."""
+    global _request_session
+    if _request_session is None or not _request_session.is_active:
+        assert _pg_session_factory is not None
+        _request_session = _pg_session_factory()
+    return _request_session
+
+
+def _pg_repos():
+    """Create a set of Postgres repos sharing one session."""
+    session = _get_or_create_session()
+    return _make_pg_repos(session)
+
+
 def get_user_repo() -> UserRepository:
+    if _use_postgres:
+        return _pg_repos()["user"]
     _init_defaults()
     assert _user_repo is not None
     return _user_repo
 
 
 def get_report_repo() -> ReportRepository:
+    if _use_postgres:
+        return _pg_repos()["report"]
     _init_defaults()
     assert _report_repo is not None
     return _report_repo
 
 
 def get_permission_repo() -> PermissionRepository:
+    if _use_postgres:
+        return _pg_repos()["permission"]
     _init_defaults()
     assert _permission_repo is not None
     return _permission_repo
 
 
 def get_issue_repo() -> IssueRepository:
+    if _use_postgres:
+        return _pg_repos()["issue"]
     _init_defaults()
     assert _issue_repo is not None
     return _issue_repo
 
 
 def get_group_repo() -> GroupRepository:
+    if _use_postgres:
+        return _pg_repos()["group"]
     _init_defaults()
     assert _group_repo is not None
     return _group_repo
 
 
 def get_moderation_repo() -> ModerationRepository:
+    if _use_postgres:
+        return _pg_repos()["moderation"]
     _init_defaults()
     assert _moderation_repo is not None
     return _moderation_repo

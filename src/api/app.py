@@ -7,15 +7,21 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import os
+
 from src.api.routers import assist, auth, groups, issues, moderation, reports, sharing, users
+from src.api import dependencies
+from src.api.dependencies import configure_postgres
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Startup: repos are lazily initialized via dependencies
+    # Initialize PostgreSQL repos if DATABASE_URL is set
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        configure_postgres(database_url=db_url)
     yield
-    # Shutdown: nothing to clean up for in-memory repos
 
 
 app = FastAPI(title="GMR Community API", version="0.1.0", lifespan=lifespan)
@@ -44,6 +50,23 @@ async def not_found_handler(request: Request, exc: NotFound) -> JSONResponse:
 @app.exception_handler(Conflict)
 async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": exc.message})
+
+
+# Session management middleware — commits Postgres session after each request
+@app.middleware("http")
+async def db_session_middleware(request: Request, call_next):
+    response = await call_next(request)
+    # Commit the session if it was used
+    session = dependencies._request_session
+    if session is not None and session.is_active:
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
+        finally:
+            await session.close()
+            dependencies._request_session = None
+    return response
 
 
 # Include routers
