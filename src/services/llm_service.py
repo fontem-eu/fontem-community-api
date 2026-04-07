@@ -150,12 +150,50 @@ async def _execute_tool(name: str, args: dict) -> str:
         return r.text
 
 
+CLAUDE_PROXY_URL = os.environ.get(
+    "CLAUDE_PROXY_URL", "http://claude-proxy.devspaces.svc.cluster.local:8090"
+)
+
+
 class LLMService:
-    """Handles LLM chat with tool use."""
+    """Handles LLM chat via Claude CLI proxy or Anthropic API fallback."""
 
     def __init__(self) -> None:
         self._api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self._model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        self._proxy_url = CLAUDE_PROXY_URL
+
+    async def _chat_via_proxy(
+        self, user_message: str, system: str,
+    ) -> dict | None:
+        """Call the Claude CLI proxy (flat subscription cost)."""
+        tool_descriptions = "\n".join(
+            f"- {t['name']}: {t['description']}" for t in TOOLS
+        )
+        full_message = (
+            f"{user_message}\n\n"
+            f"Available data tools (call these via the GMR API):\n{tool_descriptions}\n\n"
+            "If you need data, describe which tool you would call and with what parameters. "
+            "I will execute it for you."
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    f"{self._proxy_url}/chat",
+                    json={"message": full_message, "system": system},
+                )
+                if resp.status_code != 200:
+                    return None  # Fall back to API
+                data = resp.json()
+                return {
+                    "content": data.get("content", ""),
+                    "tool_calls_made": 0,
+                    "suggestions": [],
+                    "messages": [],
+                }
+        except (httpx.ConnectError, httpx.TimeoutException):
+            return None  # Proxy unreachable — fall back to API
 
     async def chat(
         self,
@@ -171,10 +209,16 @@ class LLMService:
         if report_context:
             system += f"\n\nCurrent report context:\n{report_context}"
 
-        # If no API key, return a helpful message
+        # Try Claude CLI proxy first (flat subscription)
+        result = await self._chat_via_proxy(user_message, system)
+        if result is not None:
+            result["messages"] = messages
+            return result
+
+        # Fallback: Anthropic API
         if not self._api_key:
             return {
-                "content": "LLM assistant is not configured yet. Set ANTHROPIC_API_KEY to enable AI-assisted analysis.",
+                "content": "LLM assistant is temporarily unavailable. Please try again later.",
                 "tool_calls_made": 0,
                 "suggestions": [],
                 "messages": messages,
