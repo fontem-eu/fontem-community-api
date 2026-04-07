@@ -56,8 +56,8 @@ async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
 @app.middleware("http")
 async def db_session_middleware(request: Request, call_next):
     response = await call_next(request)
-    # Commit the session if it was used
-    session = dependencies._request_session
+    # Commit the session if it was used (async-safe via ContextVar)
+    session = dependencies._request_session.get()
     if session is not None and session.is_active:
         try:
             await session.commit()
@@ -65,7 +65,7 @@ async def db_session_middleware(request: Request, call_next):
             await session.rollback()
         finally:
             await session.close()
-            dependencies._request_session = None
+            dependencies._request_session.set(None)
     return response
 
 

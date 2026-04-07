@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 from src.infra.memory.mem_group_repo import InMemoryGroupRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
 from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
@@ -108,16 +110,17 @@ def _make_pg_repos(session):  # type: ignore[no-untyped-def]
     }
 
 
-_request_session = None
+_request_session: ContextVar = ContextVar("_request_session", default=None)
 
 
 def _get_or_create_session():
-    """Get a session for the current request context."""
-    global _request_session
-    if _request_session is None or not _request_session.is_active:
+    """Get a session for the current request context (async-safe via ContextVar)."""
+    session = _request_session.get()
+    if session is None or not session.is_active:
         assert _pg_session_factory is not None
-        _request_session = _pg_session_factory()
-    return _request_session
+        session = _pg_session_factory()
+        _request_session.set(session)
+    return session
 
 
 def _pg_repos():
