@@ -261,3 +261,11 @@ class PgReportRepository(ReportRepository):
             .limit(limit)
         )
         return [self._version_to_domain(r) for r in result.scalars().all()]
+
+    async def list_children(self, parent_id: str) -> list[Report]:
+        result = await self._session.execute(
+            select(ReportModel)
+            .where(ReportModel.parent_id == parent_id)
+            .order_by(ReportModel.created_at)
+        )
+        return [self._to_domain(r) for r in result.scalars().all()]

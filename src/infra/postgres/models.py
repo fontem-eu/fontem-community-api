@@ -93,6 +93,7 @@ class ReportModel(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
     abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
     visibility: Mapped[str] = mapped_column(Text, nullable=False, default="private")
+    parent_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
     created_by: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
     )
