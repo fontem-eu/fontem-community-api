@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -102,8 +103,9 @@ async def google_login(
     picture = payload.get("picture")
     google_sub = payload["sub"]
 
-    # Upsert user — use Google sub as stable ID
-    user_id = f"google:{google_sub}"
+    # Upsert user — derive a deterministic UUID from the Google sub
+    # so the ID is stable across logins and compatible with the UUID column
+    user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"google:{google_sub}"))
     existing = await user_repo.get_by_id(user_id)
     if existing is None:
         existing = await user_repo.get_by_email(email)

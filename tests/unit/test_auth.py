@@ -1,6 +1,7 @@
 """Tests for Google OAuth token exchange (AUTH-GOOGLE)."""
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -102,3 +103,20 @@ class TestGoogleAuth:
         me_resp = client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
         assert me_resp.status_code == 200
         assert me_resp.json()["email"] == "alice@gmail.com"
+
+    def test_user_id_is_valid_uuid(self, client):
+        """Regression: user ID must be a valid UUID for PostgreSQL compatibility."""
+        with _patch_verify():
+            resp = client.post("/auth/google", json={"credential": "fake"})
+        user_id = resp.json()["user"]["id"]
+        # Must not raise ValueError
+        parsed = uuid.UUID(user_id)
+        assert str(parsed) == user_id
+
+    def test_user_id_is_deterministic(self, client):
+        """Same Google sub always produces the same UUID."""
+        with _patch_verify():
+            resp1 = client.post("/auth/google", json={"credential": "fake"})
+        with _patch_verify():
+            resp2 = client.post("/auth/google", json={"credential": "fake"})
+        assert resp1.json()["user"]["id"] == resp2.json()["user"]["id"]
