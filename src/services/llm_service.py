@@ -166,26 +166,23 @@ class LLMService:
     async def _chat_via_proxy(
         self, user_message: str, system: str,
     ) -> dict | None:
-        """Call the Claude CLI proxy (flat subscription cost)."""
-        tool_descriptions = "\n".join(
-            f"- {t['name']}: {t['description']}" for t in TOOLS
-        )
-        full_message = (
-            f"{user_message}\n\n"
-            f"Available data tools (call these via the GMR API):\n{tool_descriptions}\n\n"
-            "If you need data, describe which tool you would call and with what parameters. "
-            "I will execute it for you."
-        )
+        """Call the Claude CLI proxy (flat subscription cost).
 
+        The proxy runs Claude CLI with MCP tools configured, so Claude
+        can directly call search_entities, get_company, etc.
+        We just pass the user's message and system prompt.
+        """
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
                     f"{self._proxy_url}/chat",
-                    json={"message": full_message, "system": system},
+                    json={"message": user_message, "system": system},
                 )
                 if resp.status_code != 200:
                     return None  # Fall back to API
                 data = resp.json()
+                if data.get("error"):
+                    return None
                 return {
                     "content": data.get("content", ""),
                     "tool_calls_made": 0,
