@@ -52,24 +52,7 @@ async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": exc.message})
 
 
-# Session management middleware — commits Postgres session after each request
-@app.middleware("http")
-async def db_session_middleware(request: Request, call_next):
-    response = await call_next(request)
-    # Commit the session if it was used (async-safe via ContextVar)
-    session = dependencies._request_session.get()
-    if session is not None and session.is_active:
-        try:
-            await session.commit()
-        except Exception:
-            await session.rollback()
-        finally:
-            await session.close()
-            dependencies._request_session.set(None)
-    return response
-
-
-# Include routers
+# Include routers — db session dependency ensures commit/rollback per request
 app.include_router(assist.router)
 app.include_router(auth.router)
 app.include_router(reports.router)

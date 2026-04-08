@@ -113,25 +113,39 @@ def _make_pg_repos(session):  # type: ignore[no-untyped-def]
 _request_session: ContextVar = ContextVar("_request_session", default=None)
 
 
-def _get_or_create_session():
-    """Get a session for the current request context (async-safe via ContextVar)."""
-    session = _request_session.get()
-    if session is None or not session.is_active:
+async def get_db_session():
+    """FastAPI dependency — yields a session, commits on success, rolls back on error."""
+    if not _use_postgres:
+        yield None
+        return
+
+    assert _pg_session_factory is not None
+    session = _pg_session_factory()
+    _request_session.set(session)
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+        _request_session.set(None)
+
+
+def _pg_repos_from_session(session=None):
+    """Build repos from the given session or the ContextVar session."""
+    s = session or _request_session.get()
+    if s is None:
         assert _pg_session_factory is not None
-        session = _pg_session_factory()
-        _request_session.set(session)
-    return session
-
-
-def _pg_repos():
-    """Create a set of Postgres repos sharing one session."""
-    session = _get_or_create_session()
-    return _make_pg_repos(session)
+        s = _pg_session_factory()
+        _request_session.set(s)
+    return _make_pg_repos(s)
 
 
 def get_user_repo() -> UserRepository:
     if _use_postgres:
-        return _pg_repos()["user"]
+        return _pg_repos_from_session()["user"]
     _init_defaults()
     assert _user_repo is not None
     return _user_repo
@@ -139,7 +153,7 @@ def get_user_repo() -> UserRepository:
 
 def get_report_repo() -> ReportRepository:
     if _use_postgres:
-        return _pg_repos()["report"]
+        return _pg_repos_from_session()["report"]
     _init_defaults()
     assert _report_repo is not None
     return _report_repo
@@ -147,7 +161,7 @@ def get_report_repo() -> ReportRepository:
 
 def get_permission_repo() -> PermissionRepository:
     if _use_postgres:
-        return _pg_repos()["permission"]
+        return _pg_repos_from_session()["permission"]
     _init_defaults()
     assert _permission_repo is not None
     return _permission_repo
@@ -155,7 +169,7 @@ def get_permission_repo() -> PermissionRepository:
 
 def get_issue_repo() -> IssueRepository:
     if _use_postgres:
-        return _pg_repos()["issue"]
+        return _pg_repos_from_session()["issue"]
     _init_defaults()
     assert _issue_repo is not None
     return _issue_repo
@@ -163,7 +177,7 @@ def get_issue_repo() -> IssueRepository:
 
 def get_group_repo() -> GroupRepository:
     if _use_postgres:
-        return _pg_repos()["group"]
+        return _pg_repos_from_session()["group"]
     _init_defaults()
     assert _group_repo is not None
     return _group_repo
@@ -171,7 +185,7 @@ def get_group_repo() -> GroupRepository:
 
 def get_moderation_repo() -> ModerationRepository:
     if _use_postgres:
-        return _pg_repos()["moderation"]
+        return _pg_repos_from_session()["moderation"]
     _init_defaults()
     assert _moderation_repo is not None
     return _moderation_repo

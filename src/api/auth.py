@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from src.api.dependencies import get_user_repo
+from src.api.dependencies import get_db_session, get_user_repo
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 
@@ -18,6 +18,7 @@ _bearer_scheme = HTTPBearer()
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+    _session=Depends(get_db_session),  # ensures session lifecycle (commit/rollback)
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> User:
     token = credentials.credentials
