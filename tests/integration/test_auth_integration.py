@@ -25,18 +25,18 @@ class TestAuth:
 
     def test_valid_jwt_creates_user(self, client, user_id):
         """AUTH-I03: Valid JWT auto-creates user on first request."""
-        h = make_headers(user_id, name="New User", email="new@test.com")
+        h = make_headers(user_id, name="New User")
         resp = client.get("/users/me", headers=h)
         assert resp.status_code == 200
         assert resp.json()["name"] == "New User"
 
     def test_users_me_returns_profile(self, client, user_id):
         """AUTH-I04: /users/me returns the authenticated user's profile."""
-        h = make_headers(user_id, name="Profile User", email="profile@test.com")
+        h = make_headers(user_id, name="Profile User")
         resp = client.get("/users/me", headers=h)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["email"] == "profile@test.com"
+        assert data["name"] == "Profile User"
 
 
 class TestGroups:

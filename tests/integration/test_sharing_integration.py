@@ -13,6 +13,9 @@ class TestSharing:
     def test_grant_access(self, client, user_id, user2_id):
         """SHR-I01: Grant user access to report."""
         h1 = make_headers(user_id)
+        h2 = make_headers(user2_id)
+        # Ensure user2 exists in the database before granting access
+        client.get("/users/me", headers=h2)
         report = client.post("/reports", json={"title": "Shared"}, headers=h1).json()
         resp = client.post(
             f"/reports/{report['id']}/access",
