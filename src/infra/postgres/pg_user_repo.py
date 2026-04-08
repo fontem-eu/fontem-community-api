@@ -24,6 +24,7 @@ class PgUserRepository(UserRepository):
             email=row.email,
             name=row.name,
             avatar_url=row.avatar_url,
+            password_hash=getattr(row, 'password_hash', None),
             trust_level=row.trust_level,
             created_at=row.created_at,
         )
@@ -50,6 +51,7 @@ class PgUserRepository(UserRepository):
             email=user.email,
             name=user.name,
             avatar_url=user.avatar_url,
+            password_hash=user.password_hash,
             trust_level=user.trust_level,
             created_at=user.created_at or now,
         )

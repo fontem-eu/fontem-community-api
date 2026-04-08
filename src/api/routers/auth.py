@@ -1,4 +1,4 @@
-"""Google OAuth token exchange endpoint."""
+"""Authentication endpoints — Google OAuth + local accounts."""
 from __future__ import annotations
 
 import base64
@@ -7,13 +7,14 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt as jose_jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from src.api.auth import JWT_ALGORITHM, JWT_SECRET
-from src.api.dependencies import get_user_repo
+from src.api.dependencies import get_db_session, get_user_repo
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 
@@ -148,3 +149,97 @@ async def google_login(
             avatar_url=user.avatar_url,
         ),
     )
+
+
+# ── Local account registration + login ────────────────────────
+
+class RegisterRequest(BaseModel):
+    """Local account registration."""
+    email: str
+    password: str
+    name: str
+
+
+class LoginRequest(BaseModel):
+    """Local account login."""
+    email: str
+    password: str
+
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def _check_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
+
+
+def _issue_jwt(user: User) -> TokenResponse:
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=_TOKEN_EXPIRE_DAYS)
+    token = jose_jwt.encode(
+        {
+            "sub": user.id,
+            "email": user.email,
+            "name": user.name,
+            "iat": int(now.timestamp()),
+            "exp": int(expires.timestamp()),
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
+    return TokenResponse(
+        access_token=token,
+        expires_in=_TOKEN_EXPIRE_DAYS * 86400,
+        user=UserInfo(
+            id=user.id, email=user.email,
+            name=user.name, avatar_url=user.avatar_url,
+        ),
+    )
+
+
+@router.post("/register", response_model=TokenResponse, status_code=201)
+async def register(
+    body: RegisterRequest,
+    _session=Depends(get_db_session),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> TokenResponse:
+    """Register a new local account."""
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    existing = await user_repo.get_by_email(body.email)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    user_id = str(uuid.uuid4())
+    user = User(
+        id=user_id,
+        email=body.email,
+        name=body.name,
+        password_hash=_hash_password(body.password),
+    )
+    user = await user_repo.upsert(user)
+    return _issue_jwt(user)
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(
+    body: LoginRequest,
+    _session=Depends(get_db_session),
+    user_repo: UserRepository = Depends(get_user_repo),
+) -> TokenResponse:
+    """Login with email + password."""
+    user = await user_repo.get_by_email(body.email)
+    if user is None or user.password_hash is None:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not _check_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # Check ban
+    sanction = await user_repo.get_active_sanction(user.id)
+    if sanction is not None and sanction.type == "ban":
+        raise HTTPException(status_code=401, detail="Account is banned")
+
+    return _issue_jwt(user)
