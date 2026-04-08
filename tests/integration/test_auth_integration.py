@@ -51,13 +51,16 @@ class TestGroups:
 
     def test_add_remove_member(self, client, user_id, user2_id):
         """GRP-I02: Add and remove members."""
-        h = make_headers(user_id)
-        group = client.post("/groups", json={"name": "Team"}, headers=h).json()
+        h1 = make_headers(user_id)
+        h2 = make_headers(user2_id)
+        # Ensure user2 exists
+        client.get("/users/me", headers=h2)
+        group = client.post("/groups", json={"name": "Team"}, headers=h1).json()
         # Add member
-        resp = client.post(f"/groups/{group['id']}/members", json={"user_id": user2_id}, headers=h)
+        resp = client.post(f"/groups/{group['id']}/members", json={"user_id": user2_id}, headers=h1)
         assert resp.status_code in (200, 201)
         # Remove member
-        resp = client.delete(f"/groups/{group['id']}/members/{user2_id}", headers=h)
+        resp = client.delete(f"/groups/{group['id']}/members/{user2_id}", headers=h1)
         assert resp.status_code == 204
 
     def test_group_access_to_report(self, client, user_id, user2_id):

@@ -86,11 +86,15 @@ class TestDossierTree:
         """RPT-I07: GET parent returns children list."""
         h = make_headers(user_id)
         parent = client.post("/reports", json={"title": "Dossier"}, headers=h).json()
-        client.post("/reports", json={"title": "Ch1", "parent_id": parent["id"]}, headers=h)
-        client.post("/reports", json={"title": "Ch2", "parent_id": parent["id"]}, headers=h)
-        resp = client.get(f"/reports/{parent['id']}", headers=h).json()
-        assert len(resp["children"]) == 2
-        assert {c["title"] for c in resp["children"]} == {"Ch1", "Ch2"}
+        r1 = client.post("/reports", json={"title": "Ch1", "parent_id": parent["id"]}, headers=h)
+        r2 = client.post("/reports", json={"title": "Ch2", "parent_id": parent["id"]}, headers=h)
+        assert r1.status_code == 201, f"Child 1 failed: {r1.status_code} {r1.text[:100]}"
+        assert r2.status_code == 201, f"Child 2 failed: {r2.status_code} {r2.text[:100]}"
+        resp = client.get(f"/reports/{parent['id']}", headers=h)
+        assert resp.status_code == 200, f"Get parent failed: {resp.status_code} {resp.text[:100]}"
+        data = resp.json()
+        assert len(data["children"]) == 2
+        assert {c["title"] for c in data["children"]} == {"Ch1", "Ch2"}
 
 
 class TestReportPersistence:

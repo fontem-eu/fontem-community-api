@@ -270,4 +270,4 @@ class PgReportRepository(ReportRepository):
             .where(ReportModel.parent_id == parent_id)
             .order_by(ReportModel.created_at)
         )
-        return [self._to_domain(r) for r in result.scalars().all()]
+        return [self._report_to_domain(r) for r in result.scalars().all()]
