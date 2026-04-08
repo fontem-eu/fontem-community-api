@@ -21,6 +21,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
         configure_postgres(database_url=db_url)
+        # Auto-migrate: ensure all columns exist
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy import text
+        engine = create_async_engine(db_url)
+        async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"))
+        await engine.dispose()
     yield
 
 
