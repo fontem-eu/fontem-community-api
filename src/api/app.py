@@ -27,6 +27,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         engine = create_async_engine(db_url)
         async with engine.begin() as conn:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES users(id),
+                    report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+                    messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (user_id, report_id)
+                )
+            """))
         await engine.dispose()
     yield
 

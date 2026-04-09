@@ -9,9 +9,12 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select, and_
 
 from src.api.auth import get_current_user
+from src.api.dependencies import get_db_session
 from src.domain.user import User
+from src.infra.postgres.models import ConversationModel
 from src.services.llm_service import LLMService, TOOLS, CLAUDE_PROXY_URL, SYSTEM_PROMPT
 
 router = APIRouter(prefix="/assist", tags=["assist"])
@@ -93,3 +96,80 @@ async def list_tools(
 ) -> list[dict]:
     """List available tools the assistant can use."""
     return [{"name": t["name"], "description": t["description"]} for t in TOOLS]
+
+
+# ── Conversation persistence ─────────────────────────────────────
+
+
+class ConversationResponse(BaseModel):
+    id: str
+    report_id: str
+    messages: list[dict]
+    updated_at: str
+
+
+class SaveConversationRequest(BaseModel):
+    messages: list[dict]
+
+
+@router.get("/conversations/{report_id}", response_model=ConversationResponse | None)
+async def get_conversation(
+    report_id: str,
+    user: User = Depends(get_current_user),
+    session=Depends(get_db_session),
+):
+    """Get the conversation for a user+report pair."""
+    result = await session.execute(
+        select(ConversationModel).where(
+            and_(
+                ConversationModel.user_id == user.id,
+                ConversationModel.report_id == report_id,
+            )
+        )
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return None
+    return ConversationResponse(
+        id=row.id,
+        report_id=row.report_id,
+        messages=row.messages,
+        updated_at=row.updated_at.isoformat(),
+    )
+
+
+@router.put("/conversations/{report_id}", response_model=ConversationResponse)
+async def save_conversation(
+    report_id: str,
+    body: SaveConversationRequest,
+    user: User = Depends(get_current_user),
+    session=Depends(get_db_session),
+):
+    """Save/update the conversation for a user+report pair."""
+    result = await session.execute(
+        select(ConversationModel).where(
+            and_(
+                ConversationModel.user_id == user.id,
+                ConversationModel.report_id == report_id,
+            )
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row:
+        row.messages = body.messages
+        from datetime import datetime, timezone
+        row.updated_at = datetime.now(timezone.utc)
+    else:
+        row = ConversationModel(
+            user_id=user.id,
+            report_id=report_id,
+            messages=body.messages,
+        )
+        session.add(row)
+    await session.flush()
+    return ConversationResponse(
+        id=row.id,
+        report_id=row.report_id,
+        messages=row.messages,
+        updated_at=row.updated_at.isoformat(),
+    )
