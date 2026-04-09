@@ -11,3 +11,5 @@ coverage.xml
 test-results.xml
 pylint-report.txt
 .scannerwork/
+.mutmut-cache
+mutants/
