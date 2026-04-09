@@ -31,6 +31,13 @@ async def get_current_user(
     if user_id is None:
         raise HTTPException(status_code=401, detail="Token missing 'sub' claim")
 
+    # Legacy tokens may have "google:XXXXX" as sub instead of a UUID5.
+    # Convert to the deterministic UUID5 used by the current Google login flow.
+    if user_id.startswith("google:"):
+        import uuid
+        google_sub = user_id[len("google:"):]
+        user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"google:{google_sub}"))
+
     # Auto-create user on first request
     user = await user_repo.get_by_id(user_id)
     if user is None:
