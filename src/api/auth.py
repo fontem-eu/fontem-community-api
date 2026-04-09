@@ -27,16 +27,18 @@ async def get_current_user(
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+    import uuid as _uuid
+
     user_id: str | None = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=401, detail="Token missing 'sub' claim")
 
-    # Legacy tokens may have "google:XXXXX" as sub instead of a UUID5.
-    # Convert to the deterministic UUID5 used by the current Google login flow.
-    if user_id.startswith("google:"):
-        import uuid
-        google_sub = user_id[len("google:"):]
-        user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"google:{google_sub}"))
+    # Ensure user_id is a valid UUID. Non-UUID subs (legacy Google tokens,
+    # test tokens, etc.) get a deterministic UUID5 derived from the sub value.
+    try:
+        _uuid.UUID(user_id)
+    except ValueError:
+        user_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, user_id))
 
     # Auto-create user on first request
     user = await user_repo.get_by_id(user_id)
