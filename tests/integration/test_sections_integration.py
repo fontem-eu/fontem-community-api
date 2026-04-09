@@ -51,14 +51,31 @@ class TestSections:
     def test_lock_prevents_concurrent_edit(self, client, user_id, user2_id):
         """SEC-I05: Locked section rejects edit from other user."""
         rid, h1 = self._create_report(client, user_id)
-        # Grant user2 editor access
+        # Ensure user2 exists in DB (auto-created by making any authenticated request)
         h2 = make_headers(user2_id)
-        client.post(f"/reports/{rid}/access", json={"user_id": user2_id, "level": "editor"}, headers=h1)
-        # Create and lock section
-        sec = client.post(f"/reports/{rid}/sections", json={"content": "<p>locked</p>"}, headers=h1).json()
-        client.post(f"/reports/{rid}/sections/{sec['id']}/lock", headers=h1)
+        client.get("/users/me", headers=h2)
+        # Grant user2 editor access
+        grant = client.post(
+            f"/reports/{rid}/access",
+            json={"user_id": user2_id, "level": "editor"},
+            headers=h1,
+        )
+        assert grant.status_code in (200, 201), f"grant failed: {grant.text}"
+        # Create section
+        sec = client.post(
+            f"/reports/{rid}/sections",
+            json={"content": "<p>locked</p>"},
+            headers=h1,
+        ).json()
+        # Lock and verify it took
+        lock_resp = client.post(f"/reports/{rid}/sections/{sec['id']}/lock", headers=h1)
+        assert lock_resp.status_code in (200, 201), f"lock failed: {lock_resp.text}"
         # User2 tries to edit — should fail
-        resp = client.put(f"/reports/{rid}/sections/{sec['id']}", json={"content": "<p>hacked</p>"}, headers=h2)
+        resp = client.put(
+            f"/reports/{rid}/sections/{sec['id']}",
+            json={"content": "<p>hacked</p>"},
+            headers=h2,
+        )
         assert resp.status_code in (409, 403)
 
     def test_section_versions_tracked(self, client, user_id):

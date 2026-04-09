@@ -118,6 +118,9 @@ class TestReportPermissions:
         """RPT-I09: Other user cannot access private report."""
         h1 = make_headers(user_id)
         h2 = make_headers(user2_id)
+        # Ensure both users exist in DB
+        client.get("/users/me", headers=h1)
+        client.get("/users/me", headers=h2)
         report = client.post("/reports", json={"title": "Private"}, headers=h1).json()
         resp = client.get(f"/reports/{report['id']}", headers=h2)
         assert resp.status_code == 403
@@ -126,8 +129,18 @@ class TestReportPermissions:
         """RPT-I10: Public report accessible by other users."""
         h1 = make_headers(user_id)
         h2 = make_headers(user2_id)
+        # Ensure both users exist in DB
+        client.get("/users/me", headers=h1)
+        client.get("/users/me", headers=h2)
         report = client.post("/reports", json={"title": "Public Report"}, headers=h1).json()
-        client.put(f"/reports/{report['id']}", json={"visibility": "public_open"}, headers=h1)
+        update_resp = client.put(
+            f"/reports/{report['id']}",
+            json={"visibility": "public_open"},
+            headers=h1,
+        )
+        assert update_resp.status_code == 200, f"visibility update failed: {update_resp.text}"
+        check = client.get(f"/reports/{report['id']}", headers=h1).json()
+        assert check["visibility"] == "public_open", f"got {check['visibility']}"
         resp = client.get(f"/reports/{report['id']}", headers=h2)
         assert resp.status_code == 200
         assert resp.json()["title"] == "Public Report"

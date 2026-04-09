@@ -4,6 +4,8 @@ All tests use InMemory repositories — 0 I/O, sub-millisecond.
 """
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from jose import jwt
 
@@ -11,6 +13,19 @@ from starlette.testclient import TestClient
 
 from src.api.app import app
 from src.api.auth import JWT_SECRET, JWT_ALGORITHM
+
+
+def _stable_uuid(raw_id: str) -> str:
+    """Convert a human-friendly test ID to the UUID5 that auth.py will derive.
+
+    The auth middleware converts any non-UUID sub to UUID5. Tests must seed
+    users with the same derived ID so lookups match.
+    """
+    try:
+        uuid.UUID(raw_id)
+        return raw_id  # already a valid UUID
+    except ValueError:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, raw_id))
 from src.api.dependencies import get_user_repo, get_report_service, get_issue_service, get_moderation_service, get_group_repo, get_permission_service, get_permission_repo
 
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
@@ -89,10 +104,17 @@ def client(services):
 async def seed_user(user_repo: InMemoryUserRepository, user_id: str,
                     trust_level: str = "contributor",
                     roles: list[str] | None = None) -> User:
-    """Create a user with given trust level and roles."""
-    user = User(id=user_id, email=f"{user_id}@test.com", name=user_id,
+    """Create a user with given trust level and roles.
+
+    Derives a UUID5 from human-friendly IDs (e.g. "user-1" → UUID5) to match
+    what the auth middleware produces. The returned User has the derived ID.
+    All tests should use the returned user.id (or _stable_uuid(label)) when
+    calling services directly.
+    """
+    derived = _stable_uuid(user_id)
+    user = User(id=derived, email=f"{user_id}@test.com", name=user_id,
                 trust_level=trust_level)
     user = await user_repo.upsert(user)
     if roles:
-        await user_repo.set_roles(user_id, roles)
+        await user_repo.set_roles(derived, roles)
     return user

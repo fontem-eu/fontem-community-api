@@ -13,3 +13,4 @@ pylint-report.txt
 .scannerwork/
 .mutmut-cache
 mutants/
+test-results/

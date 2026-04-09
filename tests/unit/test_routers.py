@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from tests.conftest import make_headers, seed_user
+from tests.conftest import make_headers, seed_user, _stable_uuid
 
 from src.api.dependencies import get_permission_repo
 
@@ -169,7 +169,7 @@ class TestSharingAccess:
         rid = _create_report(sharing_client, h)
         resp = sharing_client.post(
             f"/reports/{rid}/access",
-            json={"user_id": "user-2", "level": "editor"},
+            json={"user_id": _stable_uuid("user-2"), "level": "editor"},
             headers=h,
         )
         assert resp.status_code == 201
@@ -178,7 +178,7 @@ class TestSharingAccess:
         # Verify the grant shows up in list
         grants = sharing_client.get(f"/reports/{rid}/access", headers=h).json()
         user_ids = [g.get("user_id") for g in grants]
-        assert "user-2" in user_ids
+        assert _stable_uuid("user-2") in user_ids
 
     def test_grant_group_access(self, sharing_client, services):
         _seed(services)
@@ -201,11 +201,11 @@ class TestSharingAccess:
         rid = _create_report(sharing_client, h)
         sharing_client.post(
             f"/reports/{rid}/access",
-            json={"user_id": "user-2", "level": "editor"},
+            json={"user_id": _stable_uuid("user-2"), "level": "editor"},
             headers=h,
         )
         grants = sharing_client.get(f"/reports/{rid}/access", headers=h).json()
-        user2_grant = [g for g in grants if g.get("user_id") == "user-2"]
+        user2_grant = [g for g in grants if g.get("user_id") == _stable_uuid("user-2")]
         assert len(user2_grant) == 1
         access_id = user2_grant[0]["id"]
         resp = sharing_client.delete(f"/reports/{rid}/access/{access_id}", headers=h)
@@ -346,28 +346,28 @@ class TestGroupCRUD:
         _seed(services, "user-2")
         h = make_headers("user-1")
         gid = client.post("/groups", json={"name": "G"}, headers=h).json()["id"]
-        resp = client.post(f"/groups/{gid}/members", json={"user_id": "user-2"}, headers=h)
+        resp = client.post(f"/groups/{gid}/members", json={"user_id": _stable_uuid("user-2")}, headers=h)
         assert resp.status_code == 201
         assert resp.json()["status"] == "ok"
 
         # Verify member appears in group details
         group = client.get(f"/groups/{gid}", headers=h).json()
-        assert "user-2" in group["members"]
+        assert _stable_uuid("user-2") in group["members"]
 
     def test_remove_member(self, client, services):
         _seed(services)
         _seed(services, "user-2")
         h = make_headers("user-1")
         gid = client.post("/groups", json={"name": "G"}, headers=h).json()["id"]
-        client.post(f"/groups/{gid}/members", json={"user_id": "user-2"}, headers=h)
-        resp = client.delete(f"/groups/{gid}/members/user-2", headers=h)
+        client.post(f"/groups/{gid}/members", json={"user_id": _stable_uuid("user-2")}, headers=h)
+        resp = client.delete(f"/groups/{gid}/members/{_stable_uuid('user-2')}", headers=h)
         assert resp.status_code == 204
 
     def test_add_member_to_nonexistent_group(self, client, services):
         _seed(services)
         resp = client.post(
             "/groups/nonexistent/members",
-            json={"user_id": "user-1"},
+            json={"user_id": _stable_uuid("user-1")},
             headers=make_headers("user-1"),
         )
         assert resp.status_code == 404
@@ -383,10 +383,10 @@ class TestGetOtherUser:
     def test_get_other_user(self, client, services):
         _seed(services)
         _seed(services, "user-2")
-        resp = client.get("/users/user-2", headers=make_headers("user-1"))
+        resp = client.get(f"/users/{_stable_uuid('user-2')}", headers=make_headers("user-1"))
         assert resp.status_code == 200
         data = resp.json()
-        assert data["id"] == "user-2"
+        assert data["id"] == _stable_uuid("user-2")
         assert "trust_level" in data
         # Private fields like email should not be present
         assert "email" not in data

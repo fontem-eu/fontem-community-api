@@ -1,7 +1,7 @@
 """HTTP-level tests for user and health endpoints."""
 from __future__ import annotations
 
-from tests.conftest import make_headers
+from tests.conftest import make_headers, _stable_uuid
 
 
 class TestUserAPI:
@@ -17,7 +17,7 @@ class TestUserAPI:
         """GET /users/:id returns public user info."""
         # Auto-create user first
         client.get("/users/me", headers=make_headers("user-1", name="Bob"))
-        resp = client.get("/users/user-1", headers=make_headers("user-1"))
+        resp = client.get(f"/users/{_stable_uuid('user-1')}", headers=make_headers("user-1"))
         assert resp.status_code == 200
 
 

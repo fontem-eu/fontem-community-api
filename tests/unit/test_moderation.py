@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import seed_user
+from tests.conftest import seed_user, _stable_uuid
 
 from src.services.exceptions import PermissionDenied, Conflict
 
@@ -20,9 +20,9 @@ class TestModeration:
         for i in range(3):
             await seed_user(s["user_repo"], f"flagger-{i}", trust_level="commenter")
 
-        flag1 = await s["mod_svc"].flag("flagger-0", "report", "rpt-1", "spam", None)
-        flag2 = await s["mod_svc"].flag("flagger-1", "report", "rpt-1", "spam", None)
-        flag3 = await s["mod_svc"].flag("flagger-2", "report", "rpt-1", "spam", None)
+        flag1 = await s["mod_svc"].flag(_stable_uuid("flagger-0"), "report", "rpt-1", "spam", None)
+        flag2 = await s["mod_svc"].flag(_stable_uuid("flagger-1"), "report", "rpt-1", "spam", None)
+        flag3 = await s["mod_svc"].flag(_stable_uuid("flagger-2"), "report", "rpt-1", "spam", None)
 
         count = await s["mod_repo"].count_flags("report", "rpt-1")
         assert count >= 3
@@ -32,9 +32,9 @@ class TestModeration:
         s = services
         await seed_user(s["user_repo"], "flagger-1", trust_level="commenter")
 
-        await s["mod_svc"].flag("flagger-1", "report", "rpt-1", "spam", None)
+        await s["mod_svc"].flag(_stable_uuid("flagger-1"), "report", "rpt-1", "spam", None)
         with pytest.raises(Conflict):
-            await s["mod_svc"].flag("flagger-1", "report", "rpt-1", "spam", None)
+            await s["mod_svc"].flag(_stable_uuid("flagger-1"), "report", "rpt-1", "spam", None)
 
     # MOD-03: Only moderators can apply sanctions
     async def test_only_moderators_sanction(self, services):
@@ -43,7 +43,7 @@ class TestModeration:
         await seed_user(s["user_repo"], "target-1")
 
         with pytest.raises(PermissionDenied):
-            await s["mod_svc"].sanction("user-1", "target-1", "warning", "bad behavior")
+            await s["mod_svc"].sanction(_stable_uuid("user-1"), _stable_uuid("target-1"), "warning", "bad behavior")
 
     # MOD-04: Only admins can ban
     async def test_only_admins_ban(self, services):
@@ -52,7 +52,7 @@ class TestModeration:
         await seed_user(s["user_repo"], "target-1")
 
         with pytest.raises(PermissionDenied):
-            await s["mod_svc"].sanction("mod-1", "target-1", "ban", "severe violation")
+            await s["mod_svc"].sanction(_stable_uuid("mod-1"), _stable_uuid("target-1"), "ban", "severe violation")
 
     # MOD-04b: Admin can ban
     async def test_admin_can_ban(self, services):
@@ -61,7 +61,7 @@ class TestModeration:
         await seed_user(s["user_repo"], "target-1")
 
         sanction = await s["mod_svc"].sanction(
-            "admin-1", "target-1", "ban", "severe",
+            _stable_uuid("admin-1"), _stable_uuid("target-1"), "ban", "severe",
         )
         assert sanction.type == "ban"
 
@@ -72,7 +72,7 @@ class TestModeration:
         await seed_user(s["user_repo"], "target-1")
 
         sanction = await s["mod_svc"].sanction(
-            "mod-1", "target-1", "warning", "first warning",
+            _stable_uuid("mod-1"), _stable_uuid("target-1"), "warning", "first warning",
         )
         assert sanction.expires_at is None
 
@@ -82,9 +82,9 @@ class TestModeration:
         await seed_user(s["user_repo"], "mod-1", roles=["moderator"])
         user = await seed_user(s["user_repo"], "user-1", trust_level="contributor")
 
-        await s["mod_svc"].sanction("mod-1", "user-1", "mute", "spam")
+        await s["mod_svc"].sanction(_stable_uuid("mod-1"), _stable_uuid("user-1"), "mute", "spam")
 
-        active = await s["user_repo"].get_active_sanction("user-1")
+        active = await s["user_repo"].get_active_sanction(_stable_uuid("user-1"))
         assert active is not None
         assert active.type == "mute"
 
@@ -99,14 +99,14 @@ class TestModeration:
         # Create a suspension that already expired
         from src.domain.moderation import Sanction
         expired = Sanction(
-            user_id="user-1", type="suspend", reason="test",
-            applied_by="admin-1",
+            user_id=_stable_uuid("user-1"), type="suspend", reason="test",
+            applied_by=_stable_uuid("admin-1"),
             starts_at=datetime.now(timezone.utc) - timedelta(days=2),
             expires_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
         await s["mod_repo"].add_sanction(expired)
 
-        active = await s["mod_repo"].get_active_sanction("user-1")
+        active = await s["mod_repo"].get_active_sanction(_stable_uuid("user-1"))
         assert active is None  # Expired, should not be active
 
     # MOD-08: Moderation log records actions
@@ -115,7 +115,7 @@ class TestModeration:
         await seed_user(s["user_repo"], "mod-1", roles=["moderator"])
         await seed_user(s["user_repo"], "target-1")
 
-        await s["mod_svc"].sanction("mod-1", "target-1", "warning", "first")
+        await s["mod_svc"].sanction(_stable_uuid("mod-1"), _stable_uuid("target-1"), "warning", "first")
         log = await s["mod_repo"].get_log(10, 0)
         assert len(log) >= 1
 
@@ -126,11 +126,11 @@ class TestModeration:
         await seed_user(s["user_repo"], "target-1")
 
         sanction = await s["mod_svc"].sanction(
-            "mod-1", "target-1", "mute", "temporary",
+            _stable_uuid("mod-1"), _stable_uuid("target-1"), "mute", "temporary",
         )
-        await s["mod_svc"].lift("mod-1", sanction.id)
+        await s["mod_svc"].lift(_stable_uuid("mod-1"), sanction.id)
 
-        active = await s["mod_repo"].get_active_sanction("target-1")
+        active = await s["mod_repo"].get_active_sanction(_stable_uuid("target-1"))
         assert active is None
 
     # MOD-10: Trust level auto-progression placeholder
@@ -140,6 +140,6 @@ class TestModeration:
         assert user.trust_level == "new_user"
         # Auto-progression would be checked by a background job
         # For now, just verify we can change it
-        await s["user_repo"].set_trust_level("user-1", "commenter")
-        updated = await s["user_repo"].get_by_id("user-1")
+        await s["user_repo"].set_trust_level(_stable_uuid("user-1"), "commenter")
+        updated = await s["user_repo"].get_by_id(_stable_uuid("user-1"))
         assert updated.trust_level == "commenter"

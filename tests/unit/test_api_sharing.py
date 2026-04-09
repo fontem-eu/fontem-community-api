@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import pytest
-from tests.conftest import make_headers, seed_user
+from tests.conftest import make_headers, seed_user, _stable_uuid
 
 
 @pytest.mark.asyncio
@@ -29,7 +29,7 @@ class TestSharingAPI:
         r = client.post("/reports", json={"title": "R"}, headers=h).json()
         resp = client.post(
             f"/reports/{r['id']}/access",
-            json={"user_id": "viewer-1", "level": "viewer"},
+            json={"user_id": _stable_uuid("viewer-1"), "level": "viewer"},
             headers=h,
         )
         assert resp.status_code in (200, 201)
@@ -44,7 +44,7 @@ class TestSharingAPI:
         r = client.post("/reports", json={"title": "Shared"}, headers=ho).json()
         client.post(
             f"/reports/{r['id']}/access",
-            json={"user_id": "viewer-1", "level": "viewer"},
+            json={"user_id": _stable_uuid("viewer-1"), "level": "viewer"},
             headers=ho,
         )
         resp = client.get(f"/reports/{r['id']}", headers=hv)
@@ -57,7 +57,7 @@ class TestSharingAPI:
         r = client.post("/reports", json={"title": "R"}, headers=ho).json()
         grant = client.post(
             f"/reports/{r['id']}/access",
-            json={"user_id": "viewer-1", "level": "viewer"},
+            json={"user_id": _stable_uuid("viewer-1"), "level": "viewer"},
             headers=ho,
         ).json()
         aid = grant.get("id") or grant.get("access_id", "unknown")

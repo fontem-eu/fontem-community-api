@@ -9,19 +9,19 @@ import pytest
 from jose import jwt
 from starlette.testclient import TestClient
 
-from tests.conftest import make_headers, make_token, seed_user
+from tests.conftest import make_headers, make_token, seed_user, _stable_uuid
 from src.api.auth import JWT_SECRET, JWT_ALGORITHM
 
 
 class TestAuthSecurity:
     """AUTH-SEC: Authentication boundary tests."""
 
-    # AUTH-SEC-01: No token → 401
+    # AUTH-SEC-01: No token -> 401
     def test_no_token_returns_401(self, client):
         r = client.get("/reports")
         assert r.status_code in (401, 403)
 
-    # AUTH-SEC-02: Expired JWT → 401
+    # AUTH-SEC-02: Expired JWT -> 401
     def test_expired_token_returns_401(self, client):
         import time
         token = jwt.encode(
@@ -31,7 +31,7 @@ class TestAuthSecurity:
         r = client.get("/reports", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 401
 
-    # AUTH-SEC-03: Wrong issuer/secret → 401
+    # AUTH-SEC-03: Wrong issuer/secret -> 401
     def test_wrong_secret_returns_401(self, client):
         token = jwt.encode(
             {"sub": "user-1"}, "wrong-secret", algorithm="HS256",
@@ -39,7 +39,7 @@ class TestAuthSecurity:
         r = client.get("/reports", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 401
 
-    # AUTH-SEC-04: Tampered signature → 401
+    # AUTH-SEC-04: Tampered signature -> 401
     def test_tampered_signature_returns_401(self, client):
         token = make_token("user-1")
         # Tamper the last character of the signature
@@ -47,13 +47,13 @@ class TestAuthSecurity:
         r = client.get("/reports", headers={"Authorization": f"Bearer {tampered}"})
         assert r.status_code == 401
 
-    # AUTH-SEC-05: Banned user → 401
+    # AUTH-SEC-05: Banned user -> 401
     @pytest.mark.asyncio
     async def test_banned_user_gets_401(self, client, services):
         s = services
         await seed_user(s["user_repo"], "banned-1")
         await seed_user(s["user_repo"], "admin-1", roles=["admin"])
-        await s["mod_svc"].sanction("admin-1", "banned-1", "ban", "severe violation")
+        await s["mod_svc"].sanction(_stable_uuid("admin-1"), _stable_uuid("banned-1"), "ban", "severe violation")
 
         r = client.get("/users/me", headers=make_headers("banned-1"))
         assert r.status_code == 401
@@ -81,8 +81,8 @@ class TestAuthzSecurity:
         await seed_user(s["user_repo"], "owner-1")
         await seed_user(s["user_repo"], "viewer-1")
 
-        report = await s["report_svc"].create("owner-1", "Report")
-        await s["permission_repo"].set_user_access(report.id, "viewer-1", "viewer")
+        report = await s["report_svc"].create(_stable_uuid("owner-1"), "Report")
+        await s["permission_repo"].set_user_access(report.id, _stable_uuid("viewer-1"), "viewer")
 
         r = client.put(
             f"/reports/{report.id}",
@@ -98,8 +98,8 @@ class TestAuthzSecurity:
         await seed_user(s["user_repo"], "owner-1")
         await seed_user(s["user_repo"], "editor-1")
 
-        report = await s["report_svc"].create("owner-1", "Report")
-        await s["permission_repo"].set_user_access(report.id, "editor-1", "editor")
+        report = await s["report_svc"].create(_stable_uuid("owner-1"), "Report")
+        await s["permission_repo"].set_user_access(report.id, _stable_uuid("editor-1"), "editor")
 
         r = client.put(
             f"/reports/{report.id}",
@@ -115,22 +115,22 @@ class TestAuthzSecurity:
         await seed_user(s["user_repo"], "owner-1")
         await seed_user(s["user_repo"], "editor-1")
 
-        report = await s["report_svc"].create("owner-1", "Report")
-        await s["permission_repo"].set_user_access(report.id, "editor-1", "editor")
+        report = await s["report_svc"].create(_stable_uuid("owner-1"), "Report")
+        await s["permission_repo"].set_user_access(report.id, _stable_uuid("editor-1"), "editor")
 
         r = client.delete(
             f"/reports/{report.id}", headers=make_headers("editor-1"),
         )
         assert r.status_code == 403
 
-    # AUTHZ-SEC-10: IDOR — user A cannot access user B's private report
+    # AUTHZ-SEC-10: IDOR -- user A cannot access user B's private report
     @pytest.mark.asyncio
     async def test_idor_private_report(self, client, services):
         s = services
         await seed_user(s["user_repo"], "owner-1")
         await seed_user(s["user_repo"], "attacker-1")
 
-        report = await s["report_svc"].create("owner-1", "Secret")
+        report = await s["report_svc"].create(_stable_uuid("owner-1"), "Secret")
 
         r = client.get(
             f"/reports/{report.id}", headers=make_headers("attacker-1"),
@@ -161,10 +161,10 @@ class TestDataSecurity:
         await seed_user(s["user_repo"], "owner-1")
         await seed_user(s["user_repo"], "user-2")
 
-        report = await s["report_svc"].create("owner-1", "Report")
-        await s["permission_repo"].set_user_access(report.id, "user-2", "editor")
+        report = await s["report_svc"].create(_stable_uuid("owner-1"), "Report")
+        await s["permission_repo"].set_user_access(report.id, _stable_uuid("user-2"), "editor")
         section = await s["report_svc"].add_section(
-            "owner-1", report.id, {"text": "content"},
+            _stable_uuid("owner-1"), report.id, {"text": "content"},
         )
 
         # owner-1 acquires lock
@@ -173,7 +173,7 @@ class TestDataSecurity:
             headers=make_headers("owner-1"),
         )
 
-        # user-2 tries to edit — should fail due to lock
+        # user-2 tries to edit -- should fail due to lock
         r = client.put(
             f"/reports/{report.id}/sections/{section.id}",
             json={"content": "<p>hacked</p>"},
