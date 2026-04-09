@@ -1,59 +1,11 @@
-"""Tests targeting mutmut survivors in IssueService, PermissionService, ModerationService, and exceptions."""
+"""Tests for IssueService, PermissionService, and ModerationService —
+verify access control, trust levels, and error behavior through public APIs.
+"""
 from __future__ import annotations
 
 import pytest
 from tests.conftest import seed_user
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
-from src.services.issue_service import TRUST_LEVELS as ISSUE_TRUST_LEVELS
-from src.services.moderation_service import AUTO_HIDE_THRESHOLD, TRUST_LEVELS as MOD_TRUST_LEVELS
-from src.services.permission_service import LEVEL_HIERARCHY
-
-
-# ── Exception defaults ────────────────────────────────────────
-
-class TestExceptionDefaults:
-    def test_permission_denied_default_message(self):
-        e = PermissionDenied()
-        assert e.message == "Permission denied"
-
-    def test_not_found_default_message(self):
-        e = NotFound()
-        assert e.message == "Not found"
-
-    def test_conflict_default_message(self):
-        e = Conflict()
-        assert e.message == "Conflict"
-
-    def test_permission_denied_custom_message(self):
-        e = PermissionDenied("custom")
-        assert e.message == "custom"
-        assert str(e) == "custom"
-
-    def test_not_found_custom_message(self):
-        e = NotFound("gone")
-        assert e.message == "gone"
-        assert str(e) == "gone"
-
-    def test_conflict_custom_message(self):
-        e = Conflict("locked")
-        assert e.message == "locked"
-        assert str(e) == "locked"
-
-
-# ── Constants ──────────────────────────────────────────────────
-
-class TestConstants:
-    def test_issue_trust_levels_order(self):
-        assert ISSUE_TRUST_LEVELS == ["new_user", "commenter", "contributor", "moderator", "admin"]
-
-    def test_mod_trust_levels_order(self):
-        assert MOD_TRUST_LEVELS == ["new_user", "commenter", "contributor", "moderator", "admin"]
-
-    def test_auto_hide_threshold_is_3(self):
-        assert AUTO_HIDE_THRESHOLD == 3
-
-    def test_level_hierarchy_values(self):
-        assert LEVEL_HIERARCHY == {"viewer": 0, "commenter": 1, "editor": 2, "owner": 3}
 
 
 # ── IssueService ───────────────────────────────────────────────

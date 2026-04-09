@@ -71,6 +71,9 @@ mutation:
 
 .PHONY: all test analyze mutation build release deploy security
 
+DTRACK_URL  ?= http://dependency-track.dependency-track.svc.cluster.local:8080
+DTRACK_KEY  ?= $(shell cat /config/.dtrack-api-key 2>/dev/null)
+
 # ── Security & SBOM ─────────────────────────────────────────
 audit:
 	pip-audit -r requirements.txt --desc 2>&1 || true

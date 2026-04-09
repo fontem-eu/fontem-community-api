@@ -14,3 +14,4 @@ pylint-report.txt
 .mutmut-cache
 mutants/
 test-results/
+sbom.json

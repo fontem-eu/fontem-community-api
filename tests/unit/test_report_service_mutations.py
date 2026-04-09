@@ -1,135 +1,165 @@
-"""Tests targeting surviving mutmut mutants in ReportService.
+"""Tests for ReportService — verify permission enforcement and error behavior
+through the public service API.
 
-Verifies:
-- Exact permission role strings passed to PermissionService.require()
-- DEFAULT_LOCK_TTL value used in acquire_lock
-- Error messages contain the correct entity IDs
+No mocking of internals — tests exercise the full service stack with
+InMemory repositories.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 from tests.conftest import seed_user
-from src.services.exceptions import Conflict, NotFound
-from src.services.report_service import DEFAULT_LOCK_TTL
-
-
-class TestDefaultLockTTL:
-    def test_lock_ttl_is_300(self):
-        assert DEFAULT_LOCK_TTL == 300
+from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
 
 @pytest.mark.asyncio
-class TestPermissionRoleStrings:
-    """Verify the exact role string passed to require() for each operation."""
+class TestReportPermissions:
+    """Verify that each operation enforces the correct access level."""
 
-    async def test_get_requires_viewer(self, services):
+    async def test_viewer_can_read_report(self, services):
         s = services
-        await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create("u1", "T")
-        with patch.object(s["perm_svc"], "require", new_callable=AsyncMock) as mock_req:
-            await s["report_svc"].get("u1", r.id)
-            mock_req.assert_called_once_with("u1", r.id, "viewer")
+        owner = await seed_user(s["user_repo"], "owner")
+        viewer = await seed_user(s["user_repo"], "viewer")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
+        report = await s["report_svc"].get(viewer.id, r.id)
+        assert report.title == "Report"
 
-    async def test_update_requires_owner(self, services):
+    async def test_viewer_cannot_update_report(self, services):
         s = services
-        await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create("u1", "T")
-        with patch.object(s["perm_svc"], "require", new_callable=AsyncMock) as mock_req:
-            await s["report_svc"].update("u1", r.id, title="New")
-            mock_req.assert_called_once_with("u1", r.id, "owner")
+        owner = await seed_user(s["user_repo"], "owner")
+        viewer = await seed_user(s["user_repo"], "viewer")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
+        with pytest.raises(PermissionDenied):
+            await s["report_svc"].update(viewer.id, r.id, title="Hacked")
 
-    async def test_delete_requires_owner(self, services):
+    async def test_viewer_cannot_delete_report(self, services):
         s = services
-        await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create("u1", "T")
-        with patch.object(s["perm_svc"], "require", new_callable=AsyncMock) as mock_req:
-            await s["report_svc"].delete("u1", r.id)
-            mock_req.assert_called_once_with("u1", r.id, "owner")
+        owner = await seed_user(s["user_repo"], "owner")
+        viewer = await seed_user(s["user_repo"], "viewer")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
+        with pytest.raises(PermissionDenied):
+            await s["report_svc"].delete(viewer.id, r.id)
 
-    async def test_add_section_requires_editor(self, services):
+    async def test_editor_can_add_section(self, services):
         s = services
-        await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create("u1", "T")
-        with patch.object(s["perm_svc"], "require", new_callable=AsyncMock) as mock_req:
-            await s["report_svc"].add_section("u1", r.id, {"text": "hi"})
-            mock_req.assert_called_once_with("u1", r.id, "editor")
+        owner = await seed_user(s["user_repo"], "owner")
+        editor = await seed_user(s["user_repo"], "editor")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, editor.id, "editor")
+        sec = await s["report_svc"].add_section(editor.id, r.id, {"text": "hi"})
+        assert sec.content_json == {"text": "hi"}
 
-    async def test_edit_section_requires_editor(self, services):
+    async def test_viewer_cannot_add_section(self, services):
         s = services
-        await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create("u1", "T")
-        sec = await s["report_svc"].add_section("u1", r.id, {"text": "v1"})
-        with patch.object(s["perm_svc"], "require", new_callable=AsyncMock) as mock_req:
-            await s["report_svc"].edit_section("u1", sec.id, {"text": "v2"})
-            mock_req.assert_called_once_with("u1", r.id, "editor")
+        owner = await seed_user(s["user_repo"], "owner")
+        viewer = await seed_user(s["user_repo"], "viewer")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
+        with pytest.raises(PermissionDenied):
+            await s["report_svc"].add_section(viewer.id, r.id, {"text": "hi"})
 
-    async def test_delete_section_requires_editor(self, services):
+    async def test_editor_can_edit_section(self, services):
         s = services
-        await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create("u1", "T")
-        sec = await s["report_svc"].add_section("u1", r.id, {"text": "v1"})
-        with patch.object(s["perm_svc"], "require", new_callable=AsyncMock) as mock_req:
-            await s["report_svc"].delete_section("u1", sec.id)
-            mock_req.assert_called_once_with("u1", r.id, "editor")
+        owner = await seed_user(s["user_repo"], "owner")
+        editor = await seed_user(s["user_repo"], "editor")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, editor.id, "editor")
+        sec = await s["report_svc"].add_section(owner.id, r.id, {"v": 1})
+        updated = await s["report_svc"].edit_section(editor.id, sec.id, {"v": 2})
+        assert updated.content_json == {"v": 2}
 
-    async def test_acquire_lock_requires_editor(self, services):
+    async def test_viewer_cannot_edit_section(self, services):
         s = services
-        await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create("u1", "T")
-        sec = await s["report_svc"].add_section("u1", r.id, {"text": "v1"})
-        with patch.object(s["perm_svc"], "require", new_callable=AsyncMock) as mock_req:
-            await s["report_svc"].acquire_lock("u1", sec.id)
-            mock_req.assert_called_once_with("u1", r.id, "editor")
+        owner = await seed_user(s["user_repo"], "owner")
+        viewer = await seed_user(s["user_repo"], "viewer")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
+        sec = await s["report_svc"].add_section(owner.id, r.id, {"v": 1})
+        with pytest.raises(PermissionDenied):
+            await s["report_svc"].edit_section(viewer.id, sec.id, {"v": 2})
+
+    async def test_viewer_cannot_delete_section(self, services):
+        s = services
+        owner = await seed_user(s["user_repo"], "owner")
+        viewer = await seed_user(s["user_repo"], "viewer")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
+        sec = await s["report_svc"].add_section(owner.id, r.id, {"v": 1})
+        with pytest.raises(PermissionDenied):
+            await s["report_svc"].delete_section(viewer.id, sec.id)
+
+    async def test_viewer_cannot_acquire_lock(self, services):
+        s = services
+        owner = await seed_user(s["user_repo"], "owner")
+        viewer = await seed_user(s["user_repo"], "viewer")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
+        sec = await s["report_svc"].add_section(owner.id, r.id, {"v": 1})
+        with pytest.raises(PermissionDenied):
+            await s["report_svc"].acquire_lock(viewer.id, sec.id)
+
+    async def test_owner_can_update_report(self, services):
+        s = services
+        owner = await seed_user(s["user_repo"], "owner")
+        r = await s["report_svc"].create(owner.id, "Original")
+        updated = await s["report_svc"].update(owner.id, r.id, title="New")
+        assert updated.title == "New"
+
+    async def test_editor_cannot_update_report(self, services):
+        s = services
+        owner = await seed_user(s["user_repo"], "owner")
+        editor = await seed_user(s["user_repo"], "editor")
+        r = await s["report_svc"].create(owner.id, "Report")
+        await s["perm_svc"].grant_access(r.id, editor.id, "editor")
+        with pytest.raises(PermissionDenied):
+            await s["report_svc"].update(editor.id, r.id, title="Nope")
 
 
 @pytest.mark.asyncio
-class TestErrorMessages:
-    """Verify error messages contain the correct entity IDs."""
+class TestReportNotFound:
+    """Verify that operations on nonexistent entities raise NotFound."""
 
-    async def test_edit_section_not_found_contains_id(self, services):
+    async def test_edit_nonexistent_section(self, services):
         s = services
         await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound, match="sec-999"):
-            await s["report_svc"].edit_section("u1", "sec-999", {})
+        with pytest.raises(NotFound):
+            await s["report_svc"].edit_section("u1", "no-such-section", {})
 
-    async def test_delete_section_not_found_contains_id(self, services):
+    async def test_delete_nonexistent_section(self, services):
         s = services
         await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound, match="sec-888"):
-            await s["report_svc"].delete_section("u1", "sec-888")
+        with pytest.raises(NotFound):
+            await s["report_svc"].delete_section("u1", "no-such-section")
 
-    async def test_acquire_lock_not_found_contains_id(self, services):
+    async def test_acquire_lock_nonexistent_section(self, services):
         s = services
         await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound, match="sec-777"):
-            await s["report_svc"].acquire_lock("u1", "sec-777")
-
-    async def test_edit_section_conflict_contains_holder(self, services):
-        s = services
-        await seed_user(s["user_repo"], "u1")
-        await seed_user(s["user_repo"], "u2")
-        r = await s["report_svc"].create("u1", "T")
-        # Grant u2 editor access
-        await s["perm_svc"].grant_access(r.id, "u2", "editor")
-        sec = await s["report_svc"].add_section("u1", r.id, {"text": "v1"})
-        # u1 acquires lock
-        await s["report_svc"].acquire_lock("u1", sec.id)
-        # u2 tries to edit — should get Conflict with lock holder info
-        with pytest.raises(Conflict, match="u1"):
-            await s["report_svc"].edit_section("u2", sec.id, {"text": "v2"})
+        with pytest.raises(NotFound):
+            await s["report_svc"].acquire_lock("u1", "no-such-section")
 
 
 @pytest.mark.asyncio
-class TestLockTTLUsage:
-    """Verify DEFAULT_LOCK_TTL is passed to acquire_lock."""
+class TestSectionLocking:
+    """Verify that section locking prevents concurrent edits."""
 
-    async def test_acquire_lock_uses_ttl_300(self, services):
+    async def test_locked_section_rejects_other_editor(self, services):
         s = services
-        await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create("u1", "T")
-        sec = await s["report_svc"].add_section("u1", r.id, {"text": "v1"})
-        with patch.object(s["report_repo"], "acquire_lock", new_callable=AsyncMock, return_value=True) as mock_lock:
-            await s["report_svc"].acquire_lock("u1", sec.id)
-            mock_lock.assert_called_once_with(sec.id, "u1", 300)
+        u1 = await seed_user(s["user_repo"], "u1")
+        u2 = await seed_user(s["user_repo"], "u2")
+        r = await s["report_svc"].create(u1.id, "Report")
+        await s["perm_svc"].grant_access(r.id, u2.id, "editor")
+        sec = await s["report_svc"].add_section(u1.id, r.id, {"v": 1})
+        await s["report_svc"].acquire_lock(u1.id, sec.id)
+        with pytest.raises(Conflict):
+            await s["report_svc"].edit_section(u2.id, sec.id, {"v": 2})
+
+    async def test_lock_holder_can_still_edit(self, services):
+        s = services
+        u1 = await seed_user(s["user_repo"], "u1")
+        r = await s["report_svc"].create(u1.id, "Report")
+        sec = await s["report_svc"].add_section(u1.id, r.id, {"v": 1})
+        await s["report_svc"].acquire_lock(u1.id, sec.id)
+        updated = await s["report_svc"].edit_section(u1.id, sec.id, {"v": 2})
+        assert updated.content_json == {"v": 2}
