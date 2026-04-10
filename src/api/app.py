@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse
 
 import os
 
-from src.api.routers import assist, auth, groups, issues, moderation, reports, sharing, users
+from src.api.routers import auth, groups, issues, moderation, reports, sharing, users
+from src.assistant import router as assistant_router
 from src.api import dependencies
 from src.api.dependencies import configure_postgres
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
@@ -37,6 +38,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     UNIQUE (user_id, report_id)
                 )
             """))
+            # Assistant module owns its own tables
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS assist_conversations (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL,
+                    conversation_key TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT uq_assist_conv_user_key UNIQUE (user_id, conversation_key)
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS assist_messages (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    conversation_id UUID NOT NULL REFERENCES assist_conversations(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL,
+                    role VARCHAR(16) NOT NULL,
+                    content TEXT NOT NULL,
+                    extras JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    tokens_in INTEGER,
+                    tokens_out INTEGER,
+                    model VARCHAR(64),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT ck_assist_msg_role CHECK (role IN ('user', 'assistant'))
+                )
+            """))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_assist_msg_user_created "
+                "ON assist_messages (user_id, created_at)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_assist_msg_conv_created "
+                "ON assist_messages (conversation_id, created_at)"
+            ))
         await engine.dispose()
     yield
 
@@ -70,7 +105,7 @@ async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
 
 
 # Include routers — db session dependency ensures commit/rollback per request
-app.include_router(assist.router)
+app.include_router(assistant_router.router)
 app.include_router(auth.router)
 app.include_router(reports.router)
 app.include_router(sharing.router)

@@ -1,0 +1,170 @@
+"""Assistant repository — abstract interface + in-memory implementation.
+
+The assistant module owns its own storage. Callers never read or write
+chat history directly; they go through this interface. The Postgres
+implementation lives in ``pg_repository.py``.
+"""
+# pylint: disable=missing-class-docstring,missing-function-docstring
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-instance-attributes
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Callable
+from uuid import uuid4
+
+from src.assistant.context import Turn
+
+
+# ── Data classes (wire format for the repository layer) ────────
+
+
+@dataclass
+class AssistConversation:
+    id: str
+    user_id: str
+    conversation_key: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class AssistMessage:
+    id: str
+    conversation_id: str
+    user_id: str
+    role: str           # "user" | "assistant"
+    content: str
+    extras: dict = field(default_factory=dict)
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    model: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ── Abstract interface ────────────────────────────────────────
+
+
+class AssistRepository(ABC):
+    """The only surface the assistant service is allowed to touch."""
+
+    @abstractmethod
+    async def find_or_create_conversation(
+        self, user_id: str, conversation_key: str
+    ) -> AssistConversation:
+        ...
+
+    @abstractmethod
+    async def append_message(
+        self,
+        conversation_id: str,
+        user_id: str,
+        role: str,
+        content: str,
+        tokens_in: int | None,
+        tokens_out: int | None,
+        model: str | None,
+        extras: dict | None = None,
+    ) -> AssistMessage:
+        ...
+
+    @abstractmethod
+    async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
+        ...
+
+    @abstractmethod
+    async def history_turns(self, conversation_id: str) -> list[Turn]:
+        ...
+
+    @abstractmethod
+    async def tokens_used_since(self, user_id: str, since: datetime) -> int:
+        ...
+
+
+# ── In-memory implementation (for unit tests + dev) ───────────
+
+
+class InMemoryAssistRepository(AssistRepository):
+    """In-memory repository. Thread-unsafe on purpose — tests only."""
+
+    def __init__(
+        self,
+        now_provider: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._now: Callable[[], datetime] = (
+            now_provider or (lambda: datetime.now(timezone.utc))
+        )
+        self._conversations: dict[str, AssistConversation] = {}
+        self._by_key: dict[tuple[str, str], str] = {}  # (user_id, key) -> conv_id
+        self._messages: list[AssistMessage] = []
+
+    async def find_or_create_conversation(
+        self, user_id: str, conversation_key: str
+    ) -> AssistConversation:
+        existing_id = self._by_key.get((user_id, conversation_key))
+        if existing_id is not None:
+            return self._conversations[existing_id]
+        now = self._now()
+        conv = AssistConversation(
+            id=str(uuid4()),
+            user_id=user_id,
+            conversation_key=conversation_key,
+            created_at=now,
+            updated_at=now,
+        )
+        self._conversations[conv.id] = conv
+        self._by_key[(user_id, conversation_key)] = conv.id
+        return conv
+
+    async def append_message(
+        self,
+        conversation_id: str,
+        user_id: str,
+        role: str,
+        content: str,
+        tokens_in: int | None,
+        tokens_out: int | None,
+        model: str | None,
+        extras: dict | None = None,
+    ) -> AssistMessage:
+        msg = AssistMessage(
+            id=str(uuid4()),
+            conversation_id=conversation_id,
+            user_id=user_id,
+            role=role,
+            content=content,
+            extras=extras or {},
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            model=model,
+            created_at=self._now(),
+        )
+        self._messages.append(msg)
+        # Bump conversation.updated_at so rate queries see freshness
+        conv = self._conversations.get(conversation_id)
+        if conv is not None:
+            conv.updated_at = msg.created_at
+        return msg
+
+    async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
+        return [
+            m for m in self._messages
+            if m.conversation_id == conversation_id
+        ]
+
+    async def history_turns(self, conversation_id: str) -> list[Turn]:
+        return [
+            Turn(role=m.role, content=m.content)
+            for m in await self.list_messages(conversation_id)
+        ]
+
+    async def tokens_used_since(self, user_id: str, since: datetime) -> int:
+        total = 0
+        for m in self._messages:
+            if m.user_id != user_id:
+                continue
+            if m.created_at < since:
+                continue
+            total += (m.tokens_in or 0) + (m.tokens_out or 0)
+        return total

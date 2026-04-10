@@ -1,0 +1,127 @@
+"""PostgreSQL implementation of the assistant repository.
+
+Mirrors the in-memory contract test-for-test. Any change to the
+``AssistRepository`` interface must be reflected here *and* the
+contract tests extended to catch the regression.
+"""
+# pylint: disable=missing-class-docstring,too-many-arguments,too-many-positional-arguments
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.assistant.context import Turn
+from src.assistant.models import AssistConversationModel, AssistMessageModel
+from src.assistant.repository import (
+    AssistConversation,
+    AssistMessage,
+    AssistRepository,
+)
+
+
+def _to_conv_dc(row: AssistConversationModel) -> AssistConversation:
+    return AssistConversation(
+        id=row.id,
+        user_id=row.user_id,
+        conversation_key=row.conversation_key,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_msg_dc(row: AssistMessageModel) -> AssistMessage:
+    return AssistMessage(
+        id=row.id,
+        conversation_id=row.conversation_id,
+        user_id=row.user_id,
+        role=row.role,
+        content=row.content,
+        extras=row.extras or {},
+        tokens_in=row.tokens_in,
+        tokens_out=row.tokens_out,
+        model=row.model,
+        created_at=row.created_at,
+    )
+
+
+class PgAssistRepository(AssistRepository):
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def find_or_create_conversation(
+        self, user_id: str, conversation_key: str
+    ) -> AssistConversation:
+        stmt = select(AssistConversationModel).where(
+            and_(
+                AssistConversationModel.user_id == user_id,
+                AssistConversationModel.conversation_key == conversation_key,
+            )
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is not None:
+            return _to_conv_dc(row)
+        row = AssistConversationModel(
+            user_id=user_id, conversation_key=conversation_key,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return _to_conv_dc(row)
+
+    async def append_message(
+        self,
+        conversation_id: str,
+        user_id: str,
+        role: str,
+        content: str,
+        tokens_in: int | None,
+        tokens_out: int | None,
+        model: str | None,
+        extras: dict | None = None,
+    ) -> AssistMessage:
+        row = AssistMessageModel(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            role=role,
+            content=content,
+            extras=extras or {},
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            model=model,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return _to_msg_dc(row)
+
+    async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
+        stmt = (
+            select(AssistMessageModel)
+            .where(AssistMessageModel.conversation_id == conversation_id)
+            .order_by(AssistMessageModel.created_at.asc())
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_to_msg_dc(r) for r in rows]
+
+    async def history_turns(self, conversation_id: str) -> list[Turn]:
+        messages = await self.list_messages(conversation_id)
+        return [Turn(role=m.role, content=m.content) for m in messages]
+
+    async def tokens_used_since(self, user_id: str, since: datetime) -> int:
+        stmt = select(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(AssistMessageModel.tokens_in, 0)
+                    + func.coalesce(AssistMessageModel.tokens_out, 0)
+                ),
+                0,
+            )
+        ).where(
+            and_(
+                AssistMessageModel.user_id == user_id,
+                AssistMessageModel.created_at >= since,
+            )
+        )
+        result = (await self._session.execute(stmt)).scalar_one()
+        return int(result)

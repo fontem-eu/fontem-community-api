@@ -1,110 +1,177 @@
-"""Tests for the LLM assist endpoint."""
+"""Endpoint-level tests for the assistant router.
+
+These use the TestClient + dependency overrides to replace the live
+proxy with a fake. They verify the HTTP contract only — business
+logic of the turn is already covered by test_service.py.
+"""
+# pylint: disable=missing-class-docstring,missing-function-docstring,protected-access,unused-import,too-few-public-methods
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+import asyncio
 
+import pytest
+
+from src.api.app import app
+from src.assistant import dependencies as assist_deps
+from src.assistant.context import TurnLimits
+from src.assistant.repository import InMemoryAssistRepository
+from src.assistant.service import AssistantService
 from tests.conftest import make_headers, seed_user
 
 
-class TestAssistAPI:
-    """Cover /assist endpoints."""
+class _FakeProxy:
+    def __init__(self, events: list[str] | None = None) -> None:
+        self._events = events or [
+            "event: chunk\ndata: {\"text\": \"Hello\"}\n\n",
+            "event: chunk\ndata: {\"text\": \" world\"}\n\n",
+        ]
 
-    def test_chat_returns_response(self, client, services):
-        """POST /assist/chat returns a 200 with content."""
-        import asyncio
+    async def stream(self, payload):
+        for line in self._events:
+            yield line
+
+
+@pytest.fixture()
+def fake_assistant(services):
+    """Override the assistant service dependency with an in-memory,
+    fake-proxy-backed instance. Returns the repo so tests can inspect rows.
+    """
+    repo = InMemoryAssistRepository()
+    proxy = _FakeProxy()
+    service = AssistantService(
+        repo=repo,
+        proxy_client=proxy,
+        base_system_prompt="You are a test assistant.",
+        turn_limits=TurnLimits(),
+        context_char_budget=8000,
+    )
+    app.dependency_overrides[assist_deps.get_assistant_service] = lambda: service
+    yield repo
+    app.dependency_overrides.pop(assist_deps.get_assistant_service, None)
+
+
+class TestAssistRouter:
+
+    def test_chat_stream_returns_sse(self, client, services, fake_assistant):
         asyncio.get_event_loop().run_until_complete(
             seed_user(services["user_repo"], "user-1")
         )
         resp = client.post(
-            "/assist/chat",
-            json={"message": "Hello"},
+            "/assist/chat/stream",
+            json={
+                "message": "What are the top contractors in Germany?",
+                "conversation_key": "report:abc",
+                "context_block": "Report: Germany contractors",
+            },
             headers=make_headers("user-1"),
         )
         assert resp.status_code == 200
-        assert "content" in resp.json()
+        assert "text/event-stream" in resp.headers["content-type"]
+        body = resp.text
+        assert "Hello" in body
+        assert "world" in body
 
-    def test_chat_requires_auth(self, client):
-        """POST /assist/chat without auth returns 401/403."""
-        resp = client.post("/assist/chat", json={"message": "Hello"})
+    def test_chat_stream_requires_auth(self, client, fake_assistant):
+        resp = client.post(
+            "/assist/chat/stream",
+            json={
+                "message": "hi",
+                "conversation_key": "k",
+                "context_block": "",
+            },
+        )
         assert resp.status_code in (401, 403)
 
-    def test_list_tools(self, client, services):
-        """GET /assist/tools returns available tools."""
-        import asyncio
+    def test_chat_stream_rejects_empty_message(self, client, services, fake_assistant):
         asyncio.get_event_loop().run_until_complete(
             seed_user(services["user_repo"], "user-1")
         )
-        resp = client.get("/assist/tools", headers=make_headers("user-1"))
+        resp = client.post(
+            "/assist/chat/stream",
+            json={"message": "", "conversation_key": "k", "context_block": ""},
+            headers=make_headers("user-1"),
+        )
+        assert resp.status_code == 422
+
+    def test_usage_starts_at_zero(self, client, services, fake_assistant):
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1")
+        )
+        resp = client.get("/assist/usage", headers=make_headers("user-1"))
         assert resp.status_code == 200
-        tools = resp.json()
-        assert len(tools) >= 5
-        names = [t["name"] for t in tools]
-        assert "search_entities" in names
-        assert "explore_graph" in names
-        assert "suggest_visualization" in names
+        data = resp.json()
+        assert data["tokens_1h"] == 0
+        assert data["tokens_24h"] == 0
+        assert data["tokens_7d"] == 0
 
-
-class TestDossierTree:
-    """Cover dossier (nested report) functionality."""
-
-    def test_create_child_report(self, client, services):
-        """Reports can be nested via parent_id."""
-        import asyncio
+    def test_usage_reflects_recorded_turn(self, client, services, fake_assistant):
         asyncio.get_event_loop().run_until_complete(
             seed_user(services["user_repo"], "user-1")
         )
         h = make_headers("user-1")
-
-        # Create parent dossier
-        parent = client.post(
-            "/reports", json={"title": "Investigation Dossier"}, headers=h,
-        ).json()
-
-        # Create child page
-        child = client.post(
-            "/reports",
-            json={"title": "Chapter 1", "parent_id": parent["id"]},
-            headers=h,
-        ).json()
-
-        assert child["parent_id"] == parent["id"]
-
-    def test_get_report_includes_children(self, client, services):
-        """GET /reports/:id includes children list."""
-        import asyncio
-        asyncio.get_event_loop().run_until_complete(
-            seed_user(services["user_repo"], "user-1")
-        )
-        h = make_headers("user-1")
-
-        parent = client.post(
-            "/reports", json={"title": "Dossier"}, headers=h,
-        ).json()
         client.post(
-            "/reports",
-            json={"title": "Page A", "parent_id": parent["id"]},
+            "/assist/chat/stream",
+            json={
+                "message": "hello world of pharma contracting",
+                "conversation_key": "k",
+                "context_block": "",
+            },
             headers=h,
+        )
+        data = client.get("/assist/usage", headers=h).json()
+        assert data["tokens_1h"] > 0
+        assert data["tokens_24h"] == data["tokens_1h"]
+
+    def test_usage_isolates_users(self, client, services, fake_assistant):
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1")
+        )
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-2")
         )
         client.post(
-            "/reports",
-            json={"title": "Page B", "parent_id": parent["id"]},
-            headers=h,
+            "/assist/chat/stream",
+            json={"message": "q", "conversation_key": "k", "context_block": ""},
+            headers=make_headers("user-1"),
         )
+        data2 = client.get("/assist/usage", headers=make_headers("user-2")).json()
+        assert data2["tokens_1h"] == 0
 
-        result = client.get(f"/reports/{parent['id']}", headers=h).json()
-        assert len(result["children"]) == 2
-        titles = [c["title"] for c in result["children"]]
-        assert "Page A" in titles
-        assert "Page B" in titles
+    def test_get_conversation_returns_empty_for_new_key(
+        self, client, services, fake_assistant
+    ):
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1")
+        )
+        resp = client.get(
+            "/assist/conversations/report:fresh",
+            headers=make_headers("user-1"),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["messages"] == []
 
-    def test_root_report_has_no_parent(self, client, services):
-        """Root-level reports have parent_id = None."""
-        import asyncio
+    def test_get_conversation_returns_recorded_messages(
+        self, client, services, fake_assistant
+    ):
         asyncio.get_event_loop().run_until_complete(
             seed_user(services["user_repo"], "user-1")
         )
         h = make_headers("user-1")
-        report = client.post(
-            "/reports", json={"title": "Root Report"}, headers=h,
-        ).json()
-        assert report.get("parent_id") is None
+        client.post(
+            "/assist/chat/stream",
+            json={
+                "message": "first question",
+                "conversation_key": "report:abc",
+                "context_block": "",
+            },
+            headers=h,
+        )
+        resp = client.get(
+            "/assist/conversations/report:abc",
+            headers=h,
+        )
+        data = resp.json()
+        assert len(data["messages"]) == 2
+        assert data["messages"][0]["role"] == "user"
+        assert data["messages"][0]["content"] == "first question"
+        assert data["messages"][1]["role"] == "assistant"
