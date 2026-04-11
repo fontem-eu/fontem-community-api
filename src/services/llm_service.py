@@ -192,7 +192,7 @@ class LLMService:
         except (httpx.ConnectError, httpx.TimeoutException):
             return None  # Proxy unreachable — fall back to API
 
-    async def chat(
+    async def chat(  # NOSONAR S3776: tool-use loop with fallback branches
         self,
         user_message: str,
         history: list[dict] | None = None,

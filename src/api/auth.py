@@ -23,7 +23,7 @@ async def get_current_user(
     # cleanup AFTER response, which created a write-then-read race: clients
     # received 201 from POSTs while the rows were still uncommitted, and a
     # quick follow-up GET would see 0 rows ~10% of the time.
-    _session=Depends(get_db_session, scope="function"),
+    _session=Depends(get_db_session, scope="function"),  # NOSONAR S930: scope= is a real FastAPI arg (added 2024)
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> User:
     token = credentials.credentials

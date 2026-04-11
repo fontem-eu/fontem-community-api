@@ -202,7 +202,7 @@ def _issue_jwt(user: User) -> TokenResponse:
 async def register(
     body: RegisterRequest,
     # See gmr-community-api/src/api/auth.py for why scope="function" matters.
-    _session=Depends(get_db_session, scope="function"),
+    _session=Depends(get_db_session, scope="function"),  # NOSONAR S930: scope= is a real FastAPI arg (added 2024)
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> TokenResponse:
     """Register a new local account."""
@@ -228,7 +228,7 @@ async def register(
 async def login(
     body: LoginRequest,
     # See gmr-community-api/src/api/auth.py for why scope="function" matters.
-    _session=Depends(get_db_session, scope="function"),
+    _session=Depends(get_db_session, scope="function"),  # NOSONAR S930: scope= is a real FastAPI arg (added 2024)
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> TokenResponse:
     """Login with email + password."""
