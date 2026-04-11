@@ -201,7 +201,8 @@ def _issue_jwt(user: User) -> TokenResponse:
 @router.post("/register", response_model=TokenResponse, status_code=201)
 async def register(
     body: RegisterRequest,
-    _session=Depends(get_db_session),
+    # See gmr-community-api/src/api/auth.py for why scope="function" matters.
+    _session=Depends(get_db_session, scope="function"),
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> TokenResponse:
     """Register a new local account."""
@@ -226,7 +227,8 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
-    _session=Depends(get_db_session),
+    # See gmr-community-api/src/api/auth.py for why scope="function" matters.
+    _session=Depends(get_db_session, scope="function"),
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> TokenResponse:
     """Login with email + password."""
