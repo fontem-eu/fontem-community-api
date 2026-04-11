@@ -26,7 +26,7 @@ spec:
             - name: DATABASE_URL
               value: "postgresql+asyncpg://postgres:gmr-pg-2026@postgresql:5432/gmr_app"
             - name: CLAUDE_PROXY_URL
-              value: "http://192.168.1.114:8090"
+              value: "http://claude-proxy.gmr.svc.cluster.local:8090"
           livenessProbe:
             httpGet:
               path: /health
