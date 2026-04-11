@@ -54,27 +54,32 @@ class TestParseSSEUsage:
     def test_none_on_unrelated_event(self):
         assert parse_sse_usage("chunk", '{"text": "hi"}') is None
 
-    def test_parses_anthropic_usage_event(self):
-        # Actual shape Anthropic emits on message_stop
-        payload = '{"type": "message_stop", "usage": {"input_tokens": 123, "output_tokens": 45}}'
-        usage = parse_sse_usage("message_stop", payload)
+    def test_parses_proxy_usage_event(self):
+        # Shape emitted by claude-proxy.py when it reads Claude CLI's
+        # `result` event: event: usage\ndata: {input_tokens, output_tokens}
+        payload = '{"input_tokens": 123, "output_tokens": 45}'
+        usage = parse_sse_usage("usage", payload)
         assert usage is not None
         assert usage.input_tokens == 123
         assert usage.output_tokens == 45
 
     def test_none_on_malformed_json(self):
-        assert parse_sse_usage("message_stop", "{not json") is None
-
-    def test_none_when_usage_missing(self):
-        assert parse_sse_usage("message_stop", '{"type": "message_stop"}') is None
+        assert parse_sse_usage("usage", "{not json") is None
 
     def test_none_when_fields_missing(self):
-        assert parse_sse_usage("message_stop", '{"usage": {"input_tokens": 5}}') is None
+        assert parse_sse_usage("usage", '{"input_tokens": 5}') is None
+
+    def test_none_when_negative(self):
+        assert parse_sse_usage("usage", '{"input_tokens": -1, "output_tokens": 5}') is None
 
     def test_zero_counts_are_valid(self):
-        payload = '{"usage": {"input_tokens": 0, "output_tokens": 0}}'
-        usage = parse_sse_usage("message_stop", payload)
+        payload = '{"input_tokens": 0, "output_tokens": 0}'
+        usage = parse_sse_usage("usage", payload)
         assert usage == TokenUsage(input_tokens=0, output_tokens=0)
+
+    def test_none_on_status_event(self):
+        # Status events with their own payload must not be confused for usage
+        assert parse_sse_usage("status", '{"phase": "tool_use"}') is None
 
 
 # ── total_tokens ───────────────────────────────────────────────

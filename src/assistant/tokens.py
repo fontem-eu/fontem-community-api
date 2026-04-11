@@ -1,13 +1,19 @@
 """Token estimation and SSE usage parsing.
 
 We care about two things:
-  * Estimating input tokens **before** a request, so we can charge a
-    user's budget and log the cost of every prompt. The estimate does
-    not need to match the LLM's tokenizer byte-for-byte — word-count-
-    with-a-fudge-factor is good enough for billing at this stage.
-  * Parsing the `usage` object from an Anthropic-style SSE event, if
-    the proxy ever forwards it. When it doesn't, callers fall back to
-    estimate_tokens on the streamed text.
+  * Estimating input tokens **before** a request, as a fallback when
+    the proxy has not yet forwarded the real count (e.g. if the stream
+    is cancelled mid-flight).
+  * Parsing the ``event: usage`` block the claude-proxy emits at the
+    end of each stream. The proxy extracts ``input_tokens`` and
+    ``output_tokens`` from Claude CLI's ``result`` event and forwards
+    them as a structured SSE event in the shape::
+
+        event: usage
+        data: {"input_tokens": 123, "output_tokens": 45}
+
+    This is the source of truth for per-user billing. Estimates only
+    kick in when the proxy didn't get a chance to forward the event.
 """
 from __future__ import annotations
 
@@ -42,23 +48,26 @@ def estimate_tokens(text: str | None) -> int:
 
 
 def parse_sse_usage(event: str, data: str) -> TokenUsage | None:
-    """Pull a ``TokenUsage`` out of an Anthropic-style SSE event.
+    """Pull a ``TokenUsage`` out of a ``event: usage`` SSE block.
 
-    Returns None if the event isn't a usage-bearing one, the payload
-    isn't JSON, or the required fields are missing. Never raises.
+    The proxy emits this once per request, at the end of the stream,
+    with the real token counts extracted from Claude CLI's ``result``
+    event. Returns ``None`` for any other event, any non-JSON payload,
+    or missing/invalid fields. Never raises.
     """
-    if event not in {"message_stop", "message_delta"}:
+    if event != "usage":
         return None
     try:
         payload = json.loads(data)
     except (ValueError, TypeError):
         return None
-    usage = payload.get("usage") if isinstance(payload, dict) else None
-    if not isinstance(usage, dict):
+    if not isinstance(payload, dict):
         return None
-    inp = usage.get("input_tokens")
-    out = usage.get("output_tokens")
+    inp = payload.get("input_tokens")
+    out = payload.get("output_tokens")
     if not isinstance(inp, int) or not isinstance(out, int):
+        return None
+    if inp < 0 or out < 0:
         return None
     return TokenUsage(input_tokens=inp, output_tokens=out)
 

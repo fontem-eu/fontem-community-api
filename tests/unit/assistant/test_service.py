@@ -176,7 +176,7 @@ class TestTurn:
     async def test_real_usage_from_sse_overrides_estimate(self):
         proxy = FakeProxyClient(scripted_events=[
             "event: chunk\ndata: {\"text\": \"Hi\"}\n\n",
-            'event: message_stop\ndata: {"usage": {"input_tokens": 100, "output_tokens": 50}}\n\n',
+            'event: usage\ndata: {"input_tokens": 100, "output_tokens": 50}\n\n',
             "event: done\ndata: {}\n\n",
         ])
         service = _make_service(proxy)
@@ -190,6 +190,50 @@ class TestTurn:
         msgs = await service._repo.list_messages(conv.id)  # pylint: disable=protected-access
         assert msgs[0].tokens_in == 100
         assert msgs[1].tokens_out == 50
+
+    async def test_realistic_proxy_stream_all_events(self):
+        # Mirrors the actual claude-proxy.py event sequence: status at start,
+        # tool_use status updates as Claude calls MCP tools, chunks with the
+        # text response, a final usage event with real token counts, and a
+        # done marker. All must pass through to the caller and the assistant
+        # row must carry the real token counts.
+        events = [
+            'event: status\ndata: {"phase": "connecting", "detail": "Starting..."}\n\n',
+            'event: status\ndata: {"phase": "thinking", "detail": "Processing"}\n\n',
+            'event: status\ndata: {"phase": "tool_use", "tool": "mcp__gmr__search_entities", "detail": "Searching entities"}\n\n',
+            'event: chunk\ndata: {"text": "Found "}\n\n',
+            'event: chunk\ndata: {"text": "VINCI with 42 contracts."}\n\n',
+            'event: usage\ndata: {"input_tokens": 250, "output_tokens": 18}\n\n',
+            'event: done\ndata: {"done": true}\n\n',
+        ]
+        proxy = FakeProxyClient(scripted_events=events)
+        service = _make_service(proxy)
+
+        relayed = []
+        async for line in service.turn(
+            ChatRequest(user_id="u1", conversation_key="k", message="search VINCI", context_block="")
+        ):
+            relayed.append(line)
+
+        # The full sequence must reach the caller (frontend needs status events for UX)
+        joined = "".join(relayed)
+        assert "connecting" in joined
+        assert "tool_use" in joined
+        assert "mcp__gmr__search_entities" in joined
+        assert "Found " in joined
+        assert "42 contracts" in joined
+        assert "done" in joined
+
+        # The assistant row must carry the accumulated text and the REAL token counts
+        conv = await service._repo.find_or_create_conversation(  # pylint: disable=protected-access
+            "u1", "k"
+        )
+        msgs = await service._repo.list_messages(conv.id)  # pylint: disable=protected-access
+        assert len(msgs) == 2
+        assert msgs[1].role == "assistant"
+        assert "VINCI" in msgs[1].content
+        assert msgs[1].tokens_out == 18  # real, not estimated
+        assert msgs[0].tokens_in == 250   # reconciled from usage event
 
     async def test_proxy_error_still_records_user_row(self):
         class ErroringProxy:
