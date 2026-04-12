@@ -74,14 +74,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ))
         await engine.dispose()
 
-        # Wire up dishka container — single source of truth for all DI
-        container = make_container(db_url)
-        setup_dishka(container, app)
-
     yield
 
 
 app = FastAPI(title="GMR Community API", version="0.1.0", lifespan=lifespan)
+
+# Wire up dishka container — must happen before the app starts, not inside
+# the lifespan (Starlette forbids adding middleware after startup).
+_db_url = os.environ.get("DATABASE_URL")
+if _db_url:
+    _container = make_container(_db_url)
+    setup_dishka(_container, app)
 
 # CORS — allow all for development
 app.add_middleware(
