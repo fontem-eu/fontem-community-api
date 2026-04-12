@@ -26,7 +26,6 @@ def _stable_uuid(raw_id: str) -> str:
         return raw_id  # already a valid UUID
     except ValueError:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, raw_id))
-from src.api.dependencies import get_user_repo
 
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
 from src.infra.memory.mem_report_repo import InMemoryReportRepository
@@ -94,9 +93,6 @@ def client(services):
     from tests.dishka_fixtures import make_test_container
     from dishka.integrations.fastapi import setup_dishka
 
-    # Legacy override for any code still using Depends(get_user_repo)
-    app.dependency_overrides[get_user_repo] = lambda: services["user_repo"]
-
     # Reset middleware stack so setup_dishka can add its middleware
     app.middleware_stack = None
 
@@ -106,7 +102,6 @@ def client(services):
     with TestClient(app) as c:
         yield c
 
-    app.dependency_overrides.clear()
     app.middleware_stack = None
 
 

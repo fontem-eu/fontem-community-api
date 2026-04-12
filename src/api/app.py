@@ -13,8 +13,6 @@ from dishka.integrations.fastapi import setup_dishka
 
 from src.api.routers import auth, groups, issues, moderation, reports, sharing, users
 from src.assistant import router as assistant_router
-from src.api import dependencies
-from src.api.dependencies import configure_postgres
 from src.api.di import make_container
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
@@ -24,7 +22,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize PostgreSQL repos if DATABASE_URL is set
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
-        configure_postgres(database_url=db_url)
         # Auto-migrate: ensure all columns exist
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text

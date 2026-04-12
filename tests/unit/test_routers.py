@@ -10,8 +10,6 @@ import asyncio
 import pytest
 from tests.conftest import make_headers, seed_user, _stable_uuid
 
-from src.api.dependencies import get_permission_repo
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -126,48 +124,28 @@ class TestSectionVersions:
 # Sharing router
 # ---------------------------------------------------------------------------
 
-@pytest.fixture()
-def sharing_client(services):
-    """Client with permission_repo override added (sharing router needs it)."""
-    from src.api.app import app
-    from src.api.dependencies import (
-        get_user_repo, get_report_service, get_issue_service,
-        get_moderation_service, get_group_repo, get_permission_service,
-        get_permission_repo,
-    )
-    app.dependency_overrides[get_user_repo] = lambda: services["user_repo"]
-    app.dependency_overrides[get_report_service] = lambda: services["report_svc"]
-    app.dependency_overrides[get_issue_service] = lambda: services["issue_svc"]
-    app.dependency_overrides[get_moderation_service] = lambda: services["mod_svc"]
-    app.dependency_overrides[get_group_repo] = lambda: services["group_repo"]
-    app.dependency_overrides[get_permission_service] = lambda: services["perm_svc"]
-    app.dependency_overrides[get_permission_repo] = lambda: services["permission_repo"]
-
-    from starlette.testclient import TestClient
-    with TestClient(app) as c:
-        yield c
-
-    app.dependency_overrides.clear()
+# client removed — the main `client` fixture (conftest.py) now
+# handles dishka injection for all routers including sharing.
 
 
 class TestSharingAccess:
     """Tests for /reports/:id/access endpoints."""
 
-    def test_list_access_empty(self, sharing_client, services):
+    def test_list_access_empty(self, client, services):
         _seed(services)
         h = make_headers("user-1")
-        rid = _create_report(sharing_client, h)
-        resp = sharing_client.get(f"/reports/{rid}/access", headers=h)
+        rid = _create_report(client, h)
+        resp = client.get(f"/reports/{rid}/access", headers=h)
         assert resp.status_code == 200
         # The owner grant is set by report creation
         assert isinstance(resp.json(), list)
 
-    def test_grant_user_access(self, sharing_client, services):
+    def test_grant_user_access(self, client, services):
         _seed(services)
         _seed(services, "user-2")
         h = make_headers("user-1")
-        rid = _create_report(sharing_client, h)
-        resp = sharing_client.post(
+        rid = _create_report(client, h)
+        resp = client.post(
             f"/reports/{rid}/access",
             json={"user_id": _stable_uuid("user-2"), "level": "editor"},
             headers=h,
@@ -176,48 +154,48 @@ class TestSharingAccess:
         assert resp.json()["status"] == "ok"
 
         # Verify the grant shows up in list
-        grants = sharing_client.get(f"/reports/{rid}/access", headers=h).json()
+        grants = client.get(f"/reports/{rid}/access", headers=h).json()
         user_ids = [g.get("user_id") for g in grants]
         assert _stable_uuid("user-2") in user_ids
 
-    def test_grant_group_access(self, sharing_client, services):
+    def test_grant_group_access(self, client, services):
         _seed(services)
         h = make_headers("user-1")
-        rid = _create_report(sharing_client, h)
+        rid = _create_report(client, h)
         # Create a group first
-        grp = sharing_client.post("/groups", json={"name": "Team A"}, headers=h).json()
+        grp = client.post("/groups", json={"name": "Team A"}, headers=h).json()
         gid = grp["id"]
-        resp = sharing_client.post(
+        resp = client.post(
             f"/reports/{rid}/access",
             json={"group_id": gid, "level": "viewer"},
             headers=h,
         )
         assert resp.status_code == 201
 
-    def test_revoke_access(self, sharing_client, services):
+    def test_revoke_access(self, client, services):
         _seed(services)
         _seed(services, "user-2")
         h = make_headers("user-1")
-        rid = _create_report(sharing_client, h)
-        sharing_client.post(
+        rid = _create_report(client, h)
+        client.post(
             f"/reports/{rid}/access",
             json={"user_id": _stable_uuid("user-2"), "level": "editor"},
             headers=h,
         )
-        grants = sharing_client.get(f"/reports/{rid}/access", headers=h).json()
+        grants = client.get(f"/reports/{rid}/access", headers=h).json()
         user2_grant = [g for g in grants if g.get("user_id") == _stable_uuid("user-2")]
         assert len(user2_grant) == 1
         access_id = user2_grant[0]["id"]
-        resp = sharing_client.delete(f"/reports/{rid}/access/{access_id}", headers=h)
+        resp = client.delete(f"/reports/{rid}/access/{access_id}", headers=h)
         assert resp.status_code == 204
 
-    def test_non_owner_cannot_list_access(self, sharing_client, services):
+    def test_non_owner_cannot_list_access(self, client, services):
         _seed(services)
         _seed(services, "user-2")
         h_owner = make_headers("user-1")
         h_other = make_headers("user-2")
-        rid = _create_report(sharing_client, h_owner)
-        resp = sharing_client.get(f"/reports/{rid}/access", headers=h_other)
+        rid = _create_report(client, h_owner)
+        resp = client.get(f"/reports/{rid}/access", headers=h_other)
         assert resp.status_code == 403
 
 
