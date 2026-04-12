@@ -4,6 +4,7 @@ from src.domain.report import Report, Section
 from src.repositories.report_repository import ReportRepository
 from src.services.exceptions import Conflict, NotFound
 from src.services.permission_service import PermissionService
+from src.services.sanitize import sanitize_html, sanitize_text
 
 DEFAULT_LOCK_TTL = 300  # 5 minutes
 
@@ -22,7 +23,12 @@ class ReportService:
         abstract: str | None = None,
         parent_id: str | None = None,
     ) -> Report:
-        report = Report(title=title, abstract=abstract, parent_id=parent_id, created_by=user_id)
+        report = Report(
+            title=sanitize_text(title),
+            abstract=sanitize_text(abstract) if abstract else abstract,
+            parent_id=parent_id,
+            created_by=user_id,
+        )
         report = await self._reports.create(report)
         await self._perms.grant_access(report.id, user_id, "owner")
         return report
@@ -47,9 +53,9 @@ class ReportService:
         if report is None:
             raise NotFound(f"Report {report_id} not found")
         if title is not None:
-            report.title = title
+            report.title = sanitize_text(title)
         if abstract is not None:
-            report.abstract = abstract
+            report.abstract = sanitize_text(abstract)
         if visibility is not None:
             report.visibility = visibility
         report = await self._reports.update(report)
@@ -61,7 +67,7 @@ class ReportService:
 
     async def add_section(self, user_id: str, report_id: str, content: dict) -> Section:
         await self._perms.require(user_id, report_id, "editor")
-        section = Section(content_json=content)
+        section = Section(content_json=_sanitize_section(content))
         return await self._reports.add_section(report_id, section)
 
     async def edit_section(self, user_id: str, section_id: str, content: dict) -> Section:
@@ -75,7 +81,7 @@ class ReportService:
             raise Conflict(f"Section {section_id} is locked by {holder}")
         # Save version before editing
         await self._reports.save_version(section_id, section.content_json, user_id)
-        section.content_json = content
+        section.content_json = _sanitize_section(content)
         return await self._reports.update_section(section)
 
     async def delete_section(self, user_id: str, section_id: str) -> None:
@@ -107,3 +113,10 @@ class ReportService:
     async def list_children(self, parent_id: str) -> list[Report]:
         """List child reports (dossier sub-pages)."""
         return await self._reports.list_children(parent_id)
+
+
+def _sanitize_section(content: dict) -> dict:
+    """Sanitize the HTML inside a section content dict."""
+    if "html" in content:
+        content = {**content, "html": sanitize_html(content["html"])}
+    return content
