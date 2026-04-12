@@ -9,12 +9,12 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import httpx
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt as jose_jwt
 from pydantic import BaseModel, EmailStr
 
 from src.api.auth import JWT_ALGORITHM, JWT_SECRET
-from src.api.dependencies import get_db_session, get_user_repo
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 
@@ -92,9 +92,10 @@ async def _verify_google_token(credential: str) -> dict:
 
 
 @router.post("/google", response_model=TokenResponse)
+@inject
 async def google_login(
     body: GoogleTokenRequest,
-    user_repo: UserRepository = Depends(get_user_repo),
+    user_repo: FromDishka[UserRepository],
 ) -> TokenResponse:
     """Exchange a Google ID token for a GMR session JWT."""
     payload = await _verify_google_token(body.credential)
@@ -199,11 +200,10 @@ def _issue_jwt(user: User) -> TokenResponse:
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
+@inject
 async def register(
     body: RegisterRequest,
-    # See gmr-community-api/src/api/auth.py for why scope="function" matters.
-    _session=Depends(get_db_session, scope="function"),  # NOSONAR S930: scope= is a real FastAPI arg (added 2024)
-    user_repo: UserRepository = Depends(get_user_repo),
+    user_repo: FromDishka[UserRepository],
 ) -> TokenResponse:
     """Register a new local account."""
     if len(body.password) < 8:
@@ -225,11 +225,10 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
+@inject
 async def login(
     body: LoginRequest,
-    # See gmr-community-api/src/api/auth.py for why scope="function" matters.
-    _session=Depends(get_db_session, scope="function"),  # NOSONAR S930: scope= is a real FastAPI arg (added 2024)
-    user_repo: UserRepository = Depends(get_user_repo),
+    user_repo: FromDishka[UserRepository],
 ) -> TokenResponse:
     """Login with email + password."""
     user = await user_repo.get_by_email(body.email)

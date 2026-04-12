@@ -9,10 +9,13 @@ from fastapi.responses import JSONResponse
 
 import os
 
+from dishka.integrations.fastapi import setup_dishka
+
 from src.api.routers import auth, groups, issues, moderation, reports, sharing, users
 from src.assistant import router as assistant_router
 from src.api import dependencies
 from src.api.dependencies import configure_postgres
+from src.api.di import make_container
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
 
@@ -73,6 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "ON assist_messages (conversation_id, created_at)"
             ))
         await engine.dispose()
+
+        # Wire up dishka container (coexists with old DI during migration)
+        container = make_container(db_url)
+        setup_dishka(container, app)
+
     yield
 
 

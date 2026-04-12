@@ -120,6 +120,11 @@ def dishka_client(services):
     app.dependency_overrides[get_permission_service] = lambda: services["perm_svc"]
     app.dependency_overrides[get_permission_repo] = lambda: services["permission_repo"]
 
+    # Reset the middleware stack so setup_dishka can add its middleware.
+    # This is necessary because a prior test's TestClient may have built
+    # the stack, and Starlette refuses middleware additions afterward.
+    app.middleware_stack = None
+
     container = make_test_container(services)
     setup_dishka(container, app)
 
@@ -127,9 +132,8 @@ def dishka_client(services):
         yield c
 
     app.dependency_overrides.clear()
-    # dishka teardown: remove middleware added by setup_dishka
+    # Tear down dishka state so the next test gets a clean app
     app.middleware_stack = None
-    app.router.lifespan_context = app.router.lifespan_context  # reset
 
 
 async def seed_user(user_repo: InMemoryUserRepository, user_id: str,
