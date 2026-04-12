@@ -11,8 +11,6 @@ import asyncio
 
 import pytest
 
-from src.api.app import app
-from src.assistant import dependencies as assist_deps
 from src.assistant.context import TurnLimits
 from src.assistant.repository import InMemoryAssistRepository
 from src.assistant.service import AssistantService
@@ -31,10 +29,12 @@ class _FakeProxy:
             yield line
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def fake_assistant(services):
-    """Override the assistant service dependency with an in-memory,
-    fake-proxy-backed instance. Returns the repo so tests can inspect rows.
+    """Inject a fake-proxy-backed AssistantService into the services dict.
+
+    The dishka InMemoryProvider picks this up and provides it via
+    FromDishka[AssistantService] to the router endpoints.
     """
     repo = InMemoryAssistRepository()
     proxy = _FakeProxy()
@@ -45,9 +45,9 @@ def fake_assistant(services):
         turn_limits=TurnLimits(),
         context_char_budget=8000,
     )
-    app.dependency_overrides[assist_deps.get_assistant_service] = lambda: service
+    services["assistant_service"] = service
+    services["assist_repo"] = repo
     yield repo
-    app.dependency_overrides.pop(assist_deps.get_assistant_service, None)
 
 
 class TestAssistRouter:

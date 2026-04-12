@@ -90,6 +90,16 @@ class AssistRepository(ABC):
         ...
 
     @abstractmethod
+    async def commit(self) -> None:
+        """Flush pending writes to the underlying store.
+
+        In-memory repos treat this as a no-op. The Postgres repo
+        delegates to ``session.commit()``. Callers (the service) invoke
+        this at the end of a streaming turn so data is persisted before
+        the response finishes.
+        """
+
+    @abstractmethod
     async def usage_history_since(
         self, user_id: str, since: datetime
     ) -> list[DailyUsage]:
@@ -176,6 +186,9 @@ class InMemoryAssistRepository(AssistRepository):
             Turn(role=m.role, content=m.content)
             for m in await self.list_messages(conversation_id)
         ]
+
+    async def commit(self) -> None:
+        pass  # In-memory: writes are immediate
 
     async def tokens_used_since(self, user_id: str, since: datetime) -> int:
         total = 0

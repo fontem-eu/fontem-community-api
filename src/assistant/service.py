@@ -179,6 +179,11 @@ class AssistantService:
                     conv.id, real_usage.input_tokens
                 )
 
+        # Commit all writes so they survive regardless of how the
+        # HTTP framework manages the session lifecycle (e.g. streaming
+        # responses where framework cleanup may run too late).
+        await self._repo.commit()
+
         if errored and not assistant_buf:
             return
 

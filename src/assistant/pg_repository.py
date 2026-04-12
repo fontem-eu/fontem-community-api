@@ -109,6 +109,9 @@ class PgAssistRepository(AssistRepository):
         messages = await self.list_messages(conversation_id)
         return [Turn(role=m.role, content=m.content) for m in messages]
 
+    async def commit(self) -> None:
+        await self._session.commit()
+
     async def tokens_used_since(self, user_id: str, since: datetime) -> int:
         stmt = select(
             func.coalesce(

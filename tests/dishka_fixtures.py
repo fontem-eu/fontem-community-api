@@ -95,6 +95,10 @@ class InMemoryProvider(Provider):
     def assistant_service(
         self, repo: AssistRepository, proxy: ClaudeProxyClient,
     ) -> AssistantService:
+        # If a pre-built service was provided (e.g. with a fake proxy),
+        # use it instead of creating one.
+        if "assistant_service" in self._svc:
+            return self._svc["assistant_service"]
         return AssistantService(
             repo=repo,
             proxy_client=proxy,

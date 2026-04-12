@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
 from src.domain.user import User
-from src.assistant.dependencies import get_assistant_service
 from src.assistant.service import AssistantService, ChatRequest
 
 
@@ -74,10 +74,12 @@ class HistoryMessage(BaseModel):
 
 
 @router.post("/chat/stream")
+@inject
 async def chat_stream(
     body: AssistChatBody,
+    *,
+    service: FromDishka[AssistantService],
     user: User = Depends(get_current_user),
-    service: AssistantService = Depends(get_assistant_service),
 ) -> StreamingResponse:
     """Stream an assistant reply via SSE."""
     req = ChatRequest(
@@ -90,12 +92,6 @@ async def chat_stream(
     async def generator() -> AsyncGenerator[str, None]:
         async for line in service.turn(req):
             yield line
-        # Commit the session after streaming so persisted messages survive.
-        # The Pg repo holds its own session reference; commit it directly
-        # to guarantee the transaction is finalized before the response ends.
-        repo = service._repo  # pylint: disable=protected-access
-        if hasattr(repo, '_session'):
-            await repo._session.commit()
         yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(
@@ -110,9 +106,11 @@ async def chat_stream(
 
 
 @router.get("/usage", response_model=UsageResponse)
+@inject
 async def usage(
+    *,
+    service: FromDishka[AssistantService],
     user: User = Depends(get_current_user),
-    service: AssistantService = Depends(get_assistant_service),
 ) -> UsageResponse:
     """Return the current user's token consumption over rolling windows."""
     snapshot = await service.usage_for_user(user.id)
@@ -124,10 +122,12 @@ async def usage(
 
 
 @router.get("/usage-history", response_model=UsageHistoryResponse)
+@inject
 async def usage_history(
     days: int = Query(30, ge=1, le=365),
+    *,
+    service: FromDishka[AssistantService],
     user: User = Depends(get_current_user),
-    service: AssistantService = Depends(get_assistant_service),
 ) -> UsageHistoryResponse:
     """Return per-day token totals for the current user over the last N days."""
     rows = await service.usage_history_for_user(user.id, days=days)
@@ -145,10 +145,12 @@ async def usage_history(
 
 
 @router.get("/conversations/{conversation_key:path}")
+@inject
 async def get_conversation(
     conversation_key: str,
+    *,
+    service: FromDishka[AssistantService],
     user: User = Depends(get_current_user),
-    service: AssistantService = Depends(get_assistant_service),
 ) -> dict:
     """Return the full stored history for a conversation key, scoped to the user."""
     conv = await service._repo.find_or_create_conversation(  # pylint: disable=protected-access
