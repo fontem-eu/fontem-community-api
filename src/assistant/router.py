@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -42,12 +42,27 @@ class AssistChatBody(BaseModel):
 
 
 class UsageResponse(BaseModel):
+    """Rolling-window token totals for the current user."""
     tokens_1h: int
     tokens_24h: int
     tokens_7d: int
 
 
+class DailyUsagePoint(BaseModel):
+    """A single day's token totals in a usage-history response."""
+    date: str
+    tokens_in: int
+    tokens_out: int
+
+
+class UsageHistoryResponse(BaseModel):
+    """Per-day token consumption over the requested window."""
+    days: int
+    points: list[DailyUsagePoint]
+
+
 class HistoryMessage(BaseModel):
+    """A single persisted assistant/user message in a conversation history view."""
     role: str
     content: str
     created_at: str
@@ -99,6 +114,27 @@ async def usage(
         tokens_1h=snapshot.tokens_1h,
         tokens_24h=snapshot.tokens_24h,
         tokens_7d=snapshot.tokens_7d,
+    )
+
+
+@router.get("/usage-history", response_model=UsageHistoryResponse)
+async def usage_history(
+    days: int = Query(30, ge=1, le=365),
+    user: User = Depends(get_current_user),
+    service: AssistantService = Depends(get_assistant_service),
+) -> UsageHistoryResponse:
+    """Return per-day token totals for the current user over the last N days."""
+    rows = await service.usage_history_for_user(user.id, days=days)
+    return UsageHistoryResponse(
+        days=days,
+        points=[
+            DailyUsagePoint(
+                date=r.day.isoformat(),
+                tokens_in=r.tokens_in,
+                tokens_out=r.tokens_out,
+            )
+            for r in rows
+        ],
     )
 
 

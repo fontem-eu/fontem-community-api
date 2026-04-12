@@ -34,6 +34,32 @@ class TestAssistUsageEndpoint:
         assert resp.status_code in (401, 403)
 
 
+class TestAssistUsageHistoryEndpoint:
+
+    def test_fresh_user_has_empty_history(self, client, user_id):
+        h = make_headers(user_id)
+        resp = client.get("/assist/usage-history", headers=h)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["days"] == 30
+        assert data["points"] == []
+
+    def test_custom_days_param(self, client, user_id):
+        h = make_headers(user_id)
+        resp = client.get("/assist/usage-history?days=7", headers=h)
+        assert resp.status_code == 200
+        assert resp.json()["days"] == 7
+
+    def test_rejects_out_of_range_days(self, client, user_id):
+        h = make_headers(user_id)
+        assert client.get("/assist/usage-history?days=0", headers=h).status_code == 422
+        assert client.get("/assist/usage-history?days=500", headers=h).status_code == 422
+
+    def test_history_requires_auth(self, client):
+        resp = client.get("/assist/usage-history")
+        assert resp.status_code in (401, 403)
+
+
 class TestAssistConversationEndpoint:
 
     def test_fresh_conversation_key_returns_empty_messages(self, client, user_id):

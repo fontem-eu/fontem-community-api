@@ -31,7 +31,7 @@ from src.assistant.context import (
     build_system_prompt,
     truncate_history,
 )
-from src.assistant.repository import AssistRepository
+from src.assistant.repository import AssistRepository, DailyUsage
 from src.assistant.tokens import (
     TokenUsage,
     estimate_tokens,
@@ -220,6 +220,17 @@ class AssistantService:
             tokens_24h=tokens_24h,
             tokens_7d=tokens_7d,
         )
+
+    async def usage_history_for_user(
+        self,
+        user_id: str,
+        days: int,
+        now: datetime | None = None,
+    ) -> list[DailyUsage]:
+        """Per-day token totals for the last ``days`` days (ending now)."""
+        now = now or datetime.now(timezone.utc)
+        since = now - timedelta(days=days)
+        return await self._repo.usage_history_since(user_id, since)
 
 
 # ── SSE parsing helpers ───────────────────────────────────────

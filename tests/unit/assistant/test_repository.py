@@ -16,6 +16,7 @@ from src.assistant.context import Turn
 from src.assistant.repository import (
     AssistConversation,
     AssistMessage,
+    DailyUsage,
     InMemoryAssistRepository,
 )
 
@@ -188,6 +189,89 @@ class TestTokensUsedSince:
         )
         since = NOW - timedelta(hours=1)
         assert await repo.tokens_used_since("u1", since) == 42
+
+
+# ── usage_history_since ────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestUsageHistorySince:
+
+    async def test_empty_when_no_messages(self):
+        repo = InMemoryAssistRepository(now_provider=_clock())
+        result = await repo.usage_history_since("u1", NOW - timedelta(days=30))
+        assert result == []
+
+    async def test_groups_by_day_and_sums_in_out_separately(self):
+        repo = InMemoryAssistRepository(now_provider=_clock())
+        conv = await repo.find_or_create_conversation("u1", "k")
+        await repo.append_message(
+            conversation_id=conv.id, user_id="u1", role="user",
+            content="q1", tokens_in=10, tokens_out=None, model=None,
+        )
+        await repo.append_message(
+            conversation_id=conv.id, user_id="u1", role="assistant",
+            content="a1", tokens_in=None, tokens_out=20, model="x",
+        )
+        await repo.append_message(
+            conversation_id=conv.id, user_id="u1", role="user",
+            content="q2", tokens_in=5, tokens_out=None, model=None,
+        )
+
+        result = await repo.usage_history_since("u1", NOW - timedelta(days=30))
+        assert len(result) == 1
+        assert result[0].day == NOW.date()
+        assert result[0].tokens_in == 15
+        assert result[0].tokens_out == 20
+
+    async def test_splits_across_days_sorted_ascending(self):
+        day1_clock = _clock(NOW - timedelta(days=2))
+        repo = InMemoryAssistRepository(now_provider=day1_clock)
+        conv = await repo.find_or_create_conversation("u1", "k")
+        await repo.append_message(
+            conversation_id=conv.id, user_id="u1", role="user",
+            content="day1", tokens_in=100, tokens_out=None, model=None,
+        )
+        repo._now = _clock(NOW)  # pylint: disable=protected-access
+        await repo.append_message(
+            conversation_id=conv.id, user_id="u1", role="assistant",
+            content="today", tokens_in=None, tokens_out=50, model="x",
+        )
+
+        result = await repo.usage_history_since("u1", NOW - timedelta(days=7))
+        assert [r.day for r in result] == [(NOW - timedelta(days=2)).date(), NOW.date()]
+        assert result[0] == DailyUsage(
+            day=(NOW - timedelta(days=2)).date(), tokens_in=100, tokens_out=0,
+        )
+        assert result[1] == DailyUsage(
+            day=NOW.date(), tokens_in=0, tokens_out=50,
+        )
+
+    async def test_excludes_other_users(self):
+        repo = InMemoryAssistRepository(now_provider=_clock())
+        c1 = await repo.find_or_create_conversation("u1", "k")
+        c2 = await repo.find_or_create_conversation("u2", "k")
+        await repo.append_message(
+            conversation_id=c1.id, user_id="u1", role="user",
+            content="mine", tokens_in=10, tokens_out=None, model=None,
+        )
+        await repo.append_message(
+            conversation_id=c2.id, user_id="u2", role="user",
+            content="theirs", tokens_in=999, tokens_out=None, model=None,
+        )
+        result = await repo.usage_history_since("u1", NOW - timedelta(days=30))
+        assert len(result) == 1
+        assert result[0].tokens_in == 10
+
+    async def test_respects_since_cutoff(self):
+        old_clock = _clock(NOW - timedelta(days=40))
+        repo = InMemoryAssistRepository(now_provider=old_clock)
+        conv = await repo.find_or_create_conversation("u1", "k")
+        await repo.append_message(
+            conversation_id=conv.id, user_id="u1", role="user",
+            content="ancient", tokens_in=500, tokens_out=None, model=None,
+        )
+        result = await repo.usage_history_since("u1", NOW - timedelta(days=30))
+        assert result == []
 
 
 # ── to_history_turns (helper for history reconstruction) ───────

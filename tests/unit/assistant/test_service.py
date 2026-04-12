@@ -286,3 +286,44 @@ class TestUsageQuery:
         assert usage.tokens_1h > 0
         assert usage.tokens_24h == usage.tokens_1h
         assert usage.tokens_7d == usage.tokens_1h
+
+
+@pytest.mark.asyncio
+class TestUsageHistoryQuery:
+
+    async def test_empty_for_fresh_user(self):
+        service = _make_service()
+        history = await service.usage_history_for_user("ghost", days=30, now=NOW)
+        assert history == []
+
+    async def test_single_day_after_turn(self):
+        service = _make_service()
+        async for _ in service.turn(
+            ChatRequest(user_id="u1", conversation_key="k", message="hello", context_block="")
+        ):
+            pass
+        history = await service.usage_history_for_user("u1", days=30, now=NOW)
+        assert len(history) == 1
+        assert history[0].day == NOW.date()
+        assert history[0].tokens_in > 0
+        assert history[0].tokens_out > 0
+
+    async def test_days_param_limits_window(self):
+        # Write a row dated 10 days ago; a 7-day window must exclude it.
+        from datetime import timedelta  # pylint: disable=import-outside-toplevel
+        repo = InMemoryAssistRepository(now_provider=lambda: NOW - timedelta(days=10))
+        service = AssistantService(
+            repo=repo,
+            proxy_client=FakeProxyClient(),
+            base_system_prompt="x",
+            turn_limits=TurnLimits(),
+            context_char_budget=3000,
+        )
+        conv = await repo.find_or_create_conversation("u1", "k")
+        await repo.append_message(
+            conversation_id=conv.id, user_id="u1", role="user",
+            content="old", tokens_in=99, tokens_out=None, model=None,
+        )
+        assert await service.usage_history_for_user("u1", days=7, now=NOW) == []
+        longer = await service.usage_history_for_user("u1", days=30, now=NOW)
+        assert len(longer) == 1 and longer[0].tokens_in == 99

@@ -18,6 +18,7 @@ from src.assistant.repository import (
     AssistConversation,
     AssistMessage,
     AssistRepository,
+    DailyUsage,
 )
 
 
@@ -125,3 +126,28 @@ class PgAssistRepository(AssistRepository):
         )
         result = (await self._session.execute(stmt)).scalar_one()
         return int(result)
+
+    async def usage_history_since(
+        self, user_id: str, since: datetime
+    ) -> list[DailyUsage]:
+        day = func.date_trunc("day", AssistMessageModel.created_at).label("day")
+        stmt = (
+            select(
+                day,
+                func.coalesce(func.sum(AssistMessageModel.tokens_in), 0).label("tin"),
+                func.coalesce(func.sum(AssistMessageModel.tokens_out), 0).label("tout"),
+            )
+            .where(
+                and_(
+                    AssistMessageModel.user_id == user_id,
+                    AssistMessageModel.created_at >= since,
+                )
+            )
+            .group_by(day)
+            .order_by(day.asc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            DailyUsage(day=row.day.date(), tokens_in=int(row.tin), tokens_out=int(row.tout))
+            for row in rows
+        ]

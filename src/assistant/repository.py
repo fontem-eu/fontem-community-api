@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Callable
 from uuid import uuid4
 
@@ -18,6 +18,14 @@ from src.assistant.context import Turn
 
 
 # ── Data classes (wire format for the repository layer) ────────
+
+
+@dataclass(frozen=True)
+class DailyUsage:
+    """One day's worth of input/output token totals for a user."""
+    day: date
+    tokens_in: int
+    tokens_out: int
 
 
 @dataclass
@@ -80,6 +88,16 @@ class AssistRepository(ABC):
     @abstractmethod
     async def tokens_used_since(self, user_id: str, since: datetime) -> int:
         ...
+
+    @abstractmethod
+    async def usage_history_since(
+        self, user_id: str, since: datetime
+    ) -> list[DailyUsage]:
+        """Per-day input/output token totals for a user, at or after ``since``.
+
+        Days with no activity are omitted (callers can fill gaps). Results
+        are ordered by day ascending.
+        """
 
 
 # ── In-memory implementation (for unit tests + dev) ───────────
@@ -168,3 +186,18 @@ class InMemoryAssistRepository(AssistRepository):
                 continue
             total += (m.tokens_in or 0) + (m.tokens_out or 0)
         return total
+
+    async def usage_history_since(
+        self, user_id: str, since: datetime
+    ) -> list[DailyUsage]:
+        buckets: dict[date, list[int]] = {}
+        for m in self._messages:
+            if m.user_id != user_id or m.created_at < since:
+                continue
+            bucket = buckets.setdefault(m.created_at.date(), [0, 0])
+            bucket[0] += m.tokens_in or 0
+            bucket[1] += m.tokens_out or 0
+        return [
+            DailyUsage(day=d, tokens_in=v[0], tokens_out=v[1])
+            for d, v in sorted(buckets.items())
+        ]
