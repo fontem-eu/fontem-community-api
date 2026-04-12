@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
-from src.api.dependencies import get_db_session
+from src.api.dependencies import _request_session
 from src.domain.user import User
 from src.assistant.dependencies import get_assistant_service
 from src.assistant.service import AssistantService, ChatRequest
@@ -78,7 +78,6 @@ class HistoryMessage(BaseModel):
 async def chat_stream(
     body: AssistChatBody,
     user: User = Depends(get_current_user),
-    _session=Depends(get_db_session),
     service: AssistantService = Depends(get_assistant_service),
 ) -> StreamingResponse:
     """Stream an assistant reply via SSE."""
@@ -92,6 +91,12 @@ async def chat_stream(
     async def generator() -> AsyncGenerator[str, None]:
         async for line in service.turn(req):
             yield line
+        # Commit the session after streaming so persisted messages survive.
+        # The request-scoped get_db_session dependency may not run its cleanup
+        # until after the response is fully sent; commit explicitly here.
+        session = _request_session.get()
+        if session is not None:
+            await session.commit()
         yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(
