@@ -101,6 +101,37 @@ def client(services):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture()
+def dishka_client(services):
+    """TestClient with both dishka container AND old dependency_overrides.
+
+    Use during migration: newly migrated endpoints get FromDishka injection,
+    not-yet-migrated ones still use the old overrides.
+    """
+    from tests.dishka_fixtures import make_test_container
+    from dishka.integrations.fastapi import setup_dishka
+
+    # Old overrides for endpoints not yet on dishka
+    app.dependency_overrides[get_user_repo] = lambda: services["user_repo"]
+    app.dependency_overrides[get_report_service] = lambda: services["report_svc"]
+    app.dependency_overrides[get_issue_service] = lambda: services["issue_svc"]
+    app.dependency_overrides[get_moderation_service] = lambda: services["mod_svc"]
+    app.dependency_overrides[get_group_repo] = lambda: services["group_repo"]
+    app.dependency_overrides[get_permission_service] = lambda: services["perm_svc"]
+    app.dependency_overrides[get_permission_repo] = lambda: services["permission_repo"]
+
+    container = make_test_container(services)
+    setup_dishka(container, app)
+
+    with TestClient(app) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+    # dishka teardown: remove middleware added by setup_dishka
+    app.middleware_stack = None
+    app.router.lifespan_context = app.router.lifespan_context  # reset
+
+
 async def seed_user(user_repo: InMemoryUserRepository, user_id: str,
                     trust_level: str = "contributor",
                     roles: list[str] | None = None) -> User:

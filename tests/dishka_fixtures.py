@@ -1,0 +1,109 @@
+"""Dishka test infrastructure — InMemory providers for unit tests.
+
+Provides the same in-memory repos and services as the old
+``dependency_overrides`` approach, but through dishka's container so
+endpoints using ``FromDishka[T]`` get proper injection.
+
+The ``dishka_client`` fixture coexists with the old ``client`` fixture
+during the migration: old endpoints still use ``dependency_overrides``,
+newly migrated ones use dishka. Once all endpoints are migrated,
+``dependency_overrides`` can be removed entirely.
+"""
+from __future__ import annotations
+
+from dishka import Provider, Scope, provide, make_async_container
+from dishka.integrations.fastapi import setup_dishka
+
+from src.assistant.proxy_client import ClaudeProxyClient
+from src.assistant.repository import AssistRepository, InMemoryAssistRepository
+from src.assistant.service import AssistantService
+from src.assistant.context import TurnLimits
+from src.repositories.group_repository import GroupRepository
+from src.repositories.issue_repository import IssueRepository
+from src.repositories.moderation_repository import ModerationRepository
+from src.repositories.permission_repository import PermissionRepository
+from src.repositories.report_repository import ReportRepository
+from src.repositories.user_repository import UserRepository
+from src.services.issue_service import IssueService
+from src.services.moderation_service import ModerationService
+from src.services.permission_service import PermissionService
+from src.services.report_service import ReportService
+
+
+class InMemoryProvider(Provider):
+    """Wraps the ``services`` dict from conftest.py into dishka providers.
+
+    Usage::
+
+        provider = InMemoryProvider(services_dict)
+        container = make_async_container(provider)
+    """
+
+    def __init__(self, services: dict) -> None:
+        super().__init__()
+        self._svc = services
+
+    @provide(scope=Scope.REQUEST)
+    def user_repo(self) -> UserRepository:
+        return self._svc["user_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def group_repo(self) -> GroupRepository:
+        return self._svc["group_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def report_repo(self) -> ReportRepository:
+        return self._svc["report_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def permission_repo(self) -> PermissionRepository:
+        return self._svc["permission_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def issue_repo(self) -> IssueRepository:
+        return self._svc["issue_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def moderation_repo(self) -> ModerationRepository:
+        return self._svc["mod_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def assist_repo(self) -> AssistRepository:
+        return self._svc.get("assist_repo", InMemoryAssistRepository())
+
+    @provide(scope=Scope.REQUEST)
+    def permission_service(self) -> PermissionService:
+        return self._svc["perm_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def report_service(self) -> ReportService:
+        return self._svc["report_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def issue_service(self) -> IssueService:
+        return self._svc["issue_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def moderation_service(self) -> ModerationService:
+        return self._svc["mod_svc"]
+
+    @provide(scope=Scope.APP)
+    def proxy_client(self) -> ClaudeProxyClient:
+        return ClaudeProxyClient(url="http://localhost:9999")
+
+    @provide(scope=Scope.REQUEST)
+    def assistant_service(
+        self, repo: AssistRepository, proxy: ClaudeProxyClient,
+    ) -> AssistantService:
+        return AssistantService(
+            repo=repo,
+            proxy_client=proxy,
+            base_system_prompt="Test assistant.",
+            turn_limits=TurnLimits(max_turns=10, max_chars=5000),
+            context_char_budget=3000,
+        )
+
+
+def make_test_container(services: dict):
+    """Build a dishka container backed by in-memory repos."""
+    return make_async_container(InMemoryProvider(services))
