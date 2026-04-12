@@ -13,7 +13,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
-from src.api.dependencies import _request_session
 from src.domain.user import User
 from src.assistant.dependencies import get_assistant_service
 from src.assistant.service import AssistantService, ChatRequest
@@ -92,19 +91,11 @@ async def chat_stream(
         async for line in service.turn(req):
             yield line
         # Commit the session after streaming so persisted messages survive.
-        import logging
-        _log = logging.getLogger("assist.stream")
+        # The Pg repo holds its own session reference; commit it directly
+        # to guarantee the transaction is finalized before the response ends.
         repo = service._repo  # pylint: disable=protected-access
-        _log.warning("repo type: %s, has _session: %s", type(repo).__name__, hasattr(repo, '_session'))
         if hasattr(repo, '_session'):
-            try:
-                _log.warning("committing session %s", id(repo._session))
-                await repo._session.commit()
-                _log.warning("commit OK")
-            except Exception as exc:  # pylint: disable=broad-except
-                _log.exception("commit failed: %s", exc)
-        else:
-            _log.warning("no _session on repo, skipping commit")
+            await repo._session.commit()
         yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(

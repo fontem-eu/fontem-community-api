@@ -8,7 +8,7 @@ the only symbol from the outside world that touches module internals.
 # pylint: disable=import-outside-toplevel
 from __future__ import annotations
 
-from src.api.dependencies import _request_session, _use_postgres
+from src.api import dependencies as _deps
 
 from src.assistant.context import TurnLimits
 from src.assistant.proxy_client import ClaudeProxyClient
@@ -43,19 +43,17 @@ _memory_repo: InMemoryAssistRepository | None = None
 
 def _get_assist_repo() -> AssistRepository:
     global _memory_repo
-    if _use_postgres:
+    if _deps._use_postgres:
         # Lazy import to avoid circulars
         from src.assistant.pg_repository import PgAssistRepository
 
-        session = _request_session.get()
+        session = _deps._request_session.get()
         if session is None:
             # Request didn't go through get_db_session — create a session
             # from the shared factory.
-            from src.api.dependencies import _pg_session_factory
-
-            assert _pg_session_factory is not None
-            session = _pg_session_factory()
-            _request_session.set(session)
+            assert _deps._pg_session_factory is not None
+            session = _deps._pg_session_factory()
+            _deps._request_session.set(session)
         return PgAssistRepository(session)
 
     if _memory_repo is None:
