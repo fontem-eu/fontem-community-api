@@ -13,23 +13,16 @@ where the old line-by-line version silently dropped half the payload.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncIterator
 
 import httpx
-
-
-DEFAULT_CLAUDE_PROXY_URL = os.environ.get(
-    "CLAUDE_PROXY_URL",
-    "http://claude-proxy.gmr.svc.cluster.local:8090",
-)
 
 
 class ClaudeProxyClient:
 
     def __init__(
         self,
-        url: str = DEFAULT_CLAUDE_PROXY_URL,
+        url: str,
         timeout: float = 300.0,
     ) -> None:
         self._url = url.rstrip("/") + "/chat/stream"

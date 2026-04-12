@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ))
         await engine.dispose()
 
-        # Wire up dishka container (coexists with old DI during migration)
+        # Wire up dishka container — single source of truth for all DI
         container = make_container(db_url)
         setup_dishka(container, app)
 
