@@ -92,11 +92,16 @@ async def chat_stream(
         async for line in service.turn(req):
             yield line
         # Commit the session after streaming so persisted messages survive.
-        # The request-scoped get_db_session dependency may not run its cleanup
-        # until after the response is fully sent; commit explicitly here.
-        session = _request_session.get()
-        if session is not None:
-            await session.commit()
+        # The assistant service's repo holds a session obtained from the
+        # _request_session ContextVar; commit it directly through the repo.
+        repo = service._repo  # pylint: disable=protected-access
+        if hasattr(repo, '_session'):
+            import logging
+            logging.getLogger("assist.stream").info(
+                "committing session after stream, dirty=%s, new=%s",
+                repo._session.dirty, repo._session.new,
+            )
+            await repo._session.commit()
         yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(
