@@ -86,27 +86,10 @@ def services():
 
 @pytest.fixture()
 def client(services):
-    """TestClient with InMemory repos injected."""
-    app.dependency_overrides[get_user_repo] = lambda: services["user_repo"]
-    app.dependency_overrides[get_report_service] = lambda: services["report_svc"]
-    app.dependency_overrides[get_issue_service] = lambda: services["issue_svc"]
-    app.dependency_overrides[get_moderation_service] = lambda: services["mod_svc"]
-    app.dependency_overrides[get_group_repo] = lambda: services["group_repo"]
-    app.dependency_overrides[get_permission_service] = lambda: services["perm_svc"]
-    app.dependency_overrides[get_permission_repo] = lambda: services["permission_repo"]
+    """TestClient with both dishka container and legacy dependency_overrides.
 
-    with TestClient(app) as c:
-        yield c
-
-    app.dependency_overrides.clear()
-
-
-@pytest.fixture()
-def dishka_client(services):
-    """TestClient with both dishka container AND old dependency_overrides.
-
-    Use during migration: newly migrated endpoints get FromDishka injection,
-    not-yet-migrated ones still use the old overrides.
+    Dishka handles FromDishka[T] injection (auth, migrated endpoints).
+    Old Depends(get_*) overrides handle endpoints not yet migrated.
     """
     from tests.dishka_fixtures import make_test_container
     from dishka.integrations.fastapi import setup_dishka
@@ -120,9 +103,7 @@ def dishka_client(services):
     app.dependency_overrides[get_permission_service] = lambda: services["perm_svc"]
     app.dependency_overrides[get_permission_repo] = lambda: services["permission_repo"]
 
-    # Reset the middleware stack so setup_dishka can add its middleware.
-    # This is necessary because a prior test's TestClient may have built
-    # the stack, and Starlette refuses middleware additions afterward.
+    # Reset middleware stack so setup_dishka can add its middleware
     app.middleware_stack = None
 
     container = make_test_container(services)
@@ -132,7 +113,6 @@ def dishka_client(services):
         yield c
 
     app.dependency_overrides.clear()
-    # Tear down dishka state so the next test gets a clean app
     app.middleware_stack = None
 
 

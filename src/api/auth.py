@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import os
 
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-from src.api.dependencies import get_db_session, get_user_repo
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 
@@ -16,15 +16,10 @@ JWT_ALGORITHM = "HS256"
 _bearer_scheme = HTTPBearer()
 
 
+@inject
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
-    # scope="function" forces the session cleanup (commit/rollback/close) to
-    # run BEFORE the response is sent to the client. The default scope runs
-    # cleanup AFTER response, which created a write-then-read race: clients
-    # received 201 from POSTs while the rows were still uncommitted, and a
-    # quick follow-up GET would see 0 rows ~10% of the time.
-    _session=Depends(get_db_session, scope="function"),  # NOSONAR S930: scope= is a real FastAPI arg (added 2024)
-    user_repo: UserRepository = Depends(get_user_repo),
+    user_repo: FromDishka[UserRepository] = None,  # type: ignore[assignment]
 ) -> User:
     token = credentials.credentials
     try:
