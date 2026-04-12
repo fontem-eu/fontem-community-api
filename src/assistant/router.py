@@ -92,16 +92,13 @@ async def chat_stream(
         async for line in service.turn(req):
             yield line
         # Commit the session after streaming so persisted messages survive.
-        # The assistant service's repo holds a session obtained from the
-        # _request_session ContextVar; commit it directly through the repo.
         repo = service._repo  # pylint: disable=protected-access
         if hasattr(repo, '_session'):
-            import logging
-            logging.getLogger("assist.stream").info(
-                "committing session after stream, dirty=%s, new=%s",
-                repo._session.dirty, repo._session.new,
-            )
-            await repo._session.commit()
+            try:
+                await repo._session.commit()
+            except Exception as exc:  # pylint: disable=broad-except
+                import logging
+                logging.getLogger("assist.stream").exception("commit failed: %s", exc)
         yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(
