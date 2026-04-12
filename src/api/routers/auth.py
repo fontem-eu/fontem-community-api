@@ -95,6 +95,7 @@ async def _verify_google_token(credential: str) -> dict:
 @inject
 async def google_login(
     body: GoogleTokenRequest,
+    *,
     user_repo: FromDishka[UserRepository],
 ) -> TokenResponse:
     """Exchange a Google ID token for a GMR session JWT."""
@@ -203,6 +204,7 @@ def _issue_jwt(user: User) -> TokenResponse:
 @inject
 async def register(
     body: RegisterRequest,
+    *,
     user_repo: FromDishka[UserRepository],
 ) -> TokenResponse:
     """Register a new local account."""
@@ -228,6 +230,7 @@ async def register(
 @inject
 async def login(
     body: LoginRequest,
+    *,
     user_repo: FromDishka[UserRepository],
 ) -> TokenResponse:
     """Login with email + password."""

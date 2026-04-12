@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from dishka.integrations.fastapi import FromDishka, inject
+
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
-from src.api.dependencies import get_group_repo
 from src.domain.group import Group
 from src.domain.user import User
 from src.repositories.group_repository import GroupRepository
@@ -25,10 +26,12 @@ class AddMemberRequest(BaseModel):
 
 
 @router.post("", status_code=201)
+@inject
 async def create_group(
     body: CreateGroupRequest,
+    *,
+    repo: FromDishka[GroupRepository],
     user: User = Depends(get_current_user),
-    repo: GroupRepository = Depends(get_group_repo),
 ) -> dict:
     group = Group(name=body.name, description=body.description)
     group = await repo.create(group)
@@ -36,10 +39,12 @@ async def create_group(
 
 
 @router.get("/{group_id}")
+@inject
 async def get_group(
     group_id: str,
+    *,
+    repo: FromDishka[GroupRepository],
     user: User = Depends(get_current_user),
-    repo: GroupRepository = Depends(get_group_repo),
 ) -> dict:
     group = await repo.get_by_id(group_id)
     if group is None:
@@ -50,11 +55,13 @@ async def get_group(
 
 
 @router.post("/{group_id}/members", status_code=201)
+@inject
 async def add_member(
     group_id: str,
     body: AddMemberRequest,
+    *,
+    repo: FromDishka[GroupRepository],
     user: User = Depends(get_current_user),
-    repo: GroupRepository = Depends(get_group_repo),
 ) -> dict:
     group = await repo.get_by_id(group_id)
     if group is None:
@@ -64,10 +71,12 @@ async def add_member(
 
 
 @router.delete("/{group_id}/members/{uid}", status_code=204)
+@inject
 async def remove_member(
     group_id: str,
     uid: str,
+    *,
+    repo: FromDishka[GroupRepository],
     user: User = Depends(get_current_user),
-    repo: GroupRepository = Depends(get_group_repo),
 ) -> None:
     await repo.remove_member(group_id, uid)

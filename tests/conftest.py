@@ -26,7 +26,7 @@ def _stable_uuid(raw_id: str) -> str:
         return raw_id  # already a valid UUID
     except ValueError:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, raw_id))
-from src.api.dependencies import get_user_repo, get_report_service, get_issue_service, get_moderation_service, get_group_repo, get_permission_service, get_permission_repo
+from src.api.dependencies import get_user_repo
 
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
 from src.infra.memory.mem_report_repo import InMemoryReportRepository
@@ -94,14 +94,8 @@ def client(services):
     from tests.dishka_fixtures import make_test_container
     from dishka.integrations.fastapi import setup_dishka
 
-    # Old overrides for endpoints not yet on dishka
+    # Legacy override for any code still using Depends(get_user_repo)
     app.dependency_overrides[get_user_repo] = lambda: services["user_repo"]
-    app.dependency_overrides[get_report_service] = lambda: services["report_svc"]
-    app.dependency_overrides[get_issue_service] = lambda: services["issue_svc"]
-    app.dependency_overrides[get_moderation_service] = lambda: services["mod_svc"]
-    app.dependency_overrides[get_group_repo] = lambda: services["group_repo"]
-    app.dependency_overrides[get_permission_service] = lambda: services["perm_svc"]
-    app.dependency_overrides[get_permission_repo] = lambda: services["permission_repo"]
 
     # Reset middleware stack so setup_dishka can add its middleware
     app.middleware_stack = None

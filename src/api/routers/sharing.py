@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from dishka.integrations.fastapi import FromDishka, inject
+
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
-from src.api.dependencies import get_permission_repo, get_permission_service
 from src.domain.user import User
 from src.repositories.permission_repository import PermissionRepository
 from src.services.permission_service import PermissionService
@@ -21,11 +22,13 @@ class SetAccessRequest(BaseModel):
 
 
 @router.get("")
+@inject
 async def list_access(
     report_id: str,
+    *,
+    perms_svc: FromDishka[PermissionService],
+    perms_repo: FromDishka[PermissionRepository],
     user: User = Depends(get_current_user),
-    perms_svc: PermissionService = Depends(get_permission_service),
-    perms_repo: PermissionRepository = Depends(get_permission_repo),
 ) -> list[dict]:
     await perms_svc.require(user.id, report_id, "owner")
     grants = await perms_repo.list_collaborators(report_id)
@@ -33,12 +36,14 @@ async def list_access(
 
 
 @router.post("", status_code=201)
+@inject
 async def set_access(
     report_id: str,
     body: SetAccessRequest,
+    *,
+    perms_svc: FromDishka[PermissionService],
+    perms_repo: FromDishka[PermissionRepository],
     user: User = Depends(get_current_user),
-    perms_svc: PermissionService = Depends(get_permission_service),
-    perms_repo: PermissionRepository = Depends(get_permission_repo),
 ) -> dict:
     await perms_svc.require(user.id, report_id, "owner")
     if body.user_id:
@@ -49,12 +54,14 @@ async def set_access(
 
 
 @router.delete("/{access_id}", status_code=204)
+@inject
 async def remove_access(
     report_id: str,
     access_id: str,
+    *,
+    perms_svc: FromDishka[PermissionService],
+    perms_repo: FromDishka[PermissionRepository],
     user: User = Depends(get_current_user),
-    perms_svc: PermissionService = Depends(get_permission_service),
-    perms_repo: PermissionRepository = Depends(get_permission_repo),
 ) -> None:
     await perms_svc.require(user.id, report_id, "owner")
     # Find the grant and remove it

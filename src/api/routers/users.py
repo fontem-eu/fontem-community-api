@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dishka.integrations.fastapi import FromDishka, inject
+
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends
 
 from src.api.auth import get_current_user
-from src.api.dependencies import get_user_repo
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 from src.services.exceptions import NotFound
@@ -21,10 +22,12 @@ async def get_me(
 
 
 @router.get("/{user_id}")
+@inject
 async def get_user(
     user_id: str,
+    *,
+    repo: FromDishka[UserRepository],
     user: User = Depends(get_current_user),
-    repo: UserRepository = Depends(get_user_repo),
 ) -> dict:
     target = await repo.get_by_id(user_id)
     if target is None:
