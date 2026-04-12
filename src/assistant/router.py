@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
+from src.api.dependencies import get_db_session
 from src.domain.user import User
 from src.assistant.dependencies import get_assistant_service
 from src.assistant.service import AssistantService, ChatRequest
@@ -77,6 +78,7 @@ class HistoryMessage(BaseModel):
 async def chat_stream(
     body: AssistChatBody,
     user: User = Depends(get_current_user),
+    _session=Depends(get_db_session),
     service: AssistantService = Depends(get_assistant_service),
 ) -> StreamingResponse:
     """Stream an assistant reply via SSE."""
