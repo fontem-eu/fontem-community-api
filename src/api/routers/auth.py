@@ -60,11 +60,19 @@ async def _verify_google_token(credential: str) -> dict:
         keys = resp.json()
 
     # Decode JWT header to find the signing key id
-    header_segment = credential.split(".")[0]
+    parts = credential.split(".")
+    if len(parts) != 3:
+        raise HTTPException(status_code=401, detail="Invalid Google token: not a JWT")
+    header_segment = parts[0]
     padding = 4 - len(header_segment) % 4
     if padding != 4:
         header_segment += "=" * padding
-    header = json.loads(base64.urlsafe_b64decode(header_segment))
+    try:
+        header = json.loads(base64.urlsafe_b64decode(header_segment))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            status_code=401, detail="Invalid Google token: malformed header",
+        ) from exc
     kid = header.get("kid")
 
     matching_key = next(

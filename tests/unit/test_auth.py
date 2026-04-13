@@ -120,3 +120,38 @@ class TestGoogleAuth:
         with _patch_verify():
             resp2 = client.post("/auth/google", json={"credential": "fake"})
         assert resp1.json()["user"]["id"] == resp2.json()["user"]["id"]
+
+
+class TestGoogleAuthMalformedTokens:
+    """Regression: malformed Google credentials must return 401, never 500.
+
+    These tests do NOT mock _verify_google_token — they exercise the real
+    header parsing to ensure it handles garbage input gracefully.
+    """
+
+    def test_garbage_string_returns_401(self, client):
+        """A non-JWT string must not crash the server."""
+        resp = client.post("/auth/google", json={"credential": "not-a-jwt"})
+        assert resp.status_code == 401
+
+    def test_binary_noise_returns_401(self, client):
+        """Base64-decodable but non-JSON content must not crash."""
+        import base64
+        noise = base64.urlsafe_b64encode(b"\xa9\x00\xff").decode()
+        resp = client.post("/auth/google", json={"credential": f"{noise}.x.y"})
+        assert resp.status_code == 401
+
+    def test_empty_credential_returns_401(self, client):
+        """Empty string credential must not crash."""
+        resp = client.post("/auth/google", json={"credential": ""})
+        assert resp.status_code == 401
+
+    def test_single_segment_returns_401(self, client):
+        """A string with no dots (not a JWT) must return 401."""
+        resp = client.post("/auth/google", json={"credential": "onesinglesegment"})
+        assert resp.status_code == 401
+
+    def test_two_segments_returns_401(self, client):
+        """Two dot-separated segments (malformed JWT) must return 401."""
+        resp = client.post("/auth/google", json={"credential": "header.payload"})
+        assert resp.status_code == 401
