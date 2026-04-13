@@ -77,7 +77,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
-app = FastAPI(title="GMR Community API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="GMR Community API",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url=None,     # Disable Swagger UI in production
+    redoc_url=None,    # Disable ReDoc in production
+)
 
 # Wire up dishka container — must happen before the app starts, not inside
 # the lifespan (Starlette forbids adding middleware after startup).
@@ -86,13 +92,16 @@ if _db_url:
     _container = make_container(_db_url)
     setup_dishka(_container, app)
 
-# CORS — allow all for development
+# CORS — restricted to the GMR frontend origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://gmr.void42.net",
+        "http://gmr-dast.void42.internal",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -110,6 +119,12 @@ async def not_found_handler(request: Request, exc: NotFound) -> JSONResponse:
 @app.exception_handler(Conflict)
 async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": exc.message})
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all: never leak stack traces or internal error details to clients."""
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # Include routers — db session dependency ensures commit/rollback per request
