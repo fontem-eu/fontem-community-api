@@ -22,7 +22,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if db_url:
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text
-        engine = create_async_engine(db_url)
+        engine = create_async_engine(db_url, connect_args={"timeout": 10, "ssl": None})
+        # Ensure schema exists (idempotent — safe for fresh and existing DBs)
+        from src.infra.postgres.models import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         async with engine.begin() as conn:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"))
             await conn.execute(text("""
