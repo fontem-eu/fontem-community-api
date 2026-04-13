@@ -1,22 +1,23 @@
 """
-Integration test fixtures — tests against deployed gmr-community-api + PostgreSQL.
+Integration test fixtures — in-process API against a testcontainers Postgres.
 
-Talks to the real running API (not TestClient) to test the full stack
-including async SQLAlchemy, middleware, and Postgres.
+No cluster dependency. The FastAPI app runs via Starlette TestClient against
+a disposable Postgres container spun up once per test session.
 """
 from __future__ import annotations
 
 import os
 import uuid
 
-import httpx
 import pytest
 from jose import jwt
+from testcontainers.postgres import PostgresContainer
 
-# JWT secret must match the deployed app
-JWT_SECRET = os.environ.get("JWT_SECRET", "gmr-community-jwt-secret-2026")
+# ── JWT helpers ──────────────────────────────────────────────
+
+# Must match src/api/auth.py default
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
 JWT_ALGORITHM = "HS256"
-CAPI_URL = os.environ.get("CAPI_URL", "http://gmr-community-api.gmr.svc.cluster.local:8001")
 
 
 def make_token(user_id: str | None = None, email: str | None = None,
@@ -34,11 +35,46 @@ def make_headers(user_id: str | None = None, **kwargs) -> dict:
     return {"Authorization": f"Bearer {make_token(user_id, **kwargs)}"}
 
 
-@pytest.fixture()
-def client():
-    """HTTP client for integration tests — talks to the deployed API."""
-    with httpx.Client(base_url=CAPI_URL, timeout=30.0) as c:
+# ── Postgres + App (session-scoped) ──────────────────────────
+
+@pytest.fixture(scope="session")
+def _postgres():
+    """Disposable Postgres container for the test session."""
+    pg = PostgresContainer("postgres:16-alpine")
+    pg.start()
+    sync_url = pg.get_connection_url()
+    async_url = sync_url.replace("psycopg2", "asyncpg")
+
+    # Create schema from ORM models
+    from sqlalchemy import create_engine
+    from src.infra.postgres.models import Base
+    engine = create_engine(sync_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    # Set env so the app (imported by tests/conftest.py) picks it up.
+    # This only works if integration tests are collected AFTER the
+    # global conftest, which pytest guarantees for sub-directory conftest.
+    os.environ["DATABASE_URL"] = async_url
+
+    yield pg
+    pg.stop()
+
+
+@pytest.fixture(scope="session")
+def _test_client(_postgres):
+    """Session-scoped TestClient — lifespan fires once, not per test."""
+    from starlette.testclient import TestClient
+    from src.api.app import build_app
+    application = build_app(os.environ["DATABASE_URL"])
+    with TestClient(application, raise_server_exceptions=False) as c:
         yield c
+
+
+@pytest.fixture()
+def client(_test_client):
+    """Per-test alias — shares the session-scoped TestClient."""
+    return _test_client
 
 
 @pytest.fixture()

@@ -18,10 +18,8 @@ from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Initialize PostgreSQL repos if DATABASE_URL is set
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
-        # Auto-migrate: ensure all columns exist
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text
         engine = create_async_engine(db_url)
@@ -37,7 +35,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     UNIQUE (user_id, report_id)
                 )
             """))
-            # Assistant module owns its own tables
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS assist_conversations (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -71,7 +68,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "CREATE INDEX IF NOT EXISTS ix_assist_msg_conv_created "
                 "ON assist_messages (conversation_id, created_at)"
             ))
-            # Performance indexes for common query patterns
             await conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_issues_status "
                 "ON issues (status)"
@@ -89,77 +85,75 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
-app = FastAPI(
-    title="GMR Community API",
-    version="0.1.0",
-    lifespan=lifespan,
-    docs_url=None,     # Disable Swagger UI in production
-    redoc_url=None,    # Disable ReDoc in production
-)
+def build_app(database_url: str | None = None) -> FastAPI:
+    """Create a fully-wired FastAPI application.
 
-# Wire up dishka container — must happen before the app starts, not inside
-# the lifespan (Starlette forbids adding middleware after startup).
-_db_url = os.environ.get("DATABASE_URL")
-if _db_url:
-    _container = make_container(_db_url)
-    setup_dishka(_container, app)
+    Used by production (module-level ``app``) and by integration tests
+    (which pass a testcontainers Postgres URL).
+    """
+    application = FastAPI(
+        title="GMR Community API",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+    )
 
-# CORS — restricted to the GMR frontend origin
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://gmr.void42.net",
-        "http://gmr-dast.void42.internal",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["Authorization", "Content-Type"],
-)
+    db_url = database_url or os.environ.get("DATABASE_URL")
+    if db_url:
+        container = make_container(db_url)
+        setup_dishka(container, application)
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "https://gmr.void42.net",
+            "http://gmr-dast.void42.internal",
+        ],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
+
+    # Security headers on all API responses (OWASP ZAP finding)
+    @application.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
+
+    @application.exception_handler(PermissionDenied)
+    async def permission_denied_handler(request: Request, exc: PermissionDenied) -> JSONResponse:
+        return JSONResponse(status_code=403, content={"detail": exc.message})
+
+    @application.exception_handler(NotFound)
+    async def not_found_handler(request: Request, exc: NotFound) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": exc.message})
+
+    @application.exception_handler(Conflict)
+    async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": exc.message})
+
+    @application.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    application.include_router(assistant_router.router)
+    application.include_router(auth.router)
+    application.include_router(reports.router)
+    application.include_router(sharing.router)
+    application.include_router(issues.router)
+    application.include_router(users.router)
+    application.include_router(groups.router)
+    application.include_router(moderation.router)
+
+    @application.get("/health", tags=["Health"])
+    async def health() -> dict:
+        return {"status": "ok"}
+
+    return application
 
 
-# Security headers on all API responses (OWASP ZAP finding)
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    return response
-
-
-# Exception handlers
-@app.exception_handler(PermissionDenied)
-async def permission_denied_handler(request: Request, exc: PermissionDenied) -> JSONResponse:
-    return JSONResponse(status_code=403, content={"detail": exc.message})
-
-
-@app.exception_handler(NotFound)
-async def not_found_handler(request: Request, exc: NotFound) -> JSONResponse:
-    return JSONResponse(status_code=404, content={"detail": exc.message})
-
-
-@app.exception_handler(Conflict)
-async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
-    return JSONResponse(status_code=409, content={"detail": exc.message})
-
-
-@app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Catch-all: never leak stack traces or internal error details to clients."""
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
-
-
-# Include routers — db session dependency ensures commit/rollback per request
-app.include_router(assistant_router.router)
-app.include_router(auth.router)
-app.include_router(reports.router)
-app.include_router(sharing.router)
-app.include_router(issues.router)
-app.include_router(users.router)
-app.include_router(groups.router)
-app.include_router(moderation.router)
-
-
-@app.get("/health", tags=["Health"])
-async def health() -> dict:
-    """Liveness/readiness probe."""
-    return {"status": "ok"}
+# Production app — created at import time from env vars.
+app = build_app()
