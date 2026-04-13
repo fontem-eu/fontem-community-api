@@ -6,15 +6,42 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import os
 
 from dishka.integrations.fastapi import setup_dishka
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.routers import auth, groups, issues, moderation, reports, sharing, users
 from src.assistant import router as assistant_router
 from src.api.di import make_container
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
+
+
+class EagerCommitMiddleware(BaseHTTPMiddleware):
+    """Commit the DB session BEFORE the response body is sent.
+
+    Dishka's ContainerMiddleware tears down the request scope (and thus
+    commits the session) AFTER the response is fully sent. This creates
+    a race: the client receives 201/204 but a quick follow-up GET may
+    see stale data because the transaction hasn't committed yet.
+
+    This middleware grabs the session from the dishka container after the
+    route handler has run (but before the response leaves) and commits it
+    eagerly.
+    """
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        container = getattr(request.state, "dishka_container", None)
+        if container is not None:
+            try:
+                session = await container.get(AsyncSession)
+                if session.is_active:
+                    await session.commit()
+            except Exception:
+                pass  # session may not exist for unauthenticated/read-only routes
+        return response
 
 
 @asynccontextmanager
@@ -91,6 +118,8 @@ _db_url = os.environ.get("DATABASE_URL")
 if _db_url:
     _container = make_container(_db_url)
     setup_dishka(_container, app)
+    # EagerCommitMiddleware must be added AFTER dishka (runs inside dishka's scope)
+    app.add_middleware(EagerCommitMiddleware)
 
 # CORS — restricted to the GMR frontend origin
 app.add_middleware(

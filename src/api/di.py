@@ -61,10 +61,16 @@ class DatabaseProvider(Provider):
     async def session(
         self, factory: async_sessionmaker[AsyncSession]
     ) -> AsyncIterator[AsyncSession]:
+        """Per-request session with autoflush.
+
+        Writes are committed eagerly by the repository layer (via
+        session.commit()) so that data is visible to clients before
+        the response is sent. The teardown here only handles rollback
+        on unhandled exceptions and session cleanup.
+        """
         session = factory()
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise
