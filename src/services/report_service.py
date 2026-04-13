@@ -23,6 +23,10 @@ class ReportService:
         abstract: str | None = None,
         parent_id: str | None = None,
     ) -> Report:
+        if parent_id is not None:
+            parent = await self._reports.get_by_id(parent_id)
+            if parent is None:
+                raise NotFound(f"Parent report {parent_id} not found")
         report = Report(
             title=sanitize_text(title),
             abstract=sanitize_text(abstract) if abstract else abstract,

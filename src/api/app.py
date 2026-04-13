@@ -71,6 +71,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "CREATE INDEX IF NOT EXISTS ix_assist_msg_conv_created "
                 "ON assist_messages (conversation_id, created_at)"
             ))
+            # Performance indexes for common query patterns
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_issues_status "
+                "ON issues (status)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_reports_visibility "
+                "ON reports (visibility)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_reports_parent_id "
+                "ON reports (parent_id) WHERE parent_id IS NOT NULL"
+            ))
         await engine.dispose()
 
     yield
