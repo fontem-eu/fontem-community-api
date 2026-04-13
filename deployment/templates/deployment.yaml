@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gmr-community-api
-  namespace: gmr
+  namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
   selector:
@@ -29,9 +29,9 @@ spec:
             - name: JWT_SECRET
               value: "gmr-community-jwt-secret-2026"
             - name: DATABASE_URL
-              value: "postgresql+asyncpg://postgres:gmr-pg-2026@postgresql:5432/gmr_app"
+              value: {{ .Values.databaseUrl | default "postgresql+asyncpg://postgres:gmr-pg-2026@postgresql:5432/gmr_app" | quote }}
             - name: CLAUDE_PROXY_URL
-              value: "http://claude-proxy.gmr.svc.cluster.local:8090"
+              value: {{ .Values.claudeProxyUrl | default "http://claude-proxy.gmr.svc.cluster.local:8090" | quote }}
           livenessProbe:
             httpGet:
               path: /health
