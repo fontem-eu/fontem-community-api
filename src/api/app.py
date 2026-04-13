@@ -117,6 +117,15 @@ app.add_middleware(
 )
 
 
+# Security headers on all API responses (OWASP ZAP finding)
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
 # Exception handlers
 @app.exception_handler(PermissionDenied)
 async def permission_denied_handler(request: Request, exc: PermissionDenied) -> JSONResponse:
