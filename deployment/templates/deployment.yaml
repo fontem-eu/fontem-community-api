@@ -27,9 +27,17 @@ spec:
             - containerPort: 8001
           env:
             - name: JWT_SECRET
-              value: "gmr-community-jwt-secret-2026"
+              valueFrom:
+                secretKeyRef:
+                  name: gmr-jwt-secret
+                  key: JWT_SECRET
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gmr-postgres-credentials
+                  key: POSTGRES_PASSWORD
             - name: DATABASE_URL
-              value: {{ .Values.databaseUrl | default "postgresql+asyncpg://postgres:gmr-pg-2026@postgresql:5432/gmr_app" | quote }}
+              value: "postgresql+asyncpg://postgres:$(POSTGRES_PASSWORD)@postgresql:5432/gmr_app"
             - name: CLAUDE_PROXY_URL
               value: {{ .Values.claudeProxyUrl | default "http://claude-proxy.gmr.svc.cluster.local:8090" | quote }}
           livenessProbe:
