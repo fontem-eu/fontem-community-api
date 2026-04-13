@@ -57,7 +57,7 @@ class PgIssueRepository(IssueRepository):
             updated_at=issue.updated_at or now,
         )
         self._session.add(model)
-        await self._session.flush()
+        await self._session.commit()
         return self._issue_to_domain(model)
 
     async def get_by_id(self, issue_id: str) -> Issue | None:
@@ -75,7 +75,7 @@ class PgIssueRepository(IssueRepository):
         if row is not None:
             row.status = status
             row.updated_at = datetime.now(timezone.utc)
-            await self._session.flush()
+            await self._session.commit()
 
     async def list_for_entity(
         self, entity_type: str, entity_id: str, limit: int, offset: int
@@ -111,7 +111,7 @@ class PgIssueRepository(IssueRepository):
             created_at=comment.created_at or now,
         )
         self._session.add(model)
-        await self._session.flush()
+        await self._session.commit()
         return self._comment_to_domain(model)
 
     async def get_comments(self, parent_type: str, parent_id: str) -> list[Comment]:
@@ -134,7 +134,7 @@ class PgIssueRepository(IssueRepository):
             set_={"direction": stmt.excluded.direction},
         )
         await self._session.execute(stmt)
-        await self._session.flush()
+        await self._session.commit()
 
     async def get_vote_count(self, issue_id: str) -> int:
         up_q = (

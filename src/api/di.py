@@ -71,6 +71,7 @@ class DatabaseProvider(Provider):
         session = factory()
         try:
             yield session
+            await session.commit()
         except Exception:
             await session.rollback()
             raise

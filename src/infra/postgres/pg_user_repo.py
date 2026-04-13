@@ -65,7 +65,7 @@ class PgUserRepository(UserRepository):
             },
         )
         await self._session.execute(stmt)
-        await self._session.flush()
+        await self._session.commit()
         return (await self.get_by_id(user_id))  # type: ignore[return-value]
 
     async def get_roles(self, user_id: str) -> list[str]:
@@ -80,7 +80,7 @@ class PgUserRepository(UserRepository):
         )
         for role in roles:
             self._session.add(UserRoleModel(user_id=user_id, role=role))
-        await self._session.flush()
+        await self._session.commit()
 
     async def set_trust_level(self, user_id: str, level: str) -> None:
         result = await self._session.execute(
@@ -89,7 +89,7 @@ class PgUserRepository(UserRepository):
         row = result.scalar_one_or_none()
         if row is not None:
             row.trust_level = level
-            await self._session.flush()
+            await self._session.commit()
 
     async def get_active_sanction(self, user_id: str) -> Sanction | None:
         now = datetime.now(timezone.utc)
@@ -127,7 +127,7 @@ class PgUserRepository(UserRepository):
             applied_by=sanction.applied_by,
         )
         self._session.add(row)
-        await self._session.flush()
+        await self._session.commit()
 
     async def lift_sanction(self, sanction_id: str) -> None:
         result = await self._session.execute(
@@ -136,4 +136,4 @@ class PgUserRepository(UserRepository):
         row = result.scalar_one_or_none()
         if row is not None:
             row.lifted_at = datetime.now(timezone.utc)
-            await self._session.flush()
+            await self._session.commit()

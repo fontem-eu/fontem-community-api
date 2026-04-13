@@ -33,7 +33,7 @@ class PgGroupRepository(GroupRepository):
             created_at=group.created_at or now,
         )
         self._session.add(model)
-        await self._session.flush()
+        await self._session.commit()
         return self._to_domain(model)
 
     async def get_by_id(self, group_id: str) -> Group | None:
@@ -45,7 +45,7 @@ class PgGroupRepository(GroupRepository):
 
     async def add_member(self, group_id: str, user_id: str) -> None:
         self._session.add(GroupMemberModel(group_id=group_id, user_id=user_id))
-        await self._session.flush()
+        await self._session.commit()
 
     async def remove_member(self, group_id: str, user_id: str) -> None:
         await self._session.execute(
@@ -53,7 +53,7 @@ class PgGroupRepository(GroupRepository):
             .where(GroupMemberModel.group_id == group_id)
             .where(GroupMemberModel.user_id == user_id)
         )
-        await self._session.flush()
+        await self._session.commit()
 
     async def get_members(self, group_id: str) -> list[str]:
         result = await self._session.execute(

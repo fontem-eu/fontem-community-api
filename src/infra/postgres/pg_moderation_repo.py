@@ -86,7 +86,7 @@ class PgModerationRepository(ModerationRepository):
             },
             actor_id=flag.flagged_by,
         )
-        await self._session.flush()
+        await self._session.commit()
         return self._flag_to_domain(model)
 
     async def count_flags(self, target_type: str, target_id: str) -> int:
@@ -134,7 +134,7 @@ class PgModerationRepository(ModerationRepository):
             },
             actor_id=moderator_id,
         )
-        await self._session.flush()
+        await self._session.commit()
 
     # ── Sanctions ─────────────────────────────────────────────────
 
@@ -160,7 +160,7 @@ class PgModerationRepository(ModerationRepository):
             },
             actor_id=sanction.applied_by,
         )
-        await self._session.flush()
+        await self._session.commit()
         return self._sanction_to_domain(model)
 
     async def get_active_sanction(self, user_id: str) -> Sanction | None:
@@ -190,7 +190,7 @@ class PgModerationRepository(ModerationRepository):
                 details={"sanction_id": sanction_id},
                 actor_id=row.applied_by,
             )
-            await self._session.flush()
+            await self._session.commit()
 
     async def get_log(self, limit: int, offset: int) -> list[dict]:
         result = await self._session.execute(

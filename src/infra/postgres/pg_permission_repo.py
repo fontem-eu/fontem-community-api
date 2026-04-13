@@ -88,7 +88,7 @@ class PgPermissionRepository(PermissionRepository):
                 level=level,
             )
         )
-        await self._session.flush()
+        await self._session.commit()
 
     async def set_group_access(self, report_id: str, group_id: str, level: str) -> None:
         await self._session.execute(
@@ -104,7 +104,7 @@ class PgPermissionRepository(PermissionRepository):
                 level=level,
             )
         )
-        await self._session.flush()
+        await self._session.commit()
 
     async def remove_user_access(self, report_id: str, user_id: str) -> None:
         await self._session.execute(
@@ -112,7 +112,7 @@ class PgPermissionRepository(PermissionRepository):
             .where(ReportAccessModel.report_id == report_id)
             .where(ReportAccessModel.user_id == user_id)
         )
-        await self._session.flush()
+        await self._session.commit()
 
     async def remove_group_access(self, report_id: str, group_id: str) -> None:
         await self._session.execute(
@@ -120,7 +120,7 @@ class PgPermissionRepository(PermissionRepository):
             .where(ReportAccessModel.report_id == report_id)
             .where(ReportAccessModel.group_id == group_id)
         )
-        await self._session.flush()
+        await self._session.commit()
 
     async def list_collaborators(self, report_id: str) -> list[AccessGrant]:
         result = await self._session.execute(

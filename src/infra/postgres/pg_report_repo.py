@@ -72,7 +72,7 @@ class PgReportRepository(ReportRepository):
             updated_at=report.updated_at or now,
         )
         self._session.add(model)
-        await self._session.flush()
+        await self._session.commit()
         return self._report_to_domain(model)
 
     async def get_by_id(self, report_id: str) -> Report | None:
@@ -93,14 +93,14 @@ class PgReportRepository(ReportRepository):
         row.abstract = report.abstract
         row.visibility = report.visibility
         row.updated_at = datetime.now(timezone.utc)
-        await self._session.flush()
+        await self._session.commit()
         return self._report_to_domain(row)
 
     async def delete(self, report_id: str) -> None:
         await self._session.execute(
             delete(ReportModel).where(ReportModel.id == report_id)
         )
-        await self._session.flush()
+        await self._session.commit()
 
     async def list_for_user(self, user_id: str, limit: int, offset: int) -> list[Report]:
         # Reports where created_by=user OR user has report_access
@@ -157,7 +157,7 @@ class PgReportRepository(ReportRepository):
             updated_at=now,
         )
         self._session.add(model)
-        await self._session.flush()
+        await self._session.commit()
         return self._section_to_domain(model)
 
     async def update_section(self, section: Section) -> Section:
@@ -172,14 +172,14 @@ class PgReportRepository(ReportRepository):
         row.lock_holder = section.lock_holder
         row.lock_expires = section.lock_expires
         row.updated_at = datetime.now(timezone.utc)
-        await self._session.flush()
+        await self._session.commit()
         return self._section_to_domain(row)
 
     async def delete_section(self, section_id: str) -> None:
         await self._session.execute(
             delete(SectionModel).where(SectionModel.id == section_id)
         )
-        await self._session.flush()
+        await self._session.commit()
 
     async def get_section(self, section_id: str) -> Section | None:
         result = await self._session.execute(
@@ -213,7 +213,7 @@ class PgReportRepository(ReportRepository):
                 return False
         row.lock_holder = user_id
         row.lock_expires = now + timedelta(seconds=ttl_seconds)
-        await self._session.flush()
+        await self._session.commit()
         return True
 
     async def release_lock(self, section_id: str, user_id: str) -> None:
@@ -224,7 +224,7 @@ class PgReportRepository(ReportRepository):
         if row is not None and row.lock_holder == user_id:
             row.lock_holder = None
             row.lock_expires = None
-            await self._session.flush()
+            await self._session.commit()
 
     async def get_lock_holder(self, section_id: str) -> str | None:
         result = await self._session.execute(
@@ -238,7 +238,7 @@ class PgReportRepository(ReportRepository):
             if row.lock_expires is not None and row.lock_expires <= now:
                 row.lock_holder = None
                 row.lock_expires = None
-                await self._session.flush()
+                await self._session.commit()
                 return None
             return row.lock_holder
         return None
@@ -253,7 +253,7 @@ class PgReportRepository(ReportRepository):
             saved_at=datetime.now(timezone.utc),
         )
         self._session.add(model)
-        await self._session.flush()
+        await self._session.commit()
 
     async def get_versions(self, section_id: str, limit: int) -> list[SectionVersion]:
         result = await self._session.execute(
