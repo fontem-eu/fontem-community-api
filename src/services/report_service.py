@@ -118,6 +118,27 @@ class ReportService:
         """List child reports (dossier sub-pages)."""
         return await self._reports.list_children(parent_id)
 
+    async def save_document(self, user_id: str, report_id: str, content: dict) -> None:
+        """Save the entire report as a single v2 TipTap JSON document.
+
+        Replaces all existing sections with one section containing the
+        full document. Previous content is saved as a version snapshot.
+        """
+        await self._perms.require(user_id, report_id, "editor")
+        sections = await self._reports.get_sections(report_id)
+        if sections:
+            # Save a version of the first section before overwriting
+            await self._reports.save_version(sections[0].id, sections[0].content_json, user_id)
+            # Update first section, delete the rest
+            sections[0].content_json = content
+            await self._reports.update_section(sections[0])
+            for s in sections[1:]:
+                await self._reports.delete_section(s.id)
+        else:
+            # No sections yet — create one
+            section = Section(content_json=content)
+            await self._reports.add_section(report_id, section)
+
 
 def _sanitize_section(content: dict) -> dict:
     """Sanitize the HTML inside a section content dict."""
