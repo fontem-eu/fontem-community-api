@@ -5,11 +5,12 @@ from dishka.integrations.fastapi import FromDishka, inject
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
 from src.domain.user import User
+from src.infra.minio_client import MinioStorage, ALLOWED_TYPES, MAX_SIZE
 from src.services.report_service import ReportService
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -33,6 +34,12 @@ class CreateSectionRequest(BaseModel):
 
 class UpdateSectionRequest(BaseModel):
     content: str = ""
+
+
+class SaveDocumentRequest(BaseModel):
+    """Save the full TipTap JSON document (v2 format)."""
+    tiptap: dict
+    version: int = 2
 
 
 @router.post("", status_code=201)
@@ -75,10 +82,15 @@ async def get_report(
     report = await svc.get(user.id, report_id)
     result = asdict(report)
     sections = await svc.get_sections(report_id)
-    result["sections"] = [
-        {**asdict(s), "content": s.content_json.get("html", "")}
-        for s in sections
-    ]
+    # v2 reports store a single section with TipTap JSON
+    if sections and sections[0].content_json.get("version") == 2:
+        result["content_doc"] = sections[0].content_json
+        result["sections"] = []
+    else:
+        result["sections"] = [
+            {**asdict(s), "content": s.content_json.get("html", "")}
+            for s in sections
+        ]
     # Include child reports for dossier tree navigation
     children = await svc.list_children(report_id)
     result["children"] = [{"id": c.id, "title": c.title} for c in children]
@@ -189,3 +201,58 @@ async def list_versions(
 ) -> list[dict]:
     versions = await svc._reports.get_versions(section_id, limit)
     return [asdict(v) for v in versions]
+
+
+# ── v2 Document API ──────────────────────────────────────────
+
+@router.put("/{report_id}/content")
+@inject
+async def save_document(
+    report_id: str,
+    body: SaveDocumentRequest,
+    *,
+    svc: FromDishka[ReportService],
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Save the full report document as TipTap JSON (v2 format)."""
+    await svc.save_document(user.id, report_id, {
+        "tiptap": body.tiptap,
+        "version": body.version,
+    })
+    return {"ok": True}
+
+
+# ── Image Upload ─────────────────────────────────────────────
+
+_storage = None
+
+
+def _get_storage() -> MinioStorage:
+    global _storage
+    if _storage is None:
+        _storage = MinioStorage()
+    return _storage
+
+
+@router.post("/{report_id}/upload")
+@inject
+async def upload_image(
+    report_id: str,
+    file: UploadFile = File(...),
+    *,
+    svc: FromDishka[ReportService],
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Upload an image to attach to a report."""
+    await svc._perms.require(user.id, report_id, "editor")
+
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(400, f"File type {file.content_type} not allowed. Use: {', '.join(ALLOWED_TYPES)}")
+
+    data = await file.read()
+    if len(data) > MAX_SIZE:
+        raise HTTPException(400, f"File too large. Maximum {MAX_SIZE // 1024 // 1024}MB.")
+
+    storage = _get_storage()
+    key = storage.upload(report_id, data, file.content_type)
+    return {"url": storage.get_url(key), "key": key}
