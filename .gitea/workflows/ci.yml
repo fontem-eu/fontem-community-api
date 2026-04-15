@@ -20,18 +20,21 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      REGISTRY: gitea-http.dev-tools.svc.cluster.local:3000
+      IMAGE: golden/gmr-community-api
     steps:
       - uses: actions/checkout@v4
       - name: Install Docker CLI
-        run: |
-          apt-get update -qq && apt-get install -y -qq docker.io > /dev/null
-      - name: Build image
+        run: apt-get update -qq && apt-get install -y -qq docker.io > /dev/null
+      - name: Login to registry
+        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login $REGISTRY -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+      - name: Build and push
         run: |
           TAG="v$(git rev-parse --short HEAD)"
           echo "TAG=$TAG" >> $GITHUB_ENV
-          docker build -t contribute.void42.internal/golden/gmr-community-api:$TAG .
-      - name: Push image
-        run: docker push contribute.void42.internal/golden/gmr-community-api:$TAG
+          docker build -t $REGISTRY/$IMAGE:$TAG .
+          docker push $REGISTRY/$IMAGE:$TAG
       - name: Deploy to dev
         run: |
           sed -i "s/version: .*/version: \"$TAG\"/" deployment/values-dev.yaml
