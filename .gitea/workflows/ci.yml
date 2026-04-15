@@ -23,7 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Docker
-        run: apt-get update -qq && apt-get install -y -qq docker.io > /dev/null && docker version
+        run: |
+          curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | tar xz --strip-components=1 -C /usr/local/bin docker/docker
+          docker version
       - name: Login
         run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login gitea-http.dev-tools.svc.cluster.local:3000 -u "${{ secrets.REGISTRY_USER }}" --password-stdin
       - name: Build
