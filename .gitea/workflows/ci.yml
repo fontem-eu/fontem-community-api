@@ -28,7 +28,7 @@ jobs:
       - name: Install Docker CLI
         run: apt-get update -qq && apt-get install -y -qq docker.io > /dev/null
       - name: Login to registry
-        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login $REGISTRY -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+        run: echo "${{ github.token }}" | docker login $REGISTRY -u "${{ github.actor }}" --password-stdin
       - name: Build and push
         run: |
           TAG="v$(git rev-parse --short HEAD)"
