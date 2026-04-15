@@ -6,52 +6,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: python
     steps:
-      - name: Install system deps
-        run: apt-get update && apt-get install -y gcc g++ libpq-dev python3-pip
       - uses: actions/checkout@v4
-      - name: Install Python deps
-        run: pip install --break-system-packages -r requirements.txt
-      - name: Run unit tests
+      - name: Install deps
+        run: pip install --no-cache-dir -r requirements.txt pytest pylint
+      - name: Test
         run: python3 -m pytest tests/unit/ -q
-      - name: Run pylint
-        run: |
-          python3 -m pylint src tests \
-            --output-format=parseable --reports=no \
-            > pylint-report.txt 2>&1 || true
-          tail -1 pylint-report.txt
-
-  build:
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set tag
-        id: meta
-        run: |
-          TAG="v$(git rev-parse --short HEAD)"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-      - name: Build and push
-        run: |
-          docker build -t contribute.void42.internal/golden/gmr-community-api:${{ steps.meta.outputs.tag }} .
-          docker push contribute.void42.internal/golden/gmr-community-api:${{ steps.meta.outputs.tag }}
-
-  deploy-dev:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Update dev values
-        run: |
-          echo "version: \"${{ needs.build.outputs.tag }}\"" > deployment/values-dev.yaml
-      - name: Push
-        run: |
-          git config user.name "GMR CI"
-          git config user.email "ci@void42.internal"
-          git add deployment/values-dev.yaml
-          git diff --cached --quiet || git commit -m "ci: deploy ${{ needs.build.outputs.tag }} to dev [skip ci]"
-          git push || true
+      - name: Lint
+        run: python3 -m pylint src tests --output-format=parseable --reports=no 2>&1 | tail -1 || true
