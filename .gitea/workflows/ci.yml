@@ -38,6 +38,7 @@ jobs:
           sed -i "s/version: .*/version: \"$TAG\"/" deployment/values-dev.yaml
           git config user.name "GMR CI"
           git config user.email "ci@void42.internal"
+          git remote set-url origin "http://oauth2:${{ secrets.REGISTRY_PASSWORD }}@gitea-http.dev-tools.svc.cluster.local:3000/${{ github.repository }}.git"
           git add deployment/values-dev.yaml
           git diff --cached --quiet || git commit -m "ci: deploy $TAG to dev [skip ci]"
-          git push
+          git push origin HEAD:main
