@@ -15,3 +15,28 @@ jobs:
         run: python3 -m pytest tests/unit/ -q
       - name: Lint
         run: python3 -m pylint src tests --output-format=parseable --reports=no 2>&1 | tail -1 || true
+
+  build-deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Docker CLI
+        run: |
+          apt-get update -qq && apt-get install -y -qq docker.io > /dev/null
+      - name: Build image
+        run: |
+          TAG="v$(git rev-parse --short HEAD)"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          docker build -t contribute.void42.internal/golden/gmr-community-api:$TAG .
+      - name: Push image
+        run: docker push contribute.void42.internal/golden/gmr-community-api:$TAG
+      - name: Deploy to dev
+        run: |
+          sed -i "s/version: .*/version: \"$TAG\"/" deployment/values-dev.yaml
+          git config user.name "GMR CI"
+          git config user.email "ci@void42.internal"
+          git add deployment/values-dev.yaml
+          git diff --cached --quiet || git commit -m "ci: deploy $TAG to dev [skip ci]"
+          git push
