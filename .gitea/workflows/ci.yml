@@ -20,23 +20,23 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    env:
-      REGISTRY: gitea-http.dev-tools.svc.cluster.local:3000
-      IMAGE: golden/gmr-community-api
     steps:
       - uses: actions/checkout@v4
-      - name: Install Docker CLI
-        run: apt-get update -qq && apt-get install -y -qq docker.io > /dev/null
-      - name: Login to registry
-        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login $REGISTRY -u "${{ secrets.REGISTRY_USER }}" --password-stdin
-      - name: Build and push
+      - name: Build, push, and deploy to dev
+        env:
+          REGISTRY: gitea-http.dev-tools.svc.cluster.local:3000
+          IMAGE: golden/gmr-community-api
+          REG_USER: ${{ secrets.REGISTRY_USER }}
+          REG_PASS: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
+          set -e
+          apt-get update -qq && apt-get install -y -qq docker.io > /dev/null
           TAG="v$(git rev-parse --short HEAD)"
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          docker build -t $REGISTRY/$IMAGE:$TAG .
-          docker push $REGISTRY/$IMAGE:$TAG
-      - name: Deploy to dev
-        run: |
+          echo "Building $REGISTRY/$IMAGE:$TAG"
+          echo "$REG_PASS" | docker login "$REGISTRY" -u "$REG_USER" --password-stdin
+          docker build -t "$REGISTRY/$IMAGE:$TAG" .
+          docker push "$REGISTRY/$IMAGE:$TAG"
+          echo "Updating values-dev.yaml to $TAG"
           sed -i "s/version: .*/version: \"$TAG\"/" deployment/values-dev.yaml
           git config user.name "GMR CI"
           git config user.email "ci@void42.internal"
