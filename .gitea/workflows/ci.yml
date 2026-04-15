@@ -22,21 +22,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build, push, and deploy to dev
-        env:
-          REGISTRY: gitea-http.dev-tools.svc.cluster.local:3000
-          IMAGE: golden/gmr-community-api
-          REG_USER: ${{ secrets.REGISTRY_USER }}
-          REG_PASS: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Setup Docker
+        run: apt-get update -qq && apt-get install -y -qq docker.io > /dev/null && docker version
+      - name: Login
+        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login gitea-http.dev-tools.svc.cluster.local:3000 -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+      - name: Build
+        run: docker build -t gitea-http.dev-tools.svc.cluster.local:3000/golden/gmr-community-api:v$(git rev-parse --short HEAD) .
+      - name: Push
+        run: docker push gitea-http.dev-tools.svc.cluster.local:3000/golden/gmr-community-api:v$(git rev-parse --short HEAD)
+      - name: Deploy to dev
         run: |
-          set -e
-          apt-get update -qq && apt-get install -y -qq docker.io > /dev/null
           TAG="v$(git rev-parse --short HEAD)"
-          echo "Building $REGISTRY/$IMAGE:$TAG"
-          echo "$REG_PASS" | docker login "$REGISTRY" -u "$REG_USER" --password-stdin
-          docker build -t "$REGISTRY/$IMAGE:$TAG" .
-          docker push "$REGISTRY/$IMAGE:$TAG"
-          echo "Updating values-dev.yaml to $TAG"
           sed -i "s/version: .*/version: \"$TAG\"/" deployment/values-dev.yaml
           git config user.name "GMR CI"
           git config user.email "ci@void42.internal"
