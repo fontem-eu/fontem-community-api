@@ -37,9 +37,9 @@ spec:
                   name: gmr-postgres-credentials
                   key: POSTGRES_PASSWORD
             - name: DATABASE_URL
-              value: "postgresql+asyncpg://postgres:$(POSTGRES_PASSWORD)@postgresql:5432/gmr_app"
+              value: {{ .Values.databaseUrl | quote }}
             - name: CLAUDE_PROXY_URL
-              value: {{ .Values.claudeProxyUrl | default "http://claude-proxy.gmr.svc.cluster.local:8090" | quote }}
+              value: {{ .Values.claudeProxyUrl | quote }}
           livenessProbe:
             httpGet:
               path: /health
