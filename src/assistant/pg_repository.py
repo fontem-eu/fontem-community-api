@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.assistant.context import Turn
@@ -129,6 +129,17 @@ class PgAssistRepository(AssistRepository):
         )
         result = (await self._session.execute(stmt)).scalar_one()
         return int(result)
+
+    async def delete_user_conversations(self, user_id: str) -> int:
+        # Messages are cascade-deleted via FK on assist_messages.conversation_id
+        stmt = (
+            delete(AssistConversationModel)
+            .where(AssistConversationModel.user_id == user_id)
+            .returning(AssistConversationModel.id)
+        )
+        result = await self._session.execute(stmt)
+        rows = result.all()
+        return len(rows)
 
     async def usage_history_since(
         self, user_id: str, since: datetime

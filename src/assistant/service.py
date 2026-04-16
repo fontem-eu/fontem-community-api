@@ -226,6 +226,12 @@ class AssistantService:
             tokens_7d=tokens_7d,
         )
 
+    async def delete_user_conversations(self, user_id: str) -> int:
+        """Delete all conversations and messages for a user. Returns count deleted."""
+        count = await self._repo.delete_user_conversations(user_id)
+        await self._repo.commit()
+        return count
+
     async def usage_history_for_user(
         self,
         user_id: str,

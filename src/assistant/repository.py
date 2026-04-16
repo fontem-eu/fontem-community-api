@@ -100,6 +100,10 @@ class AssistRepository(ABC):
         """
 
     @abstractmethod
+    async def delete_user_conversations(self, user_id: str) -> int:
+        """Delete all conversations and messages for a user. Returns count deleted."""
+
+    @abstractmethod
     async def usage_history_since(
         self, user_id: str, since: datetime
     ) -> list[DailyUsage]:
@@ -199,6 +203,23 @@ class InMemoryAssistRepository(AssistRepository):
                 continue
             total += (m.tokens_in or 0) + (m.tokens_out or 0)
         return total
+
+    async def delete_user_conversations(self, user_id: str) -> int:
+        conv_ids = {
+            cid for cid, conv in self._conversations.items()
+            if conv.user_id == user_id
+        }
+        count = len(conv_ids)
+        self._messages = [
+            m for m in self._messages
+            if m.conversation_id not in conv_ids
+        ]
+        for cid in conv_ids:
+            del self._conversations[cid]
+        self._by_key = {
+            k: v for k, v in self._by_key.items() if v not in conv_ids
+        }
+        return count
 
     async def usage_history_since(
         self, user_id: str, since: datetime

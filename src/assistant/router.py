@@ -144,6 +144,18 @@ async def usage_history(
     )
 
 
+@router.delete("/conversations")
+@inject
+async def delete_all_conversations(
+    *,
+    user: User = Depends(get_current_user),
+    service: FromDishka[AssistantService],
+) -> dict:
+    """Delete all conversation history for the current user."""
+    count = await service.delete_user_conversations(user.id)
+    return {"deleted": count}
+
+
 @router.get("/conversations/{conversation_key:path}")
 @inject
 async def get_conversation(
