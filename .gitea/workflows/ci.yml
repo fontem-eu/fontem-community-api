@@ -23,22 +23,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Docker
-        run: |
-          curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | tar xz --strip-components=1 -C /usr/local/bin docker/docker
-          docker version
-      - name: Login
-        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login gitea-http.dev-tools.svc.cluster.local:3000 -u "${{ secrets.REGISTRY_USER }}" --password-stdin
-      - name: Build
-        run: docker build -t gitea-http.dev-tools.svc.cluster.local:3000/golden/gmr-community-api:v$(git rev-parse --short HEAD) .
-      - name: Push
-        run: docker push gitea-http.dev-tools.svc.cluster.local:3000/golden/gmr-community-api:v$(git rev-parse --short HEAD)
-      - name: Deploy to dev
+        run: curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | tar xz --strip-components=1 -C /usr/local/bin docker/docker
+      - name: Build and push image
         run: |
           TAG="v$(git rev-parse --short HEAD)"
-          sed -i "s/version: .*/version: \"$TAG\"/" deployment/values-dev.yaml
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login gitea-http.dev-tools.svc.cluster.local:3000 -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+          docker build -t gitea-http.dev-tools.svc.cluster.local:3000/golden/gmr-community-api:$TAG .
+          docker push gitea-http.dev-tools.svc.cluster.local:3000/golden/gmr-community-api:$TAG
+      - name: Deploy to dev
+        run: |
+          git clone --depth=1 http://oauth2:${{ secrets.REGISTRY_PASSWORD }}@gitea-http.dev-tools.svc.cluster.local:3000/golden/gitops.git /tmp/gitops
+          cd /tmp/gitops
+          sed -i 's/version: ".*"/version: "'$TAG'"/' dev/gmr-community-api.yaml
           git config user.name "GMR CI"
           git config user.email "ci@void42.internal"
-          git remote set-url origin "http://oauth2:${{ secrets.REGISTRY_PASSWORD }}@gitea-http.dev-tools.svc.cluster.local:3000/${{ github.repository }}.git"
-          git add deployment/values-dev.yaml
-          git diff --cached --quiet || git commit -m "ci: deploy $TAG to dev [skip ci]"
-          git push origin HEAD:main
+          git add dev/gmr-community-api.yaml
+          git diff --cached --quiet || git commit -m "ci: deploy gmr-community-api $TAG to dev"
+          git push origin main
