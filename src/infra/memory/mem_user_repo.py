@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from src.domain.moderation import Sanction
@@ -70,3 +70,22 @@ class InMemoryUserRepository(UserRepository):
                 if s.id == sanction_id:
                     s.lifted_at = now
                     return
+
+    async def register_failed_login(
+        self, email: str, max_attempts: int, lock_duration_minutes: int,
+    ) -> None:
+        for user in self._users.values():
+            if user.email == email:
+                user.failed_login_attempts += 1
+                if user.failed_login_attempts >= max_attempts:
+                    user.locked_until = (
+                        datetime.now(timezone.utc)
+                        + timedelta(minutes=lock_duration_minutes)
+                    )
+                return
+
+    async def clear_failed_logins(self, user_id: str) -> None:
+        user = self._users.get(user_id)
+        if user is not None:
+            user.failed_login_attempts = 0
+            user.locked_until = None

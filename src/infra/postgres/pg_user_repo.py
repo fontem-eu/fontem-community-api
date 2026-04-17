@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,8 @@ class PgUserRepository(UserRepository):
             password_hash=getattr(row, 'password_hash', None),
             trust_level=row.trust_level,
             created_at=row.created_at,
+            failed_login_attempts=getattr(row, 'failed_login_attempts', 0) or 0,
+            locked_until=getattr(row, 'locked_until', None),
         )
 
     async def get_by_id(self, user_id: str) -> User | None:
@@ -146,3 +148,31 @@ class PgUserRepository(UserRepository):
         if row is not None:
             row.lifted_at = datetime.now(timezone.utc)
             await self._session.commit()
+
+    async def register_failed_login(
+        self, email: str, max_attempts: int, lock_duration_minutes: int,
+    ) -> None:
+        result = await self._session.execute(
+            select(UserModel).where(UserModel.email == email)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return  # silently ignore unknown emails (no account-existence leak)
+        new_count = (getattr(row, 'failed_login_attempts', 0) or 0) + 1
+        values: dict = {"failed_login_attempts": new_count}
+        if new_count >= max_attempts:
+            values["locked_until"] = (
+                datetime.now(timezone.utc) + timedelta(minutes=lock_duration_minutes)
+            )
+        await self._session.execute(
+            update(UserModel).where(UserModel.id == row.id).values(**values)
+        )
+        await self._session.commit()
+
+    async def clear_failed_logins(self, user_id: str) -> None:
+        await self._session.execute(
+            update(UserModel)
+            .where(UserModel.id == user_id)
+            .values(failed_login_attempts=0, locked_until=None)
+        )
+        await self._session.commit()

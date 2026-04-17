@@ -40,6 +40,12 @@ class UserModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow
     )
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
 
     roles: Mapped[list[UserRoleModel]] = relationship(
         "UserRoleModel", back_populates="user", cascade="all, delete-orphan"

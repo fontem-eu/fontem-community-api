@@ -13,6 +13,10 @@ from starlette.testclient import TestClient
 
 from src.api.app import app
 from src.api.auth import JWT_SECRET, JWT_ALGORITHM
+from src.api.rate_limit import limiter
+
+# Disable per-endpoint rate limiting in tests so bursts don't trip auth limits.
+limiter.enabled = False
 
 
 def _stable_uuid(raw_id: str) -> str:
