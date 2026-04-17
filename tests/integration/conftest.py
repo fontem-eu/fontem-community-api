@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 from jose import jwt
+from testcontainers.minio import MinioContainer
 from testcontainers.postgres import PostgresContainer
 
 # ── JWT helpers ──────────────────────────────────────────────
@@ -62,10 +63,44 @@ def _postgres():
 
 
 @pytest.fixture(scope="session")
-def _test_client(_postgres):
+def _minio():
+    """Disposable MinIO container for the test session.
+
+    Sets MINIO_* env vars **before** the app is built so MinioStorage
+    (which reads them in __init__) gets the right values. The bucket
+    used by upload code is created here so first upload doesn't 404.
+    """
+    container = MinioContainer("minio/minio:RELEASE.2024-12-18T13-15-44Z")
+    container.start()
+
+    config = container.get_config()
+    endpoint = config["endpoint"]  # e.g. "127.0.0.1:32789"
+    access_key = config["access_key"]
+    secret_key = config["secret_key"]
+    bucket = "gmr-uploads"
+
+    # Create bucket
+    client = container.get_client()
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+
+    os.environ["MINIO_ENDPOINT"] = endpoint
+    os.environ["MINIO_ACCESS_KEY"] = access_key
+    os.environ["MINIO_SECRET_KEY"] = secret_key
+    os.environ["MINIO_BUCKET"] = bucket
+
+    yield container
+    container.stop()
+
+
+@pytest.fixture(scope="session")
+def _test_client(_postgres, _minio):
     """Session-scoped TestClient — lifespan fires once, not per test."""
     from starlette.testclient import TestClient
     from src.api.app import build_app
+    # Reset the lazy-initialized storage cache so the test MinIO env wins
+    import src.api.routers.reports as reports_module
+    reports_module._storage = None
     application = build_app(os.environ["DATABASE_URL"])
     with TestClient(application, raise_server_exceptions=False) as c:
         yield c
