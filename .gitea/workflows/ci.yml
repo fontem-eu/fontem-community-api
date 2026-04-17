@@ -79,3 +79,5 @@ jobs:
           git add staging/gmr-community-api.yaml
           git diff --cached --quiet || git commit -m "ci: deploy gmr-community-api $TAG to staging"
           git push origin main
+
+# retrigger 1776440392
