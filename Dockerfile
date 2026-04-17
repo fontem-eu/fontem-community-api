@@ -1,5 +1,12 @@
 FROM python:3.12-slim
 
+COPY void42-ca.crt /usr/local/share/ca-certificates/void42-ca.crt
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    update-ca-certificates && rm -rf /var/lib/apt/lists/*
+
+ENV PIP_INDEX_URL=https://nexus.void42.internal/repository/pypi-proxy/simple/ \
+    PIP_TRUSTED_HOST=nexus.void42.internal
+
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
