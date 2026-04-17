@@ -23,9 +23,23 @@ class MinioStorage:
         secret_key = os.environ["MINIO_SECRET_KEY"]
         self._bucket = os.environ.get("MINIO_BUCKET", "gmr-uploads")
         self._client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=False)
+        self._bucket_ensured = False
+
+    def _ensure_bucket(self) -> None:
+        """Create the bucket if it doesn't exist (idempotent, lazy).
+
+        Done on first upload rather than in __init__ so app startup
+        doesn't depend on MinIO being reachable.
+        """
+        if self._bucket_ensured:
+            return
+        if not self._client.bucket_exists(self._bucket):
+            self._client.make_bucket(self._bucket)
+        self._bucket_ensured = True
 
     def upload(self, report_id: str, data: bytes, content_type: str) -> str:
         """Upload a file and return its object key."""
+        self._ensure_bucket()
         ext = EXT_MAP.get(content_type, "bin")
         key = f"{report_id}/{uuid.uuid4().hex}.{ext}"
         self._client.put_object(
