@@ -9,7 +9,10 @@ from fastapi.responses import JSONResponse
 import os
 
 from dishka.integrations.fastapi import setup_dishka
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+from src.api.rate_limit import limiter
 from src.api.routers import auth, groups, issues, moderation, reports, sharing, users
 from src.assistant import router as assistant_router
 from src.api.di import make_container
@@ -29,6 +32,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.run_sync(Base.metadata.create_all)
         async with engine.begin() as conn:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "failed_login_attempts INTEGER NOT NULL DEFAULT 0"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ"
+            ))
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS conversations (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -102,6 +112,9 @@ def build_app(database_url: str | None = None) -> FastAPI:
         docs_url=None,
         redoc_url=None,
     )
+
+    application.state.limiter = limiter
+    application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     db_url = database_url or os.environ.get("DATABASE_URL")
     if db_url:

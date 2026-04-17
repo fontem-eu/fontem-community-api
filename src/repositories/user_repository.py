@@ -30,3 +30,18 @@ class UserRepository(ABC):
 
     @abstractmethod
     async def lift_sanction(self, sanction_id: str) -> None: ...
+
+    @abstractmethod
+    async def register_failed_login(
+        self, email: str, max_attempts: int, lock_duration_minutes: int,
+    ) -> None:
+        """Increment failed-login counter for the given email.
+
+        If the resulting count reaches ``max_attempts``, set ``locked_until``
+        to ``now + lock_duration_minutes``. Silent no-op if the email is
+        unknown (do not leak account existence).
+        """
+
+    @abstractmethod
+    async def clear_failed_logins(self, user_id: str) -> None:
+        """Reset failed-login counter and clear any lock for the given user."""

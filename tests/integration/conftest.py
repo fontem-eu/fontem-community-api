@@ -20,6 +20,10 @@ from testcontainers.postgres import PostgresContainer
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
 JWT_ALGORITHM = "HS256"
 
+# Disable per-endpoint rate limiting in tests so bursts don't trip auth limits.
+from src.api.rate_limit import limiter as _limiter
+_limiter.enabled = False
+
 
 def make_token(user_id: str | None = None, email: str | None = None,
                name: str = "Test User") -> str:
