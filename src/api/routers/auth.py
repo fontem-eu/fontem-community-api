@@ -10,15 +10,20 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 import httpx
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from jose import jwt as jose_jwt
 from pydantic import BaseModel, EmailStr
 
 from src.api.auth import JWT_ALGORITHM, JWT_SECRET
+from src.api.rate_limit import limiter
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+# Brute-force protection: lock account for 15 min after 5 failed attempts
+_MAX_LOGIN_ATTEMPTS = 5
+_LOCKOUT_MINUTES = 15
 
 GOOGLE_CLIENT_ID = os.environ.get(
     "GOOGLE_CLIENT_ID",
@@ -100,8 +105,10 @@ async def _verify_google_token(credential: str) -> dict:
 
 
 @router.post("/google", response_model=TokenResponse)
+@limiter.limit("10/minute")
 @inject
 async def google_login(
+    request: Request,
     body: GoogleTokenRequest,
     *,
     user_repo: FromDishka[UserRepository],
@@ -209,8 +216,10 @@ def _issue_jwt(user: User) -> TokenResponse:
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
+@limiter.limit("3/minute")
 @inject
 async def register(
+    request: Request,
     body: RegisterRequest,
     *,
     user_repo: FromDishka[UserRepository],
@@ -235,8 +244,10 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/minute")
 @inject
 async def login(
+    request: Request,
     body: LoginRequest,
     *,
     user_repo: FromDishka[UserRepository],
@@ -246,12 +257,25 @@ async def login(
     if user is None or user.password_hash is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    # Lockout check (account-level brute-force protection)
+    if user.locked_until is not None and user.locked_until > datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Account temporarily locked. Try again in {_LOCKOUT_MINUTES} minutes.",
+        )
+
     if not _check_password(body.password, user.password_hash):
+        await user_repo.register_failed_login(
+            body.email, _MAX_LOGIN_ATTEMPTS, _LOCKOUT_MINUTES,
+        )
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     # Check ban
     sanction = await user_repo.get_active_sanction(user.id)
     if sanction is not None and sanction.type == "ban":
         raise HTTPException(status_code=401, detail="Account is banned")
+
+    # Successful login — clear any prior failed attempts
+    await user_repo.clear_failed_logins(user.id)
 
     return _issue_jwt(user)
