@@ -45,6 +45,20 @@ spec:
               value: {{ .Values.databaseUrl | quote }}
             - name: CLAUDE_PROXY_URL
               value: {{ .Values.claudeProxyUrl | quote }}
+            - name: MINIO_ENDPOINT
+              value: {{ .Values.minioEndpoint | default "minio.gmr.svc.cluster.local:9000" | quote }}
+            - name: MINIO_BUCKET
+              value: {{ .Values.minioBucket | default "gmr-uploads" | quote }}
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_PASSWORD
           livenessProbe:
             httpGet:
               path: /health
