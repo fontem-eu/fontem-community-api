@@ -94,6 +94,55 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "CREATE INDEX IF NOT EXISTS ix_reports_parent_id "
                 "ON reports (parent_id) WHERE parent_id IS NOT NULL"
             ))
+            # Reasoner findings: one row per (rule_id, finding_key) where
+            # finding_key is a stable hash of (rule_id, sorted(target_ids))
+            # so re-running a sweep doesn't produce duplicates.
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS reasoner_findings (
+                    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    rule_id       TEXT NOT NULL,
+                    finding_key   TEXT NOT NULL,
+                    severity      TEXT NOT NULL,
+                    confidence    DOUBLE PRECISION NOT NULL,
+                    target_ids    JSONB NOT NULL,
+                    message       TEXT NOT NULL,
+                    payload       JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    status        TEXT NOT NULL DEFAULT 'open',
+                    detected_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    resolved_at   TIMESTAMPTZ,
+                    resolved_by   UUID,
+                    CONSTRAINT uq_reasoner_findings UNIQUE (rule_id, finding_key),
+                    CONSTRAINT ck_reasoner_status CHECK (
+                        status IN ('open','resolved','dismissed','applied')
+                    )
+                )
+            """))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_reasoner_findings_rule_status "
+                "ON reasoner_findings (rule_id, status)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_reasoner_findings_detected_at "
+                "ON reasoner_findings (detected_at DESC)"
+            ))
+            # Immutable audit log for mutations the reasoner auto-applied.
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS reasoner_audit (
+                    id           BIGSERIAL PRIMARY KEY,
+                    rule_id      TEXT NOT NULL,
+                    finding_key  TEXT NOT NULL,
+                    run_id       UUID NOT NULL,
+                    action       TEXT NOT NULL,
+                    summary      TEXT NOT NULL,
+                    payload      JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    occurred_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_reasoner_audit_run "
+                "ON reasoner_audit (run_id)"
+            ))
         await engine.dispose()
 
     yield
