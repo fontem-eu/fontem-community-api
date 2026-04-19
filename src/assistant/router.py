@@ -73,14 +73,20 @@ class HistoryMessage(BaseModel):
 # ── Endpoints ──────────────────────────────────────────────────
 
 
-@router.post("/chat/stream")
+# Return annotation is omitted deliberately: with `from __future__ import
+# annotations`, FastAPI treats the annotation as a string ForwardRef and
+# hands it to Pydantic while building the OpenAPI schema, which then
+# raises `PydanticUserError` (StreamingResponse is not a Pydantic type)
+# and crashes /openapi.json with a 500. `response_class=` tells FastAPI
+# this is a streaming endpoint without involving schema generation.
+@router.post("/chat/stream", response_class=StreamingResponse)
 @inject
 async def chat_stream(
     body: AssistChatBody,
     *,
     service: FromDishka[AssistantService],
     user: User = Depends(get_current_user),
-) -> StreamingResponse:
+):
     """Stream an assistant reply via SSE."""
     req = ChatRequest(
         user_id=user.id,
