@@ -44,6 +44,29 @@ class ReportService:
             raise NotFound(f"Report {report_id} not found")
         return report
 
+    async def get_viewable(
+        self, user_id: str | None, report_id: str,
+    ) -> Report:
+        """Fetch a report, honouring its visibility against an optional user.
+
+        Anonymous callers (``user_id=None``) only see reports with
+        visibility ``public_open``. Authenticated callers go through the
+        regular permission check (which also honours ``public_auth``).
+
+        Anonymous attempts to access non-public reports return 404 —
+        don't leak whether a private report exists by giving a
+        distinguishable 403 vs 404.
+        """
+        report = await self._reports.get_by_id(report_id)
+        if report is None:
+            raise NotFound(f"Report {report_id} not found")
+        if user_id is None:
+            if report.visibility == "public_open":
+                return report
+            raise NotFound(f"Report {report_id} not found")
+        await self._perms.require(user_id, report_id, "viewer")
+        return report
+
     async def update(
         self,
         user_id: str,
