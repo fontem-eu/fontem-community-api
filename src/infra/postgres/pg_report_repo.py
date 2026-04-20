@@ -122,10 +122,18 @@ class PgReportRepository(ReportRepository):
         result = await self._session.execute(stmt)
         return [self._report_to_domain(r) for r in result.scalars().all()]
 
-    async def list_public(self, limit: int, offset: int) -> list[Report]:
+    async def list_public(
+        self, limit: int, offset: int, authenticated: bool = False,
+    ) -> list[Report]:
+        # Anonymous callers only see ``public_open``. Authenticated ones
+        # also see ``public_auth`` (visible to any signed-in user but not
+        # broadcast publicly).
+        allowed = ["public_open"]
+        if authenticated:
+            allowed.append("public_auth")
         stmt = (
             select(ReportModel)
-            .where(ReportModel.visibility.in_(["public_auth", "public_open"]))
+            .where(ReportModel.visibility.in_(allowed))
             .order_by(ReportModel.updated_at.desc())
             .limit(limit)
             .offset(offset)

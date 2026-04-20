@@ -111,8 +111,16 @@ class ReportService:
     async def list_my_reports(self, user_id: str, limit: int, offset: int) -> list[Report]:
         return await self._reports.list_for_user(user_id, limit, offset)
 
-    async def list_public(self, limit: int, offset: int) -> list[Report]:
-        return await self._reports.list_public(limit, offset)
+    async def list_public(
+        self, limit: int, offset: int, authenticated: bool = False,
+    ) -> list[Report]:
+        """List reports browseable by the caller.
+
+        Anonymous callers see ``public_open`` only. Signed-in callers
+        additionally see ``public_auth`` (reports meant for any signed-in
+        user but not the broader public).
+        """
+        return await self._reports.list_public(limit, offset, authenticated=authenticated)
 
     async def list_children(self, parent_id: str) -> list[Report]:
         """List child reports (dossier sub-pages)."""

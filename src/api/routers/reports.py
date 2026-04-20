@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
-from src.api.auth import get_current_user
+from src.api.auth import get_current_user, get_optional_user
 from src.domain.user import User
 from src.infra.minio_client import MinioStorage, ALLOWED_TYPES, MAX_SIZE
 from src.services.report_service import ReportService
@@ -62,12 +62,18 @@ async def list_reports(
     offset: int = Query(0, ge=0),
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
 ) -> list[dict]:
+    # scope=public is browseable anonymously — the feed is the platform's
+    # transparency surface. Anonymous callers only see `public_open`
+    # reports; signed-in callers also see `public_auth` ones.
     if scope == "public":
-        reports = await svc.list_public(limit, offset)
-    else:
-        reports = await svc.list_my_reports(user.id, limit, offset)
+        reports = await svc.list_public(limit, offset, authenticated=user is not None)
+        return [asdict(r) for r in reports]
+    # scope=mine requires auth — re-raise the 401 the optional dep swallowed.
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    reports = await svc.list_my_reports(user.id, limit, offset)
     return [asdict(r) for r in reports]
 
 
