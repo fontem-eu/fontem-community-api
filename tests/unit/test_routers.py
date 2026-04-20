@@ -96,6 +96,44 @@ class TestReportListPublic:
         assert resp.status_code == 401
 
 
+class TestReportGetAnonymous:
+    """GET /reports/:id must honour public_open without a token."""
+
+    def test_public_open_report_fetchable_anonymously(self, client, services):
+        _seed(services)
+        h = make_headers("user-1")
+        rid = _create_report(client, h)
+        client.put(f"/reports/{rid}", json={"visibility": "public_open"}, headers=h)
+        resp = client.get(f"/reports/{rid}")  # no auth
+        assert resp.status_code == 200
+        assert resp.json()["id"] == rid
+
+    def test_public_auth_report_hidden_from_anonymous(self, client, services):
+        _seed(services)
+        h = make_headers("user-1")
+        rid = _create_report(client, h)
+        client.put(f"/reports/{rid}", json={"visibility": "public_auth"}, headers=h)
+        # Anonymous sees 404 (don't leak existence), not 401
+        anon = client.get(f"/reports/{rid}")
+        assert anon.status_code == 404
+        # Signed-in caller can still read it
+        authed = client.get(f"/reports/{rid}", headers=h)
+        assert authed.status_code == 200
+
+    def test_private_report_404s_for_anonymous(self, client, services):
+        _seed(services)
+        h = make_headers("user-1")
+        rid = _create_report(client, h)
+        # default visibility is private; attempt anonymous read
+        anon = client.get(f"/reports/{rid}")
+        assert anon.status_code == 404
+
+    def test_nonexistent_report_404s_for_anonymous(self, client, services):
+        _seed(services)
+        resp = client.get("/reports/does-not-exist")
+        assert resp.status_code == 404
+
+
 class TestReportUpdate:
     """PUT /reports/:id -- partial updates."""
 

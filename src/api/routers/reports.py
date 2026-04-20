@@ -83,9 +83,14 @@ async def get_report(
     report_id: str,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
 ) -> dict:
-    report = await svc.get(user.id, report_id)
+    # Anonymous visitors can read `public_open` reports — that's the
+    # point of having them. The service layer enforces visibility vs
+    # user_id (None for anonymous) and 404s on any non-public attempt
+    # so we don't leak the existence of private reports.
+    uid = user.id if user is not None else None
+    report = await svc.get_viewable(uid, report_id)
     result = asdict(report)
     sections = await svc.get_sections(report_id)
     # v2 reports store a single section with TipTap JSON
