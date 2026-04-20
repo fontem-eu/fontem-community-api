@@ -46,6 +46,12 @@ class UserInfo(BaseModel):
     email: str
     name: str
     avatar_url: str | None = None
+    # Coarse authorization hint for the frontend — lets the UI hide
+    # moderator-only affordances (e.g. the Admin link in the footer)
+    # without requiring a round-trip to /users/me on every navigation.
+    # The server remains the source of truth and re-checks on every
+    # privileged endpoint.
+    trust_level: str = "new_user"
 
 
 class TokenResponse(BaseModel):
@@ -164,6 +170,7 @@ async def google_login(
             email=user.email,
             name=user.name,
             avatar_url=user.avatar_url,
+            trust_level=user.trust_level,
         ),
     )
 
@@ -211,6 +218,7 @@ def _issue_jwt(user: User) -> TokenResponse:
         user=UserInfo(
             id=user.id, email=user.email,
             name=user.name, avatar_url=user.avatar_url,
+            trust_level=user.trust_level,
         ),
     )
 
