@@ -45,6 +45,16 @@ spec:
               value: {{ .Values.databaseUrl | quote }}
             - name: CLAUDE_PROXY_URL
               value: {{ .Values.claudeProxyUrl | quote }}
+            - name: LLM_PROVIDER
+              value: {{ .Values.llmProvider | default "mistral" | quote }}
+            - name: MISTRAL_MODEL
+              value: {{ .Values.mistralModel | default "mistral-small-latest" | quote }}
+            - name: MISTRAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mistralSecretName | default "mistral-api-key" }}
+                  key: api-key
+                  optional: true
             - name: MINIO_ENDPOINT
               value: {{ .Values.minioEndpoint | default "minio.gmr.svc.cluster.local:9000" | quote }}
             - name: MINIO_BUCKET

@@ -22,8 +22,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from src.assistant.context import TurnLimits
+from src.assistant.mistral_client import MistralProxyClient
 from src.assistant.proxy_client import ClaudeProxyClient
-from src.assistant.service import AssistantService
+from src.assistant.service import AssistantService, ProxyClient
 from src.repositories.group_repository import GroupRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
@@ -183,10 +184,26 @@ _CONTEXT_CHAR_BUDGET = 8_000
 
 
 class AssistantProvider(Provider):
-    """Claude proxy client (APP singleton) and assistant service (REQUEST)."""
+    """Proxy client (APP singleton) and assistant service (REQUEST).
+
+    Selects the LLM provider via ``LLM_PROVIDER`` env var:
+      * ``mistral`` — direct HTTPS to Mistral's chat-completions API
+        (key from ``MISTRAL_API_KEY``).  Default in staging/prod — no
+        OAuth subprocess, no keepalive daemon.
+      * anything else (or unset) — the legacy Claude CLI proxy.
+    """
 
     @provide(scope=Scope.APP)
-    def proxy_client(self) -> ClaudeProxyClient:
+    def proxy_client(self) -> ProxyClient:
+        provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+        if provider == "mistral":
+            return MistralProxyClient(
+                api_key=os.environ.get("MISTRAL_API_KEY", ""),
+                model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
+                gmr_api_url=os.environ.get(
+                    "GMR_API_INTERNAL", "http://gmr-api.gmr.svc.cluster.local",
+                ),
+            )
         url = os.environ.get(
             "CLAUDE_PROXY_URL",
             "http://claude-proxy.gmr.svc.cluster.local:8090",
@@ -195,7 +212,7 @@ class AssistantProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def assistant_service(
-        self, repo: AssistRepository, proxy: ClaudeProxyClient,
+        self, repo: AssistRepository, proxy: ProxyClient,
     ) -> AssistantService:
         return AssistantService(
             repo=repo,
