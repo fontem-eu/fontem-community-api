@@ -44,11 +44,14 @@ class InMemoryReportRepository(ReportRepository):
         results.sort(key=lambda r: r.updated_at or r.created_at or datetime.min, reverse=True)
         return results[offset : offset + limit]
 
-    async def list_public(self, limit: int, offset: int) -> list[Report]:
+    async def list_public(
+        self, limit: int, offset: int, authenticated: bool = False,
+    ) -> list[Report]:
+        allowed = ("public_open",) if not authenticated else ("public_open", "public_auth")
         results = [
             deepcopy(r)
             for r in self._reports.values()
-            if r.visibility in ("public_auth", "public_open")
+            if r.visibility in allowed
         ]
         results.sort(key=lambda r: r.updated_at or r.created_at or datetime.min, reverse=True)
         return results[offset : offset + limit]

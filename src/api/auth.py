@@ -14,13 +14,14 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
 JWT_ALGORITHM = "HS256"
 
 _bearer_scheme = HTTPBearer()
+_bearer_scheme_optional = HTTPBearer(auto_error=False)
 
 
-@inject
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
-    user_repo: FromDishka[UserRepository] = None,  # type: ignore[assignment]
+async def _resolve_user(
+    credentials: HTTPAuthorizationCredentials,
+    user_repo: UserRepository,
 ) -> User:
+    """Core token → User logic; shared by the strict and optional deps."""
     token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
@@ -54,3 +55,31 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Account is banned")
 
     return user
+
+
+@inject
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+    user_repo: FromDishka[UserRepository] = None,  # type: ignore[assignment]
+) -> User:
+    return await _resolve_user(credentials, user_repo)
+
+
+@inject
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme_optional),
+    user_repo: FromDishka[UserRepository] = None,  # type: ignore[assignment]
+) -> User | None:
+    """Auth dep that returns None for anonymous callers instead of 401-ing.
+
+    Use on endpoints that must serve unauthenticated clients for at least
+    some code paths (e.g. public feed browsing). A malformed token is
+    treated as anonymous rather than a hard error — routes that truly
+    require auth should keep using ``get_current_user``.
+    """
+    if credentials is None:
+        return None
+    try:
+        return await _resolve_user(credentials, user_repo)
+    except HTTPException:
+        return None

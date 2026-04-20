@@ -67,6 +67,34 @@ class TestReportListPublic:
         assert resp.status_code == 200
         assert any(r["id"] == rid for r in resp.json())
 
+    def test_list_public_is_anonymous_browseable(self, client, services):
+        """scope=public must not 401 for a caller with no Authorization header."""
+        _seed(services)
+        h = make_headers("user-1")
+        rid = _create_report(client, h)
+        client.put(f"/reports/{rid}", json={"visibility": "public_open"}, headers=h)
+        resp = client.get("/reports?scope=public")  # no auth header
+        assert resp.status_code == 200
+        assert any(r["id"] == rid for r in resp.json())
+
+    def test_list_public_anon_hides_public_auth(self, client, services):
+        """public_auth reports must be visible to signed-in users only."""
+        _seed(services)
+        h = make_headers("user-1")
+        rid = _create_report(client, h)
+        client.put(f"/reports/{rid}", json={"visibility": "public_auth"}, headers=h)
+        anon = client.get("/reports?scope=public")
+        assert anon.status_code == 200
+        assert not any(r["id"] == rid for r in anon.json())
+        authed = client.get("/reports?scope=public", headers=h)
+        assert any(r["id"] == rid for r in authed.json())
+
+    def test_list_mine_still_requires_auth(self, client, services):
+        """scope=mine must still 401 without a token — that wasn't relaxed."""
+        _seed(services)
+        resp = client.get("/reports")  # defaults to scope=mine
+        assert resp.status_code == 401
+
 
 class TestReportUpdate:
     """PUT /reports/:id -- partial updates."""
