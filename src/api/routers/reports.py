@@ -9,11 +9,12 @@ from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user, get_optional_user
+from src.api.openapi_responses import AUTH_RESPONSES
 from src.domain.user import User
 from src.infra.minio_client import MinioStorage, ALLOWED_TYPES, MAX_SIZE
 from src.services.report_service import ReportService
 
-router = APIRouter(prefix="/reports", tags=["reports"])
+router = APIRouter(prefix="/reports", tags=["reports"], responses=AUTH_RESPONSES)
 
 
 class CreateReportRequest(BaseModel):

@@ -9,12 +9,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import get_current_user
+from src.api.openapi_responses import AUTH_RESPONSES
 from src.assistant.repository import AssistRepository
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 from src.services.exceptions import NotFound
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"], responses=AUTH_RESPONSES)
 
 
 @router.get("/me")

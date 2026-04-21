@@ -12,6 +12,8 @@ from dishka.integrations.fastapi import setup_dishka
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from sqlalchemy.exc import DBAPIError
+
 from src.api.rate_limit import limiter
 from src.api.routers import (
     auth, groups, issues, moderation, reports, sharing, sitemap, users,
@@ -153,6 +155,27 @@ def build_app(database_url: str | None = None) -> FastAPI:
     @application.exception_handler(Conflict)
     async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": exc.message})
+
+    @application.exception_handler(DBAPIError)
+    async def dbapi_error_handler(request: Request, exc: DBAPIError) -> JSONResponse:
+        """Translate driver-level argument errors into a 400 instead of 500.
+
+        asyncpg raises `ValueError: invalid UUID ...` when a path-param
+        string fails the UUID bind — SQLAlchemy wraps it as DBAPIError.
+        Before this handler, `GET /reports/undefined` returned a generic
+        500; caller now sees a clear 400 and DAST/fuzz tooling stops
+        counting these as server errors. Keep the message boring —
+        don't leak the stack trace.
+        """
+        root = exc.orig if exc.orig is not None else exc
+        if isinstance(root, ValueError):
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"Invalid parameter: {root}"},
+            )
+        # Everything else — e.g. connection errors, constraint violations
+        # that weren't translated — falls through to the generic 500.
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     @application.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:

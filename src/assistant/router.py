@@ -14,11 +14,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
+from src.api.openapi_responses import AUTH_RESPONSES
 from src.domain.user import User
 from src.assistant.service import AssistantService, ChatRequest
 
 
-router = APIRouter(prefix="/assist", tags=["assist"])
+router = APIRouter(prefix="/assist", tags=["assist"], responses=AUTH_RESPONSES)
 
 
 # ── Request / response models ─────────────────────────────────

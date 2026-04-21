@@ -9,10 +9,11 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
+from src.api.openapi_responses import AUTH_RESPONSES
 from src.domain.user import User
 from src.services.moderation_service import ModerationService
 
-router = APIRouter(tags=["moderation"])
+router = APIRouter(tags=["moderation"], responses=AUTH_RESPONSES)
 
 
 class CreateFlagRequest(BaseModel):

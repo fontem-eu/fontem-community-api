@@ -8,11 +8,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
+from src.api.openapi_responses import AUTH_RESPONSES
 from src.domain.user import User
 from src.repositories.permission_repository import PermissionRepository
 from src.services.permission_service import PermissionService
 
-router = APIRouter(prefix="/reports/{report_id}/access", tags=["sharing"])
+router = APIRouter(prefix="/reports/{report_id}/access", tags=["sharing"], responses=AUTH_RESPONSES)
 
 
 class SetAccessRequest(BaseModel):
