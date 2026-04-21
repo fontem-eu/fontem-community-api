@@ -13,7 +13,9 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from src.api.rate_limit import limiter
-from src.api.routers import auth, groups, issues, moderation, reports, sharing, users
+from src.api.routers import (
+    auth, groups, issues, moderation, reports, sharing, sitemap, users,
+)
 from src.assistant import router as assistant_router
 from src.api.di import make_container
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
@@ -164,6 +166,7 @@ def build_app(database_url: str | None = None) -> FastAPI:
     application.include_router(users.router)
     application.include_router(groups.router)
     application.include_router(moderation.router)
+    application.include_router(sitemap.router)
 
     @application.get("/health", tags=["Health"])
     async def health() -> dict:
