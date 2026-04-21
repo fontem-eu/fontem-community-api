@@ -19,33 +19,50 @@ jobs:
       - name: Lint
         run: python3 -m pylint src tests --output-format=parseable --reports=no 2>&1 | tail -1 || true
 
+  # Pre-build supply-chain gate; see gmr-ci/actions/osv-scan for the
+  # shared threshold/scanner-version definition.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: golden/gmr-ci
+          path: .gmr-ci
+          token: ${{ secrets.GMR_CI_READ_TOKEN }}
+      - name: OSV-Scanner lockfile gate
+        uses: ./.gmr-ci/actions/osv-scan
+
   analyze:
     needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: python
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: golden/gmr-ci
+          path: .gmr-ci
+          token: ${{ secrets.GMR_CI_READ_TOKEN }}
       - name: Install deps and generate coverage
         env:
           PIP_INDEX_URL: https://nexus.void42.internal/repository/pypi-proxy/simple/
           PIP_TRUSTED_HOST: nexus.void42.internal
         run: |
-          pip install --no-cache-dir -r requirements.txt pytest pytest-cov cyclonedx-bom
+          pip install --no-cache-dir -r requirements.txt pytest pytest-cov
           python3 -m pytest tests/unit/ -q --cov=src --cov-report=xml:coverage.xml || true
       - name: SonarQube scan
         run: npx sonarqube-scanner -Dsonar.host.url=http://sonarqube.sonarqube.svc.cluster.local:9000 -Dsonar.token=${{ secrets.SONAR_TOKEN }}
-      - name: Generate SBOM
-        run: cyclonedx-py requirements requirements.txt --of json -o sbom.json
-      - name: Upload SBOM to Dependency-Track
-        run: |
-          curl -fsS -X POST "http://dependency-track.dependency-track.svc.cluster.local:8080/api/v1/bom" \
-            -H "X-Api-Key: ${{ secrets.DTRACK_API_KEY }}" \
-            -H "Content-Type: multipart/form-data" \
-            -F "projectName=gmr-community-api" -F "projectVersion=$(git rev-parse --short HEAD)" \
-            -F "autoCreate=true" -F "bom=@sbom.json"
+      - name: Generate + upload SBOM
+        uses: ./.gmr-ci/actions/sbom-generate
+        with:
+          language: python
+          project-name: gmr-community-api
+          project-version: ${{ github.sha }}
+          dtrack-key: ${{ secrets.DTRACK_API_KEY }}
 
   build-deploy:
-    needs: test
+    needs: [test, security]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
