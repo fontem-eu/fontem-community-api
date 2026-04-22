@@ -160,21 +160,42 @@ def build_app(database_url: str | None = None) -> FastAPI:
     async def dbapi_error_handler(request: Request, exc: DBAPIError) -> JSONResponse:
         """Translate driver-level argument errors into a 400 instead of 500.
 
-        asyncpg raises `ValueError: invalid UUID ...` when a path-param
-        string fails the UUID bind — SQLAlchemy wraps it as DBAPIError.
-        Before this handler, `GET /reports/undefined` returned a generic
-        500; caller now sees a clear 400 and DAST/fuzz tooling stops
+        asyncpg raises `ValueError: invalid UUID ...` at the bottom of
+        the chain when a path-param string fails the UUID bind.
+        SQLAlchemy wraps it: DBAPIError → AsyncAdapt_asyncpg_dbapi.Error
+        → asyncpg.exceptions.DataError → ValueError. `exc.orig` points
+        at the first wrapper, not the root — walk `__cause__` until we
+        find the ValueError (or give up).
+
+        Before the fix, DAST's `GET /reports/undefined` returned 500;
+        after, the caller sees a clear 400 and fuzz tooling stops
         counting these as server errors. Keep the message boring —
         don't leak the stack trace.
         """
-        root = exc.orig if exc.orig is not None else exc
-        if isinstance(root, ValueError):
-            return JSONResponse(
-                status_code=400,
-                content={"detail": f"Invalid parameter: {root}"},
-            )
-        # Everything else — e.g. connection errors, constraint violations
-        # that weren't translated — falls through to the generic 500.
+        # Walk the chain via both `__cause__` (PEP 3134 exception
+        # chaining) and `orig` (SQLAlchemy's pointer to the underlying
+        # DBAPI exception, which isn't always the same). Either link
+        # can hold the ValueError depending on how the failure was
+        # constructed.
+        seen: set[int] = set()
+        stack: list[BaseException] = [exc]
+        while stack:
+            cur = stack.pop()
+            if id(cur) in seen:
+                continue
+            seen.add(id(cur))
+            if isinstance(cur, ValueError):
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": f"Invalid parameter: {cur}"},
+                )
+            if cur.__cause__ is not None:
+                stack.append(cur.__cause__)
+            orig = getattr(cur, "orig", None)
+            if isinstance(orig, BaseException):
+                stack.append(orig)
+        # Not a ValueError chain — connection errors, constraint
+        # violations — fall through to the generic 500 handler.
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     @application.exception_handler(Exception)

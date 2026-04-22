@@ -49,3 +49,28 @@ def test_dbapi_error_without_valueerror_stays_500(client: TestClient):
     resp = client.get("/_test/connection-drop")
     assert resp.status_code == 500, resp.text
     assert resp.json()["detail"] == "Internal server error"
+
+
+def test_dbapi_error_with_nested_valueerror_returns_400(client: TestClient):
+    """The real shape asyncpg produces — DBAPIError's `orig` is
+    SQLAlchemy's own wrapper, and the ValueError is two `__cause__`
+    hops deeper. First scan missed this because exc.orig was only
+    checked at the top level."""
+
+    @client.app.get("/_test/uuid-bind-nested")
+    def _raise_nested():  # pragma: no cover - invoked via HTTP
+        try:
+            try:
+                raise ValueError("invalid UUID 'undefined': length must be between 32..36 characters, got 9")
+            except ValueError as e1:
+                # Simulate asyncpg.exceptions.DataError wrapping it.
+                raise RuntimeError("asyncpg DataError") from e1
+        except RuntimeError as e2:
+            # Simulate SQLAlchemy's asyncpg dialect wrapper.
+            raise DBAPIError(statement="SELECT 1", params={}, orig=e2) from e2
+
+    resp = client.get("/_test/uuid-bind-nested")
+    assert resp.status_code == 400, resp.text
+    body = resp.json()
+    assert "Invalid parameter" in body["detail"]
+    assert "invalid UUID" in body["detail"]
