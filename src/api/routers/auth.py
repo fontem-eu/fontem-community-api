@@ -80,7 +80,7 @@ async def _verify_google_token(credential: str) -> dict:
         header_segment += "=" * padding
     try:
         header = json.loads(base64.urlsafe_b64decode(header_segment))
-    except (ValueError, UnicodeDecodeError) as exc:
+    except ValueError as exc:
         raise HTTPException(
             status_code=401, detail="Invalid Google token: malformed header",
         ) from exc

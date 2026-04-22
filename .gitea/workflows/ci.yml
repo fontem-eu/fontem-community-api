@@ -48,8 +48,17 @@ jobs:
         run: |
           pip install --no-cache-dir -r requirements.txt pytest pytest-cov
           python3 -m pytest tests/unit/ -q --cov=src --cov-report=xml:coverage.xml || true
-      - name: SonarQube scan
-        run: npx sonarqube-scanner -Dsonar.host.url=http://sonarqube.sonarqube.svc.cluster.local:9000 -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+      - name: SonarQube scan (blocking on quality gate)
+        # qualitygate.wait=true keeps the scanner running until Sonar
+        # publishes the gate verdict for this analysis, then exits
+        # non-zero on ERROR. Without it the scanner returns the moment
+        # the report upload finishes and CI goes green even when the
+        # gate is red.
+        run: |
+          npx sonarqube-scanner \
+            -Dsonar.host.url=http://sonarqube.sonarqube.svc.cluster.local:9000 \
+            -Dsonar.token=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.qualitygate.wait=true
 
   # Build → sign → attest SBOM → deploy. SBOM generation moved into
   # this job so the same file is both uploaded to DT and used as

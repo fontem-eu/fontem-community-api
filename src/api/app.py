@@ -23,6 +23,33 @@ from src.api.di import make_container
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
 
+def _find_value_error(exc: BaseException) -> ValueError | None:
+    """Walk an exception's cause chain + `.orig` pointer, returning the
+    first ValueError found (or None).
+
+    asyncpg surfaces bad UUID binds as ValueError at the bottom of the
+    chain; SQLAlchemy wraps it as DBAPIError. `exc.orig` points at the
+    first wrapper, `__cause__` chains PEP 3134-style — either link can
+    hold the ValueError depending on how the failure was constructed,
+    so we traverse both. Visited set guards against exotic cycles.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        if id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        if isinstance(cur, ValueError):
+            return cur
+        if cur.__cause__ is not None:
+            stack.append(cur.__cause__)
+        orig = getattr(cur, "orig", None)
+        if isinstance(orig, BaseException):
+            stack.append(orig)
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db_url = os.environ.get("DATABASE_URL")
@@ -160,40 +187,19 @@ def build_app(database_url: str | None = None) -> FastAPI:
     async def dbapi_error_handler(request: Request, exc: DBAPIError) -> JSONResponse:
         """Translate driver-level argument errors into a 400 instead of 500.
 
-        asyncpg raises `ValueError: invalid UUID ...` at the bottom of
-        the chain when a path-param string fails the UUID bind.
-        SQLAlchemy wraps it: DBAPIError → AsyncAdapt_asyncpg_dbapi.Error
-        → asyncpg.exceptions.DataError → ValueError. `exc.orig` points
-        at the first wrapper, not the root — walk `__cause__` until we
-        find the ValueError (or give up).
-
-        Before the fix, DAST's `GET /reports/undefined` returned 500;
-        after, the caller sees a clear 400 and fuzz tooling stops
-        counting these as server errors. Keep the message boring —
-        don't leak the stack trace.
+        Delegates the exception-chain walk to _find_value_error so
+        build_app's own cognitive complexity stays low. Before the
+        fix, DAST's `GET /reports/undefined` returned 500; after, the
+        caller sees a clear 400 and fuzz tooling stops counting these
+        as server errors. Keep the message boring — don't leak the
+        stack trace.
         """
-        # Walk the chain via both `__cause__` (PEP 3134 exception
-        # chaining) and `orig` (SQLAlchemy's pointer to the underlying
-        # DBAPI exception, which isn't always the same). Either link
-        # can hold the ValueError depending on how the failure was
-        # constructed.
-        seen: set[int] = set()
-        stack: list[BaseException] = [exc]
-        while stack:
-            cur = stack.pop()
-            if id(cur) in seen:
-                continue
-            seen.add(id(cur))
-            if isinstance(cur, ValueError):
-                return JSONResponse(
-                    status_code=400,
-                    content={"detail": f"Invalid parameter: {cur}"},
-                )
-            if cur.__cause__ is not None:
-                stack.append(cur.__cause__)
-            orig = getattr(cur, "orig", None)
-            if isinstance(orig, BaseException):
-                stack.append(orig)
+        ve = _find_value_error(exc)
+        if ve is not None:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"Invalid parameter: {ve}"},
+            )
         # Not a ValueError chain — connection errors, constraint
         # violations — fall through to the generic 500 handler.
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})

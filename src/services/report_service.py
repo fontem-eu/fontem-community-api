@@ -61,10 +61,10 @@ class ReportService:
         if report is None:
             raise NotFound(f"Report {report_id} not found")
         if user_id is None:
-            if report.visibility == "public_open":
-                return report
-            raise NotFound(f"Report {report_id} not found")
-        await self._perms.require(user_id, report_id, "viewer")
+            if report.visibility != "public_open":
+                raise NotFound(f"Report {report_id} not found")
+        else:
+            await self._perms.require(user_id, report_id, "viewer")
         return report
 
     async def update(
