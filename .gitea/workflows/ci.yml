@@ -32,6 +32,8 @@ jobs:
           token: ${{ secrets.GMR_CI_READ_TOKEN }}
       - name: OSV-Scanner lockfile gate
         uses: ./.gmr-ci/actions/osv-scan
+      - name: Secret scan (gitleaks)
+        uses: ./.gmr-ci/actions/secret-scan
 
   analyze:
     needs: test
@@ -83,7 +85,7 @@ jobs:
         name: Build, push, sign, attest
         uses: ./.gmr-ci/actions/docker-build-sign
         with:
-          image: gitea-http.dev-tools.svc.cluster.local:3000/golden/gmr-community-api
+          image: contribute.void42.internal/golden/gmr-community-api
           cosign-key: ${{ secrets.COSIGN_KEY }}
           registry-user: ${{ secrets.REGISTRY_USER }}
           registry-password: ${{ secrets.REGISTRY_PASSWORD }}
@@ -93,7 +95,7 @@ jobs:
         env:
           TAG: ${{ steps.image.outputs.tag }}
         run: |
-          git clone --depth=1 http://oauth2:${{ secrets.REGISTRY_PASSWORD }}@gitea-http.dev-tools.svc.cluster.local:3000/golden/gitops.git /tmp/gitops
+          git clone --depth=1 https://oauth2:${{ secrets.REGISTRY_PASSWORD }}@contribute.void42.internal/golden/gitops.git /tmp/gitops
           cd /tmp/gitops
           sed -i "s/version: \".*\"/version: \"$TAG\"/" staging/gmr-community-api.yaml
           git config user.name "GMR CI"
