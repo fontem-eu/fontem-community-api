@@ -41,6 +41,11 @@ jobs:
     runs-on: python
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: golden/gmr-ci
+          path: .gmr-ci
+          token: ${{ secrets.GMR_CI_READ_TOKEN }}
       - name: Install deps and generate coverage
         env:
           PIP_INDEX_URL: https://nexus.void42.internal/repository/pypi-proxy/simple/
@@ -48,17 +53,9 @@ jobs:
         run: |
           pip install --no-cache-dir -r requirements.txt pytest pytest-cov
           python3 -m pytest tests/unit/ -q --cov=src --cov-report=xml:coverage.xml || true
-      - name: SonarQube scan (blocking on quality gate)
-        # qualitygate.wait=true keeps the scanner running until Sonar
-        # publishes the gate verdict for this analysis, then exits
-        # non-zero on ERROR. Without it the scanner returns the moment
-        # the report upload finishes and CI goes green even when the
-        # gate is red.
-        run: |
-          npx sonarqube-scanner \
-            -Dsonar.host.url=http://sonarqube.sonarqube.svc.cluster.local:9000 \
-            -Dsonar.token=${{ secrets.SONAR_TOKEN }} \
-            -Dsonar.qualitygate.wait=true
+      - uses: ./.gmr-ci/actions/sonar-scan
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
 
   # Build → sign → attest SBOM → deploy. SBOM generation moved into
   # this job so the same file is both uploaded to DT and used as
@@ -66,11 +63,8 @@ jobs:
   build-deploy:
     needs: [test, security]
     if: github.ref == 'refs/heads/main'
-    # ci-python runner bundles python3 + pip + node + docker CLI. ubuntu-latest
-    # resolves to ci-node which has no pip, so `sbom-generate language: python`
-    # died with `pip: command not found` on every main build (pre-existing
-    # failure going back at least 10 runs). Cosign still has to be installed
-    # below — neither image ships it.
+    # ci-python runner bundles python3 + pip + node + docker CLI + cosign
+    # (cosign baked in by ci-images PR #15).
     runs-on: python
     steps:
       - uses: actions/checkout@v4
@@ -79,11 +73,6 @@ jobs:
           repository: golden/gmr-ci
           path: .gmr-ci
           token: ${{ secrets.GMR_CI_READ_TOKEN }}
-
-      - name: Setup Cosign
-        run: |
-          curl -sL https://nexus.void42.internal/repository/github-releases/sigstore/cosign/releases/download/v2.4.1/cosign-linux-amd64 -o /usr/local/bin/cosign
-          chmod +x /usr/local/bin/cosign
 
       - id: sbom
         name: Generate + upload SBOM
@@ -104,17 +93,9 @@ jobs:
           registry-password: ${{ secrets.REGISTRY_PASSWORD }}
           sbom-path: ${{ steps.sbom.outputs.sbom-path }}
 
-      - name: Deploy to staging
-        env:
-          TAG: ${{ steps.image.outputs.tag }}
-        run: |
-          git clone --depth=1 https://oauth2:${{ secrets.REGISTRY_PASSWORD }}@contribute.void42.internal/golden/gitops.git /tmp/gitops
-          cd /tmp/gitops
-          sed -i "s/version: \".*\"/version: \"$TAG\"/" staging/gmr-community-api.yaml
-          git config user.name "GMR CI"
-          git config user.email "ci@void42.internal"
-          git add staging/gmr-community-api.yaml
-          git diff --cached --quiet || git commit -m "ci: deploy gmr-community-api $TAG to staging"
-          git push origin main
-
-# retrigger 1776440392
+      - uses: ./.gmr-ci/actions/gitops-bump
+        with:
+          service: gmr-community-api
+          tag: ${{ steps.image.outputs.tag }}
+          env: staging
+          registry-password: ${{ secrets.REGISTRY_PASSWORD }}
