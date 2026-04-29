@@ -34,12 +34,37 @@ class _FakeResponse:
             return self._body
         return json.loads(self._body)
 
+    def raise_for_status(self) -> None:
+        """Mimic httpx.Response.raise_for_status — raise on 4xx/5xx so
+        the freshness fetcher's try/except actually trips."""
+        if self.status_code >= 400:
+            import httpx as _httpx  # pylint: disable=import-outside-toplevel
+            raise _httpx.HTTPStatusError(
+                f"HTTP {self.status_code}",
+                request=None,  # type: ignore[arg-type]
+                response=None,  # type: ignore[arg-type]
+            )
+
 
 class _FakeAsyncClient:
-    """Stand-in for ``httpx.AsyncClient`` that returns scripted responses."""
+    """Stand-in for ``httpx.AsyncClient`` that returns scripted responses.
 
-    def __init__(self, script: list[_FakeResponse]) -> None:
+    The freshness endpoint (``/data-quality/source-freshness``) is hit
+    once at the top of every ``stream`` call. To keep the existing tests
+    readable, we auto-respond with an empty sources list unless the
+    test explicitly scripts a freshness response by passing
+    ``freshness_response``.
+    """
+
+    def __init__(
+        self,
+        script: list[_FakeResponse],
+        freshness_response: _FakeResponse | None = None,
+    ) -> None:
         self._script = list(script)
+        self._freshness_response = freshness_response or _FakeResponse(
+            200, {"sources": [], "generated_at": None},
+        )
         self.calls: list[dict] = []
 
     async def __aenter__(self):
@@ -54,6 +79,8 @@ class _FakeAsyncClient:
 
     async def get(self, url, params=None, **_):
         self.calls.append({"method": "GET", "url": url, "params": params})
+        if "source-freshness" in url:
+            return self._freshness_response
         return self._script.pop(0)
 
 
@@ -145,8 +172,12 @@ async def test_tool_call_round_trip_to_search_endpoint():
     blocks = [b async for b in client.stream({"system": "s", "message": "find apple"})]
     events = _parse_events(blocks)
 
-    # Verify the GMR API was hit with the right params
-    get_calls = [c for c in fake.calls if c["method"] == "GET"]
+    # Verify the GMR API was hit with the right params. Filter out
+    # the freshness probe that now fires at the top of every stream().
+    get_calls = [
+        c for c in fake.calls
+        if c["method"] == "GET" and "source-freshness" not in c["url"]
+    ]
     assert len(get_calls) == 1
     assert get_calls[0]["url"] == "http://fake-api/search"
     assert get_calls[0]["params"] == {"q": "Apple", "limit": 3}
@@ -184,8 +215,13 @@ async def test_propose_edit_forwards_args_as_proposal():
     assert tool_status[0]["tool"] == "mcp__gmr__propose_edit"
     assert tool_status[0]["proposal"] == args
 
-    # No HTTP GET happened — propose_edit is a pure notification
-    assert not any(c["method"] == "GET" for c in fake.calls)
+    # No HTTP GET against business endpoints — propose_edit is a pure
+    # notification. (The freshness probe is allowed.)
+    business_gets = [
+        c for c in fake.calls
+        if c["method"] == "GET" and "source-freshness" not in c["url"]
+    ]
+    assert not business_gets
 
 
 @pytest.mark.asyncio
@@ -255,7 +291,9 @@ async def test_system_prompt_appends_todays_date():
     client = MistralProxyClient(api_key="k", client_factory=lambda: fake)
     [_ async for _ in client.stream({"system": "be helpful", "message": "hi"})]
 
-    body = fake.calls[0]["json"]
+    # First POST is the call to Mistral (the freshness fetch is a GET).
+    post_call = next(c for c in fake.calls if c["method"] == "POST")
+    body = post_call["json"]
     sys_msg = next(m for m in body["messages"] if m["role"] == "system")
     assert "Today's date is " in sys_msg["content"]
     # ISO date format
@@ -291,7 +329,10 @@ async def test_investigate_entity_dispatches_company_then_authority():
     blocks = [b async for b in client.stream({"system": "s", "message": "tell me about abc-123"})]
     events = _parse_events(blocks)
 
-    get_urls = [c["url"] for c in fake.calls if c["method"] == "GET"]
+    get_urls = [
+        c["url"] for c in fake.calls
+        if c["method"] == "GET" and "source-freshness" not in c["url"]
+    ]
     # Tries company first, then authority
     assert get_urls[0] == "http://fake/companies/abc-123"
     assert get_urls[1] == "http://fake/authorities/abc-123"
@@ -439,3 +480,120 @@ async def test_legacy_tools_still_callable_but_not_advertised():
     assert "mcp__gmr__get_authority" not in advertised_names
     assert "mcp__gmr__get_contracts" not in advertised_names
     assert "mcp__gmr__explore_graph" not in advertised_names
+
+
+# ── Source-freshness injection tests ─────────────────────────────────
+
+
+def test_format_freshness_summary_renders_each_source_once():
+    """One bullet per source, alphabetical by id, including coverage
+    range and a freshness note (or `STALE` flag for old loads)."""
+    from src.assistant.mistral_client import _format_freshness_summary  # pylint: disable=import-outside-toplevel
+    summary = _format_freshness_summary([
+        {
+            "id": "sanctions", "label": "EU consolidated sanctions",
+            "coverage_start": "2026-01-01", "coverage_end": "2026-04-29",
+            "record_count": 3015, "expected_cadence_hours": 25,
+            "age_hours": 2.0, "stale": False,
+        },
+        {
+            "id": "openfigi", "label": "OpenFIGI tickers",
+            "coverage_start": None, "coverage_end": None,
+            "record_count": 12345, "expected_cadence_hours": 200,
+            "age_hours": 600.0, "stale": True,
+        },
+    ])
+    assert summary  # not empty
+    # Header tells the model what this is for.
+    assert "coverage" in summary.lower()
+    # Alphabetical: openfigi before sanctions.
+    assert summary.index("openfigi") < summary.index("sanctions")
+    # Coverage range surfaced when we have it.
+    assert "2026-01-01 → 2026-04-29" in summary
+    # Stale flag is loud — capital STALE so the model can't miss it.
+    assert "STALE" in summary
+    # Record counts get thousands separators for legibility.
+    assert "3,015" in summary or "12,345" in summary
+
+
+def test_format_freshness_summary_empty_on_no_sources():
+    """Defensive: an empty list produces an empty string so the caller
+    can short-circuit injection (no half-empty section in the prompt)."""
+    from src.assistant.mistral_client import _format_freshness_summary  # pylint: disable=import-outside-toplevel
+    assert _format_freshness_summary([]) == ""
+
+
+@pytest.mark.asyncio
+async def test_freshness_summary_injected_into_system_prompt():
+    """When the data-quality endpoint returns sources, those source
+    bullets must appear in the system message of the first POST to
+    Mistral. This is what gives the assistant grounded coverage
+    statements ('I checked sanctions through 2026-04-29 …')."""
+    freshness = _FakeResponse(200, {
+        "sources": [
+            {
+                "id": "sanctions", "label": "EU consolidated sanctions",
+                "coverage_start": "2026-01-01", "coverage_end": "2026-04-29",
+                "record_count": 3015, "expected_cadence_hours": 25,
+                "age_hours": 2.0, "stale": False,
+            },
+        ],
+        "generated_at": "2026-04-29T09:00:00+00:00",
+    })
+    fake = _FakeAsyncClient([_ai("ok")], freshness_response=freshness)
+    client = MistralProxyClient(
+        api_key="k", gmr_api_url="http://fake",
+        client_factory=lambda: fake,
+    )
+    [_ async for _ in client.stream({"system": "be helpful", "message": "hi"})]
+
+    body = fake.calls[-1]["json"]  # the POST to Mistral
+    sys_msg = next(m for m in body["messages"] if m["role"] == "system")
+    assert "EU consolidated sanctions" in sys_msg["content"]
+    assert "2026-01-01 → 2026-04-29" in sys_msg["content"]
+    # Original system content + today's date still present too.
+    assert "be helpful" in sys_msg["content"]
+    assert "Today's date is " in sys_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_freshness_fetch_failure_is_silent():
+    """A 500 from the data-quality endpoint must not surface as an
+    error to the user — the chat continues with no coverage block.
+    Best-effort monitoring data shouldn't sink the chat."""
+    fake = _FakeAsyncClient(
+        [_ai("ok")],
+        freshness_response=_FakeResponse(500, "boom"),
+    )
+    client = MistralProxyClient(
+        api_key="k", gmr_api_url="http://fake",
+        client_factory=lambda: fake,
+    )
+    blocks = [b async for b in client.stream({"system": "s", "message": "hi"})]
+    events = _parse_events(blocks)
+    # No error event surfaced from the freshness probe.
+    assert not any(e == "error" for e, _ in events)
+    # And the system prompt didn't pick up a stale coverage block.
+    body = fake.calls[-1]["json"]
+    sys_msg = next(m for m in body["messages"] if m["role"] == "system")
+    assert "Data coverage" not in sys_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_freshness_summary_cached_across_turns():
+    """Within the cache TTL, subsequent stream() calls must NOT re-hit
+    the data-quality endpoint. One client instance, two turns, one
+    freshness GET."""
+    fake = _FakeAsyncClient([_ai("ok"), _ai("ok2")])
+    client = MistralProxyClient(
+        api_key="k", gmr_api_url="http://fake",
+        client_factory=lambda: fake,
+    )
+    [_ async for _ in client.stream({"system": "s", "message": "first"})]
+    [_ async for _ in client.stream({"system": "s", "message": "second"})]
+
+    freshness_calls = [
+        c for c in fake.calls
+        if c["method"] == "GET" and "source-freshness" in c["url"]
+    ]
+    assert len(freshness_calls) == 1
