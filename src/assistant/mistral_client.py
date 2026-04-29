@@ -1,5 +1,6 @@
 # pylint: disable=too-many-arguments,too-many-positional-arguments
 # pylint: disable=too-many-locals,too-many-statements,too-few-public-methods
+# pylint: disable=too-many-instance-attributes,too-many-branches
 """Mistral chat-completions client, exposed as a ``ProxyClient``.
 
 Drop-in replacement for ``ClaudeProxyClient``.  The service layer only
@@ -7,19 +8,31 @@ knows about the ``stream(payload) -> async iter of SSE blocks`` shape, so
 swapping the underlying provider is a matter of wiring a different
 implementation here.
 
-Why this exists:
-  * The Claude CLI proxy is an OAuth subprocess. It's fragile in CI — the
-    OAuth token expires, the subprocess has surprising failure modes, and
-    there is no API-key fallback that the DI currently selects.
-  * Mistral offers an OpenAI-compatible chat-completions API keyed by a
-    flat API key — no OAuth, no subprocess, no keepalive daemon.
-  * Keeping the event shape identical to claude-proxy.py means the
-    frontend (which parses ``event: status`` / ``chunk`` / ``usage``)
-    is unaffected.
+Tool surface (the assistant revamp landed here):
+  * ``investigate_entity`` is the canonical entity-detail tool — one call
+    returns label + props + contracts + graph neighbourhood. Replaces the
+    earlier four narrow getters which mistral occasionally picked the
+    wrong one of.
+  * ``search_entities``, ``find_paths``, ``propose_edit`` remain.
+  * The legacy four narrow getters (``get_company`` / ``get_authority`` /
+    ``get_contracts`` / ``explore_graph``) stay implemented in
+    :py:meth:`_execute_tool` so old saved conversations keep working,
+    but they are NOT advertised in :data:`_TOOLS` — the model only sees
+    the canonical surface.
 
-Tool set mirrors the MCP tool names the old setup exposed
-(``mcp__gmr__*``) so the frontend's ``propose_edit`` proposal-rendering
-code path continues to fire.
+Key behaviours:
+  * The system prompt is augmented every turn with the **current date**
+    so the model can reason about whether dates returned by tools are
+    past / present / future.
+  * Tool-call dedup: within one turn, identical ``(name, args)`` calls
+    short-circuit to the cached result, so a model that asks the same
+    thing twice doesn't pay (in latency or tokens) for it.
+  * Per-turn entity-name cache: when a tool surfaces an id → name, that
+    mapping is used to substitute human-readable labels into the
+    ``status`` events the frontend renders.
+  * On loop exhaustion, emit a ``status`` event with ``phase=truncated``
+    (not ``error``) so the frontend can render a "ran out of budget"
+    notice instead of a hard failure.
 """
 from __future__ import annotations
 
@@ -27,6 +40,7 @@ import json
 import os
 import time
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
 import httpx
 
@@ -41,8 +55,11 @@ _TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__search_entities",
             "description": (
-                "Search for companies, authorities, or persons by name, ticker, "
-                "or keyword. Use this first when the user mentions an entity."
+                "Search for companies, authorities, persons, or lobbyists "
+                "by name, ticker, or keyword. Use this first when the user "
+                "mentions an entity. Returns up to `limit` matches across "
+                "all entity types — pick one and call investigate_entity "
+                "to drill in."
             ),
             "parameters": {
                 "type": "object",
@@ -57,40 +74,35 @@ _TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
-            "name": "mcp__gmr__get_company",
-            "description": "Get full company profile by GMR UUID.",
-            "parameters": {
-                "type": "object",
-                "properties": {"gmr_id": {"type": "string"}},
-                "required": ["gmr_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mcp__gmr__get_contracts",
-            "description": "List EU procurement contracts for a company or authority.",
+            "name": "mcp__gmr__investigate_entity",
+            "description": (
+                "Get the full investigation packet for an entity: its props, "
+                "its EU procurement contracts, and its graph neighbourhood. "
+                "Works for Companies, Authorities, Lobbyists, and Persons — "
+                "the tool dispatches by label internally so the caller does "
+                "NOT need to know which type the id belongs to. Use this "
+                "after `search_entities`. The response carries a `summary` "
+                "field with a short prose précis suitable for direct quoting."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "entity_id": {"type": "string"},
-                    "limit": {"type": "integer"},
-                },
-                "required": ["entity_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mcp__gmr__explore_graph",
-            "description": "Traverse the knowledge graph from an entity up to N hops.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "entity_id": {"type": "string"},
-                    "depth": {"type": "integer", "description": "1-3"},
+                    "entity_id": {
+                        "type": "string",
+                        "description": "GMR UUID returned by search_entities",
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": (
+                            "Graph hops (1-3). Default 1 — usually plenty. "
+                            "Bump only when the user explicitly asks about "
+                            "second-degree connections."
+                        ),
+                    },
+                    "contract_limit": {
+                        "type": "integer",
+                        "description": "Max contracts to include (default 20).",
+                    },
                 },
                 "required": ["entity_id"],
             },
@@ -116,10 +128,14 @@ _TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__propose_edit",
             "description": (
-                "Propose an edit to the user's report. The frontend renders the "
-                "proposal and asks the user to apply it — the tool itself does "
-                "not mutate state. Supported actions: add_section, update_section, "
-                "update_title, update_abstract, insert_widget."
+                "Propose an edit to the user's report. The frontend renders "
+                "the proposal as an Apply/Reject card — the tool itself does "
+                "NOT mutate state. Supported actions: add_section, "
+                "update_section, update_title, update_abstract, "
+                "insert_widget. Multiple proposals sharing a `group_id` "
+                "render as a single grouped card the user can accept/reject "
+                "as a unit (use this when emitting a coherent set of edits "
+                "for one logical report unit)."
             ),
             "parameters": {
                 "type": "object",
@@ -141,6 +157,13 @@ _TOOLS: list[dict] = [
                     },
                     "entityId": {"type": "string"},
                     "depth": {"type": "integer"},
+                    "group_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Proposals sharing the same group_id "
+                            "render as a single review card."
+                        ),
+                    },
                 },
                 "required": ["action"],
             },
@@ -151,11 +174,15 @@ _TOOLS: list[dict] = [
 
 _TOOL_LABELS = {
     "mcp__gmr__search_entities": "Searching entities",
-    "mcp__gmr__get_company": "Looking up company",
-    "mcp__gmr__get_contracts": "Fetching contracts",
-    "mcp__gmr__explore_graph": "Exploring graph",
+    "mcp__gmr__investigate_entity": "Investigating",
     "mcp__gmr__find_paths": "Finding connections",
     "mcp__gmr__propose_edit": "Proposing report edit",
+    # Legacy tools — still implemented for old conversations, but no
+    # longer advertised in _TOOLS.
+    "mcp__gmr__get_company": "Looking up company",
+    "mcp__gmr__get_authority": "Looking up authority",
+    "mcp__gmr__get_contracts": "Fetching contracts",
+    "mcp__gmr__explore_graph": "Exploring graph",
 }
 
 
@@ -163,7 +190,14 @@ _TOOL_LABELS = {
 _MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 _DEFAULT_MODEL = "mistral-small-latest"
 _DEFAULT_GMR_API = "http://gmr-api.gmr.svc.cluster.local"
-_MAX_TOOL_ITERATIONS = 5
+# Bumped 5 → 10. Five is too tight for "investigate this multi-subsidiary
+# corporate group" prompts; ten is enough for most real questions and is
+# still capped well below the model's own context budget.
+_MAX_TOOL_ITERATIONS = 10
+# Cap how many proposals one chat turn can emit before we tell the user
+# "I proposed N edits — review them in order". Stays out of the way for
+# small reports, surfaces a checklist for big ones.
+_PROPOSAL_BUDGET_DISCLOSE = 8
 
 
 def _sse(event: str, data: dict) -> str:
@@ -171,22 +205,74 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
 
-def _tool_detail(name: str, args: dict) -> str:
+def _tool_detail(name: str, args: dict, name_cache: dict[str, str]) -> str:
+    """Build a human-readable status detail for a tool invocation.
+
+    Substitutes UUIDs for entity names when the per-turn `name_cache`
+    has them, so the user sees "Investigating: Metro Mondego, S. A."
+    instead of a UUID."""
     label = _TOOL_LABELS.get(name, name)
-    hint = args.get("query") or args.get("gmr_id") or args.get("entity_id") or ""
-    return f'{label}: "{hint}"' if hint else label
+    raw = (
+        args.get("query")
+        or args.get("entity_id")
+        or args.get("gmr_id")
+        or args.get("from_id")
+        or ""
+    )
+    if not raw:
+        return label
+    pretty = name_cache.get(raw, raw)
+    return f'{label}: "{pretty}"'
+
+
+def _system_prompt_with_today(base: str) -> str:
+    """Append a single line giving the model today's date so it can
+    reason about whether a tool-returned date is past or future."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    if not base:
+        return f"Today's date is {today}."
+    return f"{base.rstrip()}\n\nToday's date is {today}."
+
+
+def _build_summary(label: str, props: dict, contract_count: int) -> str:
+    """Produce a 1-2 sentence prose précis that the model can quote."""
+    name = props.get("name") or "(unnamed)"
+    country = props.get("country") or props.get("country_iso") or "unknown country"
+    base = f"{name} is a {label} ({country})"
+    if contract_count > 0:
+        base += f" with {contract_count} EU procurement contract(s) in the graph"
+    else:
+        base += " with no EU procurement contracts in the graph"
+    return base + "."
+
+
+def _capture_names(name_cache: dict[str, str], payload: dict | list) -> None:
+    """Walk a tool result and remember any (id, name) pairs we see."""
+    if isinstance(payload, dict):
+        # `search_entities` shape: {"companies":[...], "authorities":[...], ...}
+        for collection in ("companies", "authorities", "persons", "lobbyists"):
+            for item in payload.get(collection) or []:
+                _capture_names(name_cache, item)
+        # `investigate_entity` shape: {"props": {...}}
+        if "props" in payload:
+            _capture_names(name_cache, payload["props"])
+        # Single entity dict
+        for id_field in ("gmr_id", "authority_id", "entity_id", "tr_id"):
+            if id_field in payload and payload.get("name"):
+                name_cache[str(payload[id_field])] = str(payload["name"])
+    elif isinstance(payload, list):
+        for item in payload:
+            _capture_names(name_cache, item)
 
 
 class MistralProxyClient:
-    """Mistral chat-completions with a bounded tool-use loop.
+    """Mistral chat-completions with a bounded, deduped tool-use loop.
 
-    Emits exactly the same SSE event vocabulary as the Claude CLI proxy
-    (``status`` / ``chunk`` / ``usage`` / ``error`` / ``done``) so the
-    frontend assistant panel consumes it unchanged.
+    Emits SSE events: ``status`` / ``chunk`` / ``usage`` / ``error`` /
+    ``done`` (the last is appended by the router). Frontend consumes
+    this unchanged.
 
-    Tool calls are dispatched to the GMR REST API; ``propose_edit`` is a
-    pure notification — the frontend executes the actual report mutation
-    with the user's auth when the user clicks "Apply".
+    See the module docstring for the full revamp summary.
     """
 
     def __init__(
@@ -212,7 +298,7 @@ class MistralProxyClient:
     async def stream(self, payload: dict) -> AsyncIterator[str]:  # NOSONAR S3776: provider-loop
         """Execute a chat turn and yield SSE event blocks."""
         start = time.time()
-        system = payload.get("system", "")
+        system = _system_prompt_with_today(payload.get("system", ""))
         message = payload.get("message", "")
 
         if not message:
@@ -235,10 +321,17 @@ class MistralProxyClient:
 
         input_tokens = 0
         output_tokens = 0
+        # Per-turn caches. Keys live for ONE chat turn only (ie. one
+        # call to .stream()), so ids that update mid-conversation are
+        # never staler than one user turn.
+        tool_cache: dict[str, str] = {}
+        name_cache: dict[str, str] = {}
+        proposal_count = 0
 
         try:
             async with self._client_factory() as client:
-                for _ in range(self._max_iter):
+                completed_normally = False
+                for _iter_no in range(self._max_iter):
                     yield _sse("status", {
                         "phase": "thinking",
                         "detail": "Processing your request...",
@@ -286,6 +379,14 @@ class MistralProxyClient:
 
                     if finish != "tool_calls" or not tool_calls:
                         if content:
+                            # Append a proposal-budget disclosure when the
+                            # model emitted many proposals so the user knows
+                            # to review them in order.
+                            if proposal_count > _PROPOSAL_BUDGET_DISCLOSE:
+                                content += (
+                                    f"\n\n_(I proposed {proposal_count} edits — "
+                                    "review them in order in your editor.)_"
+                                )
                             yield _sse("status", {
                                 "phase": "streaming",
                                 "detail": "Writing response...",
@@ -296,6 +397,7 @@ class MistralProxyClient:
                             "input_tokens": input_tokens,
                             "output_tokens": output_tokens,
                         })
+                        completed_normally = True
                         return
 
                     for tc in tool_calls:
@@ -306,10 +408,13 @@ class MistralProxyClient:
                         except (ValueError, TypeError):
                             args = {}
 
+                        if name == "mcp__gmr__propose_edit":
+                            proposal_count += 1
+
                         status: dict = {
                             "phase": "tool_use",
                             "tool": name,
-                            "detail": _tool_detail(name, args),
+                            "detail": _tool_detail(name, args, name_cache),
                             "elapsed": round(time.time() - start, 1),
                         }
                         # Forward propose_edit args so the frontend renders the card.
@@ -317,7 +422,21 @@ class MistralProxyClient:
                             status["proposal"] = args
                         yield _sse("status", status)
 
-                        result = await self._execute_tool(client, name, args)
+                        # Per-turn tool-call dedup. Identical (name, args)
+                        # calls return the cached result instead of paying
+                        # the round-trip again.
+                        cache_key = name + "|" + json.dumps(args, sort_keys=True)
+                        if cache_key in tool_cache:
+                            result = tool_cache[cache_key]
+                        else:
+                            result = await self._execute_tool(client, name, args)
+                            tool_cache[cache_key] = result
+                            # Keep our id→name mapping fresh from every result.
+                            try:
+                                _capture_names(name_cache, json.loads(result))
+                            except (ValueError, TypeError):
+                                pass
+
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.get("id") or "",
@@ -325,13 +444,22 @@ class MistralProxyClient:
                             "content": result,
                         })
 
-                yield _sse("error", {
-                    "error": f"Max tool iterations ({self._max_iter}) reached",
-                })
-                yield _sse("usage", {
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                })
+                # Loop exhausted without a final response. Emit a
+                # `truncated` status (not error) so the frontend can render
+                # a "ran out of budget" notice and offer to retry.
+                if not completed_normally:
+                    yield _sse("status", {
+                        "phase": "truncated",
+                        "detail": (
+                            f"Reached max tool iterations ({self._max_iter}). "
+                            "Try a more focused question."
+                        ),
+                        "elapsed": round(time.time() - start, 1),
+                    })
+                    yield _sse("usage", {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                    })
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             yield _sse("error", {"error": str(exc)[:200]})
 
@@ -345,9 +473,34 @@ class MistralProxyClient:
                     f"{self._gmr_api_url}/search",
                     params={"q": args.get("query", ""), "limit": args.get("limit", 5)},
                 )
+            elif name == "mcp__gmr__investigate_entity":
+                # New canonical getter — composes profile + contracts +
+                # graph in one response, dispatching by label internally.
+                return await self._investigate(
+                    client, args.get("entity_id", ""),
+                    depth=int(args.get("depth", 1) or 1),
+                    contract_limit=int(args.get("contract_limit", 20) or 20),
+                )
+            elif name == "mcp__gmr__find_paths":
+                r = await client.get(
+                    f"{self._gmr_api_url}/graph/paths/find",
+                    params={
+                        "from": args.get("from_id", ""),
+                        "to": args.get("to_id", ""),
+                    },
+                )
+            elif name == "mcp__gmr__propose_edit":
+                # Pure notification; the frontend applies the edit with user auth.
+                return json.dumps({"proposed": True, "action": args.get("action")})
+            # Legacy tools — kept callable so old saved conversations still
+            # function. They are NOT advertised in `_TOOLS`.
             elif name == "mcp__gmr__get_company":
                 r = await client.get(
                     f"{self._gmr_api_url}/companies/{args.get('gmr_id', '')}",
+                )
+            elif name == "mcp__gmr__get_authority":
+                r = await client.get(
+                    f"{self._gmr_api_url}/authorities/{args.get('authority_id', '')}",
                 )
             elif name == "mcp__gmr__get_contracts":
                 eid = args.get("entity_id", "")
@@ -366,17 +519,6 @@ class MistralProxyClient:
                     f"{self._gmr_api_url}/graph/{args.get('entity_id', '')}",
                     params={"depth": args.get("depth", 1)},
                 )
-            elif name == "mcp__gmr__find_paths":
-                r = await client.get(
-                    f"{self._gmr_api_url}/graph/paths/find",
-                    params={
-                        "from": args.get("from_id", ""),
-                        "to": args.get("to_id", ""),
-                    },
-                )
-            elif name == "mcp__gmr__propose_edit":
-                # Pure notification; the frontend applies the edit with user auth.
-                return json.dumps({"proposed": True, "action": args.get("action")})
             else:
                 return json.dumps({"error": f"Unknown tool: {name}"})
 
@@ -385,6 +527,85 @@ class MistralProxyClient:
             return r.text
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
             return json.dumps({"error": str(exc)[:200]})
+
+    async def _investigate(
+        self,
+        client: httpx.AsyncClient,
+        entity_id: str,
+        *,
+        depth: int = 1,
+        contract_limit: int = 20,
+    ) -> str:
+        """Resolve an entity by id (across labels), pull profile + contracts +
+        graph neighbourhood, return one composite JSON payload.
+
+        Dispatch order: try Company, then Authority. The chosen label is
+        included in the response so the model knows what it's looking at.
+        """
+        depth = max(1, min(depth, 3))
+        # Try Company first — most-common path for procurement awardees.
+        label = "Company"
+        profile_resp = await client.get(
+            f"{self._gmr_api_url}/companies/{entity_id}",
+        )
+        if profile_resp.status_code == 404:
+            label = "Authority"
+            profile_resp = await client.get(
+                f"{self._gmr_api_url}/authorities/{entity_id}",
+            )
+        if profile_resp.status_code >= 400:
+            return json.dumps({
+                "error": f"entity {entity_id} not found",
+                "tried_labels": ["Company", "Authority"],
+            })
+
+        try:
+            props = profile_resp.json()
+        except (ValueError, TypeError):
+            props = {}
+
+        # Contracts — endpoint is per-label.
+        contracts_url = (
+            f"{self._gmr_api_url}/companies/{entity_id}/contracts"
+            if label == "Company"
+            else f"{self._gmr_api_url}/authorities/{entity_id}/contracts"
+        )
+        contracts_resp = await client.get(
+            contracts_url, params={"limit": contract_limit},
+        )
+        try:
+            contracts = (
+                contracts_resp.json()
+                if contracts_resp.status_code < 400 else []
+            )
+        except (ValueError, TypeError):
+            contracts = []
+        if isinstance(contracts, dict) and "contracts" in contracts:
+            contracts = contracts["contracts"]
+        contract_count = len(contracts) if isinstance(contracts, list) else 0
+
+        # Graph neighbourhood (depth 1 unless caller bumped).
+        graph_resp = await client.get(
+            f"{self._gmr_api_url}/graph/{entity_id}",
+            params={"depth": depth},
+        )
+        try:
+            graph = (
+                graph_resp.json()
+                if graph_resp.status_code < 400 else {}
+            )
+        except (ValueError, TypeError):
+            graph = {}
+
+        return json.dumps({
+            "label": label,
+            "entity_id": entity_id,
+            "props": props,
+            "summary": _build_summary(label, props, contract_count),
+            "contracts": contracts,
+            "contract_count": contract_count,
+            "graph": graph,
+        })
 
 
 def from_env() -> "MistralProxyClient":

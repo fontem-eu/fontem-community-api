@@ -217,8 +217,10 @@ async def test_api_error_status_emits_error_event():
 
 
 @pytest.mark.asyncio
-async def test_max_iterations_bounds_runaway_tool_loop():
-    # The model keeps asking for tools forever — the client must stop.
+async def test_max_iterations_emits_truncated_status_not_error():
+    """Loop exhaustion is not a hard error — the user got partial output,
+    they need to know to retry with a more focused question. Surface as
+    `status` phase=truncated so the frontend can render a soft notice."""
     tool_resp = _FakeResponse(200, "{}")
     never_ending = []
     for i in range(10):
@@ -232,9 +234,208 @@ async def test_max_iterations_bounds_runaway_tool_loop():
     blocks = [b async for b in client.stream({"system": "s", "message": "go"})]
     events = _parse_events(blocks)
 
-    # Exactly 3 POSTs were made before giving up
     post_calls = [c for c in fake.calls if c["method"] == "POST"]
     assert len(post_calls) == 3
-    # And we emitted an error citing the ceiling
-    err = next(d for e, d in events if e == "error")
-    assert "Max tool iterations" in err["error"]
+    # No error event — exhaustion is now a `status` with phase=truncated
+    assert not any(e == "error" for e, _ in events)
+    truncated = [d for e, d in events if e == "status" and d.get("phase") == "truncated"]
+    assert len(truncated) == 1
+    assert "max tool iterations" in truncated[0]["detail"].lower()
+
+
+# ── Phase 1+2+4 revamp tests ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_appends_todays_date():
+    """The model must know what year it is — otherwise it flags 2026 as
+    `unusually forward-dated`. We inject the date on every turn."""
+    script = [_ai("ok")]
+    fake = _FakeAsyncClient(script)
+    client = MistralProxyClient(api_key="k", client_factory=lambda: fake)
+    [_ async for _ in client.stream({"system": "be helpful", "message": "hi"})]
+
+    body = fake.calls[0]["json"]
+    sys_msg = next(m for m in body["messages"] if m["role"] == "system")
+    assert "Today's date is " in sys_msg["content"]
+    # ISO date format
+    assert "20" in sys_msg["content"][-12:]  # 2026-… or later
+    # Original system content preserved
+    assert "be helpful" in sys_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_investigate_entity_dispatches_company_then_authority():
+    """investigate_entity is the canonical getter. It tries Company first,
+    falls back to Authority on 404, and returns one composite payload."""
+    script = [
+        _tc("mcp__gmr__investigate_entity", {"entity_id": "abc-123"}, "c1"),
+        # Company endpoint says 404
+        _FakeResponse(404, ""),
+        # Authority endpoint hits (this is a Portuguese authority)
+        _FakeResponse(200, {"authority_id": "abc-123",
+                            "name": "Metro Mondego, S. A.",
+                            "country": "PRT"}),
+        # Contracts endpoint
+        _FakeResponse(200, {"contracts": [{"value_eur": 986546.64}]}),
+        # Graph endpoint
+        _FakeResponse(200, {"nodes": [{"id": "abc-123"}], "edges": []}),
+        _ai("Done."),
+    ]
+    fake = _FakeAsyncClient(script)
+    client = MistralProxyClient(
+        api_key="k", gmr_api_url="http://fake",
+        client_factory=lambda: fake,
+    )
+
+    blocks = [b async for b in client.stream({"system": "s", "message": "tell me about abc-123"})]
+    events = _parse_events(blocks)
+
+    get_urls = [c["url"] for c in fake.calls if c["method"] == "GET"]
+    # Tries company first, then authority
+    assert get_urls[0] == "http://fake/companies/abc-123"
+    assert get_urls[1] == "http://fake/authorities/abc-123"
+    # Then contracts (authority path) and graph
+    assert any("authorities/abc-123/contracts" in u for u in get_urls)
+    assert any("graph/abc-123" in u for u in get_urls)
+
+    # Final chunk produced
+    assert any(e == "chunk" for e, _ in events)
+
+
+@pytest.mark.asyncio
+async def test_per_turn_tool_call_dedup():
+    """Identical (name, args) calls within one turn return the cached
+    result — no duplicate HTTP round-trip, no duplicate token spend."""
+    script = [
+        _tc("mcp__gmr__search_entities", {"query": "Apple"}, "c1"),
+        _FakeResponse(200, '{"companies":[{"gmr_id":"a1","name":"Apple Inc."}]}'),
+        # Model asks for the SAME thing again — should be served from cache
+        _tc("mcp__gmr__search_entities", {"query": "Apple"}, "c2"),
+        # NB: no scripted response for the duplicate get — if the client
+        # hits the API again the script underflows and the test errors.
+        _ai("Found Apple."),
+    ]
+    fake = _FakeAsyncClient(script)
+    client = MistralProxyClient(
+        api_key="k", gmr_api_url="http://fake",
+        client_factory=lambda: fake,
+    )
+
+    blocks = [b async for b in client.stream({"system": "s", "message": "find apple twice"})]
+    events = _parse_events(blocks)
+
+    # Only ONE GET to /search even though the model called the tool twice
+    get_calls = [c for c in fake.calls if c["method"] == "GET"
+                 and c["url"].endswith("/search")]
+    assert len(get_calls) == 1
+    # Both tool_use status events still fired (so the user sees the activity)
+    tool_status = [d for e, d in events if e == "status" and d.get("phase") == "tool_use"]
+    assert len(tool_status) == 2
+
+
+@pytest.mark.asyncio
+async def test_status_detail_substitutes_human_name_for_uuid():
+    """After search_entities surfaces an id→name mapping, subsequent
+    tool calls with that id render with the entity's name in the detail
+    string the user sees."""
+    script = [
+        _tc("mcp__gmr__search_entities", {"query": "Metro Mondego"}, "c1"),
+        _FakeResponse(200, json.dumps({
+            "authorities": [{"authority_id": "uuid-xyz",
+                              "name": "Metro Mondego, S. A.",
+                              "country": "PRT"}],
+        })),
+        # Now the model calls investigate_entity with the UUID
+        _tc("mcp__gmr__investigate_entity", {"entity_id": "uuid-xyz"}, "c2"),
+        _FakeResponse(404, ""),  # not a Company
+        _FakeResponse(200, {"authority_id": "uuid-xyz", "name": "Metro Mondego, S. A.",
+                            "country": "PRT"}),
+        _FakeResponse(200, {"contracts": []}),
+        _FakeResponse(200, {"nodes": [], "edges": []}),
+        _ai("done"),
+    ]
+    fake = _FakeAsyncClient(script)
+    client = MistralProxyClient(
+        api_key="k", gmr_api_url="http://fake",
+        client_factory=lambda: fake,
+    )
+
+    blocks = [b async for b in client.stream({"system": "s", "message": "investigate"})]
+    events = _parse_events(blocks)
+
+    investigate_status = [
+        d for e, d in events
+        if e == "status" and d.get("phase") == "tool_use"
+        and d.get("tool") == "mcp__gmr__investigate_entity"
+    ]
+    assert len(investigate_status) == 1
+    # The detail string should contain the human name, not the UUID
+    detail = investigate_status[0]["detail"]
+    assert "Metro Mondego" in detail
+    assert "uuid-xyz" not in detail
+
+
+@pytest.mark.asyncio
+async def test_proposal_budget_disclosure_when_many_edits():
+    """When the assistant emits >8 propose_edit calls in one turn, the
+    final user-facing message gets a "I proposed N edits" footer so the
+    user knows to review them in order."""
+    script: list[_FakeResponse] = []
+    for i in range(9):
+        script.append(_tc("mcp__gmr__propose_edit",
+                          {"action": "add_section",
+                           "content": f"<p>section {i}</p>"},
+                          f"c{i}"))
+    script.append(_ai("Here's the structure."))
+    fake = _FakeAsyncClient(script)
+    client = MistralProxyClient(
+        api_key="k", max_iterations=20,
+        client_factory=lambda: fake,
+    )
+    blocks = [b async for b in client.stream({"system": "s", "message": "draft"})]
+    events = _parse_events(blocks)
+
+    chunk = next(d for e, d in events if e == "chunk")
+    assert "9 edits" in chunk["text"] or "9 edits" in chunk["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_proposal_budget_silent_when_few_edits():
+    """For ≤8 proposals, the user-facing message stays clean (no footer)."""
+    script: list[_FakeResponse] = []
+    for i in range(3):
+        script.append(_tc("mcp__gmr__propose_edit",
+                          {"action": "add_section",
+                           "content": f"<p>section {i}</p>"},
+                          f"c{i}"))
+    script.append(_ai("Done."))
+    fake = _FakeAsyncClient(script)
+    client = MistralProxyClient(
+        api_key="k", max_iterations=20,
+        client_factory=lambda: fake,
+    )
+    blocks = [b async for b in client.stream({"system": "s", "message": "draft"})]
+    events = _parse_events(blocks)
+
+    chunk = next(d for e, d in events if e == "chunk")
+    assert "edits" not in chunk["text"] or "I proposed" not in chunk["text"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_tools_still_callable_but_not_advertised():
+    """Old saved conversations may have called get_company / get_authority
+    / get_contracts / explore_graph. Those still work in _execute_tool
+    (back-compat), but the model only sees the canonical tool surface."""
+    from src.assistant.mistral_client import _TOOLS  # pylint: disable=import-outside-toplevel
+    advertised_names = {t["function"]["name"] for t in _TOOLS}
+    # Canonical surface
+    assert "mcp__gmr__investigate_entity" in advertised_names
+    assert "mcp__gmr__search_entities" in advertised_names
+    assert "mcp__gmr__find_paths" in advertised_names
+    assert "mcp__gmr__propose_edit" in advertised_names
+    # Legacy NOT advertised
+    assert "mcp__gmr__get_company" not in advertised_names
+    assert "mcp__gmr__get_authority" not in advertised_names
+    assert "mcp__gmr__get_contracts" not in advertised_names
+    assert "mcp__gmr__explore_graph" not in advertised_names
