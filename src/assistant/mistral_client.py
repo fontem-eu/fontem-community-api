@@ -198,6 +198,18 @@ _MAX_TOOL_ITERATIONS = 10
 # "I proposed N edits — review them in order". Stays out of the way for
 # small reports, surfaces a checklist for big ones.
 _PROPOSAL_BUDGET_DISCLOSE = 8
+# How long to cache the per-source freshness summary in memory. The
+# ETL loaders update :DataSource markers at most once a day for the
+# most-frequent sources; a 5-minute cache keeps the assistant from
+# hammering /data-quality/source-freshness on every chat turn while
+# still picking up new loader runs within the same session.
+_FRESHNESS_TTL_SECONDS = 300
+# Hard timeout on the freshness fetch — this call sits on the user's
+# critical path (we wait for it before sending the first model
+# request), so we'd rather show "freshness: unavailable" than make
+# the user stare at a spinner because the data-quality endpoint is
+# slow.
+_FRESHNESS_FETCH_TIMEOUT = 5.0
 
 
 def _sse(event: str, data: dict) -> str:
@@ -232,6 +244,51 @@ def _system_prompt_with_today(base: str) -> str:
     if not base:
         return f"Today's date is {today}."
     return f"{base.rstrip()}\n\nToday's date is {today}."
+
+
+def _format_freshness_summary(sources: list[dict]) -> str:
+    """Compress a /data-quality/source-freshness response into a short
+    block the model can quote when reasoning about coverage.
+
+    Emits one bulleted line per source — coverage range when available,
+    a freshness note when stale — in deterministic alphabetical order.
+    Returns ``""`` when the input is empty (callers skip injection in
+    that case so the system prompt doesn't get a half-empty section).
+    """
+    if not sources:
+        return ""
+    lines: list[str] = []
+    for src in sorted(sources, key=lambda s: s.get("id") or ""):
+        sid = src.get("id") or ""
+        label = src.get("label") or sid or "unknown"
+        cov_start = src.get("coverage_start")
+        cov_end = src.get("coverage_end")
+        rows = src.get("record_count") or 0
+        stale = bool(src.get("stale"))
+        age_h = src.get("age_hours")
+        if cov_start and cov_end:
+            coverage = f"{cov_start} → {cov_end}"
+        elif cov_end:
+            coverage = f"through {cov_end}"
+        else:
+            coverage = "no date range"
+        # Format age compactly: hours <48, days <60, then weeks.
+        if age_h is None:
+            freshness = "freshness unknown"
+        elif age_h < 48:
+            freshness = f"loaded {age_h:.1f}h ago"
+        elif age_h < 24 * 60:
+            freshness = f"loaded {age_h / 24:.0f}d ago"
+        else:
+            freshness = f"loaded {age_h / (24 * 7):.0f}w ago"
+        if stale:
+            freshness += ", STALE"
+        lines.append(f"- {label} ({sid}): {coverage}, {rows:,} rows, {freshness}")
+    header = (
+        "Data coverage at the time of this turn (cite these ranges when "
+        "the user asks about scope; flag STALE sources to the user):"
+    )
+    return header + "\n" + "\n".join(lines)
 
 
 def _build_summary(label: str, props: dict, contract_count: int) -> str:
@@ -294,6 +351,40 @@ class MistralProxyClient:
         self._client_factory = client_factory or (
             lambda: httpx.AsyncClient(timeout=timeout)
         )
+        # In-memory freshness cache: (cached_at_unix, summary_str).
+        # Keyed nowhere — one client instance only ever talks to one
+        # gmr-api, and the cache lives on the instance.
+        self._freshness_cache: tuple[float, str] | None = None
+
+    async def _get_freshness_summary(self, client: httpx.AsyncClient) -> str:
+        """Return the formatted source-freshness block for system prompt
+        injection, fetching from the data-quality API or returning the
+        cached value when warm.
+
+        Best-effort: a fetch failure logs nothing back to the user and
+        returns ``""`` so the model just doesn't get a coverage block
+        for this turn. Better to ship a useful answer with one less
+        sentence than to fail because monitoring metadata wasn't
+        available.
+        """
+        now = time.monotonic()
+        if (
+            self._freshness_cache is not None
+            and now - self._freshness_cache[0] < _FRESHNESS_TTL_SECONDS
+        ):
+            return self._freshness_cache[1]
+        try:
+            resp = await client.get(
+                f"{self._gmr_api_url}/data-quality/source-freshness",
+                timeout=_FRESHNESS_FETCH_TIMEOUT,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            summary = _format_freshness_summary(payload.get("sources") or [])
+        except (httpx.HTTPError, ValueError):
+            summary = ""
+        self._freshness_cache = (now, summary)
+        return summary
 
     async def stream(self, payload: dict) -> AsyncIterator[str]:  # NOSONAR S3776: provider-loop
         """Execute a chat turn and yield SSE event blocks."""
@@ -330,6 +421,17 @@ class MistralProxyClient:
 
         try:
             async with self._client_factory() as client:
+                # Fetch coverage summary once per turn (cached across
+                # turns for `_FRESHNESS_TTL_SECONDS`). Inject AFTER the
+                # date line so the model sees them as a single
+                # "context-as-of-now" block. Empty string when the
+                # data-quality API is unreachable — the chat still
+                # works, just without coverage grounding.
+                freshness = await self._get_freshness_summary(client)
+                if freshness:
+                    messages[0]["content"] = (
+                        messages[0]["content"].rstrip() + "\n\n" + freshness
+                    )
                 completed_normally = False
                 for _iter_no in range(self._max_iter):
                     yield _sse("status", {
