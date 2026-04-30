@@ -197,7 +197,7 @@ async def test_tool_call_round_trip_to_search_endpoint():
 async def test_propose_edit_forwards_args_as_proposal():
     """The frontend reads `proposal` off the status event to render the card."""
     args = {
-        "action": "add_section",
+        "action": "insert_content",
         "content": "<p>Analysis of Siemens contracts.</p>",
     }
     script = [
@@ -425,7 +425,7 @@ async def test_proposal_budget_disclosure_when_many_edits():
     script: list[_FakeResponse] = []
     for i in range(9):
         script.append(_tc("mcp__gmr__propose_edit",
-                          {"action": "add_section",
+                          {"action": "insert_content",
                            "content": f"<p>section {i}</p>"},
                           f"c{i}"))
     script.append(_ai("Here's the structure."))
@@ -447,7 +447,7 @@ async def test_proposal_budget_silent_when_few_edits():
     script: list[_FakeResponse] = []
     for i in range(3):
         script.append(_tc("mcp__gmr__propose_edit",
-                          {"action": "add_section",
+                          {"action": "insert_content",
                            "content": f"<p>section {i}</p>"},
                           f"c{i}"))
     script.append(_ai("Done."))

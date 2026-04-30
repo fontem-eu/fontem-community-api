@@ -129,12 +129,13 @@ _TOOLS: list[dict] = [
             "name": "mcp__gmr__propose_edit",
             "description": (
                 "Propose an edit to the user's report. The frontend renders "
-                "the proposal as an Apply/Reject card — the tool itself does "
-                "NOT mutate state. Supported actions: add_section, "
-                "update_section, update_title, update_abstract, "
-                "insert_widget. Multiple proposals sharing a `group_id` "
-                "render as a single grouped card the user can accept/reject "
-                "as a unit (use this when emitting a coherent set of edits "
+                "the proposal as an Apply/Reject card — the tool itself "
+                "does NOT mutate state. Supported actions: insert_content "
+                "(append HTML to the document), insert_widget (insert an "
+                "interactive widget node), update_title, update_abstract. "
+                "Multiple proposals sharing a `group_id` render as a "
+                "single grouped card the user can accept/reject as a "
+                "unit (use this when emitting a coherent set of edits "
                 "for one logical report unit)."
             ),
             "parameters": {
@@ -142,13 +143,20 @@ _TOOLS: list[dict] = [
                 "properties": {
                     "action": {
                         "type": "string",
+                        # Pinned in PROPOSE_EDIT_ACTIONS below so the
+                        # parity test in tests/unit/assistant/
+                        # test_propose_edit_schema.py can cross-check
+                        # against the JS-side ASSISTANT_ADVERTISED_ACTIONS.
+                        # If you add or remove an action here, update
+                        # both PROPOSE_EDIT_ACTIONS *and* useEditProposals.js.
                         "enum": [
-                            "add_section", "update_section",
-                            "update_title", "update_abstract", "insert_widget",
+                            "insert_content",
+                            "insert_widget",
+                            "update_title",
+                            "update_abstract",
                         ],
                     },
                     "content": {"type": "string", "description": "HTML content"},
-                    "section_index": {"type": "integer"},
                     "title": {"type": "string"},
                     "abstract": {"type": "string"},
                     "widget_type": {
@@ -170,6 +178,20 @@ _TOOLS: list[dict] = [
         },
     },
 ]
+
+# Canonical action enum for the propose_edit tool. Pinned for the
+# schema-parity test (Python ↔ JS) and exposed so callers don't have
+# to walk the _TOOLS structure to find it.
+PROPOSE_EDIT_ACTIONS = (
+    "insert_content",
+    "insert_widget",
+    "update_title",
+    "update_abstract",
+)
+# Legacy actions accepted from old chat history but no longer
+# advertised to the model. The frontend keeps them as aliases for
+# `insert_content` (see useEditProposals.js).
+PROPOSE_EDIT_LEGACY_ACTIONS = ("add_section", "update_section")
 
 
 _TOOL_LABELS = {
