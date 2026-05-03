@@ -7,7 +7,7 @@ per file) without the frontend having to know our content catalog.
 
 Shards:
   - core        — static routes (landing, feed, privacy, data-quality/*)
-  - reports     — every public report
+  - stories     — every public data story
   - (future)    — companies, authorities, lobbyists
 
 Everything is rendered fresh on request. At current volume (thousands
@@ -80,7 +80,7 @@ def sitemap_index() -> Response:
     today = datetime.now(timezone.utc).date().isoformat()
     shards = [
         f"{_CANONICAL_URL}/sitemap-core.xml",
-        f"{_CANONICAL_URL}/sitemap-reports.xml",
+        f"{_CANONICAL_URL}/sitemap-stories.xml",
     ]
     items = "\n".join(
         f"  <sitemap><loc>{escape(u)}</loc><lastmod>{today}</lastmod></sitemap>"
@@ -112,9 +112,9 @@ def sitemap_core() -> Response:
     return _xml_response(xml)
 
 
-@router.get("/sitemap-reports.xml", include_in_schema=False)
+@router.get("/sitemap-stories.xml", include_in_schema=False)
 @inject
-async def sitemap_reports(
+async def sitemap_stories(
     *, reports: FromDishka[ReportRepository],
 ) -> Response:
     # Use the existing list_public path; it already filters to
@@ -123,7 +123,7 @@ async def sitemap_reports(
     # up to 50k URLs per file).
     batch = await reports.list_public(limit=10_000, offset=0, authenticated=False)
     items = "\n".join(
-        f"  <url><loc>{escape(_CANONICAL_URL)}/reports/{escape(r.id)}</loc>"
+        f"  <url><loc>{escape(_CANONICAL_URL)}/stories/{escape(r.id)}</loc>"
         f"<lastmod>{_iso(r.updated_at or r.created_at)}</lastmod>"
         "<changefreq>weekly</changefreq></url>"
         for r in batch

@@ -14,7 +14,11 @@ from src.domain.user import User
 from src.infra.minio_client import MinioStorage, ALLOWED_TYPES, MAX_SIZE
 from src.services.report_service import ReportService
 
-router = APIRouter(prefix="/reports", tags=["reports"], responses=AUTH_RESPONSES)
+# Mounted by app.py at both /data-stories (canonical) and /reports
+# (legacy alias kept during the rename window). Routes inside this
+# module use empty/relative paths so the prefix is supplied at include
+# time.
+router = APIRouter(tags=["data-stories"], responses=AUTH_RESPONSES)
 
 
 class CreateReportRequest(BaseModel):

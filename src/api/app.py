@@ -210,8 +210,13 @@ def build_app(database_url: str | None = None) -> FastAPI:
 
     application.include_router(assistant_router.router)
     application.include_router(auth.router)
-    application.include_router(reports.router)
-    application.include_router(sharing.router)
+    # Data stories — canonical path. The /reports alias below keeps
+    # existing API clients working through the rename window; remove
+    # one release after the frontend cuts over.
+    application.include_router(reports.router, prefix="/data-stories")
+    application.include_router(reports.router, prefix="/reports", deprecated=True)
+    application.include_router(sharing.router, prefix="/data-stories")
+    application.include_router(sharing.router, prefix="/reports", deprecated=True)
     application.include_router(issues.router)
     application.include_router(users.router)
     application.include_router(groups.router)

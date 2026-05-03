@@ -13,7 +13,10 @@ from src.domain.user import User
 from src.repositories.permission_repository import PermissionRepository
 from src.services.permission_service import PermissionService
 
-router = APIRouter(prefix="/reports/{report_id}/access", tags=["sharing"], responses=AUTH_RESPONSES)
+# Mounted by app.py at /data-stories (canonical) and /reports (legacy
+# alias). The {report_id} path parameter name is internal — the URL
+# path users see is /data-stories/<uuid>/access.
+router = APIRouter(prefix="/{report_id}/access", tags=["sharing"], responses=AUTH_RESPONSES)
 
 
 class SetAccessRequest(BaseModel):

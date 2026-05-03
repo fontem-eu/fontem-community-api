@@ -154,3 +154,29 @@ class TestReportAPI:
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         resp = client.get("/reports/nonexistent", headers=make_headers("user-1"))
         assert resp.status_code == 404
+
+    def test_canonical_data_stories_path(self, client, services):
+        """The canonical /data-stories/* path mirrors the legacy /reports
+        alias. Cover create + read end-to-end on the new prefix so the
+        rename window doesn't silently break the new path.
+        """
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        create = client.post(
+            "/data-stories",
+            json={"title": "Canonical path", "abstract": "via /data-stories"},
+            headers=h,
+        )
+        assert create.status_code == 201
+        sid = create.json()["id"]
+
+        resp = client.get(f"/data-stories/{sid}", headers=h)
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Canonical path"
+
+        # Story created via the canonical path is also readable via the
+        # legacy alias, and vice-versa — same handlers, same DB row.
+        legacy = client.get(f"/reports/{sid}", headers=h)
+        assert legacy.status_code == 200
+        assert legacy.json()["id"] == sid
