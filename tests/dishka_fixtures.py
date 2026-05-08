@@ -23,11 +23,13 @@ from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
+from src.repositories.tag_follow_repository import TagFollowRepository
 from src.repositories.user_repository import UserRepository
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
 from src.services.report_service import ReportService
+from src.services.tag_service import TagService
 
 
 class InMemoryProvider(Provider):
@@ -86,6 +88,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def moderation_service(self) -> ModerationService:
         return self._svc["mod_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def tag_follow_repo(self) -> TagFollowRepository:
+        return self._svc["tag_follow_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def tag_service(self) -> TagService:
+        return self._svc["tag_svc"]
 
     @provide(scope=Scope.APP)
     def proxy_client(self) -> ClaudeProxyClient:

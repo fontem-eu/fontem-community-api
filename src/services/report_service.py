@@ -136,14 +136,23 @@ class ReportService:
 
     async def list_public(
         self, limit: int, offset: int, authenticated: bool = False,
+        tag: str | None = None,
     ) -> list[Report]:
         """List reports browseable by the caller.
 
         Anonymous callers see ``public_open`` only. Signed-in callers
         additionally see ``public_auth`` (reports meant for any signed-in
-        user but not the broader public).
+        user but not the broader public). When ``tag`` is given, the
+        list is filtered to stories carrying that tag.
         """
-        return await self._reports.list_public(limit, offset, authenticated=authenticated)
+        return await self._reports.list_public(
+            limit, offset, authenticated=authenticated, tag=tag,
+        )
+
+    async def get_tags(self, report_id: str) -> list[str]:
+        """Bulk-friendly read; the router uses this to embed tags in
+        the GET-by-id payload + the carousel cards."""
+        return await self._reports.get_story_tags(report_id)
 
     async def list_children(self, parent_id: str) -> list[Report]:
         """List child reports (dossier sub-pages)."""

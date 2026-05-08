@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.report import Report, Section, SectionVersion
@@ -12,6 +13,7 @@ from src.infra.postgres.models import (
     ReportModel,
     SectionModel,
     SectionVersionModel,
+    StoryTagModel,
 )
 from src.repositories.report_repository import ReportRepository
 
@@ -124,6 +126,7 @@ class PgReportRepository(ReportRepository):
 
     async def list_public(
         self, limit: int, offset: int, authenticated: bool = False,
+        tag: str | None = None,
     ) -> list[Report]:
         # Anonymous callers only see ``public_open``. Authenticated ones
         # also see ``public_auth`` (visible to any signed-in user but not
@@ -134,12 +137,61 @@ class PgReportRepository(ReportRepository):
         stmt = (
             select(ReportModel)
             .where(ReportModel.visibility.in_(allowed))
-            .order_by(ReportModel.updated_at.desc())
+        )
+        if tag:
+            # JOIN against story_tags rather than EXISTS — the planner
+            # picks an index-only scan on the (tag, report_id)-shaped
+            # composite PK and it's the same cost as EXISTS for our
+            # cardinality. Cleaner SQL.
+            stmt = stmt.join(
+                StoryTagModel, StoryTagModel.report_id == ReportModel.id,
+            ).where(StoryTagModel.tag == tag)
+        stmt = (
+            stmt.order_by(ReportModel.updated_at.desc())
             .limit(limit)
             .offset(offset)
         )
         result = await self._session.execute(stmt)
         return [self._report_to_domain(r) for r in result.scalars().all()]
+
+    # ── Tags ──────────────────────────────────────────────────
+
+    async def get_story_tags(self, report_id: str) -> list[str]:
+        stmt = (
+            select(StoryTagModel.tag)
+            .where(StoryTagModel.report_id == report_id)
+            .order_by(StoryTagModel.tag)
+        )
+        result = await self._session.execute(stmt)
+        return [r for r in result.scalars().all()]
+
+    async def set_story_tags(self, report_id: str, tags: list[str]) -> None:
+        # Atomic replace: drop the old set then insert the new. The
+        # service layer pre-normalises + dedupes, so we trust the
+        # input here.
+        await self._session.execute(
+            delete(StoryTagModel).where(StoryTagModel.report_id == report_id)
+        )
+        if tags:
+            self._session.add_all([
+                StoryTagModel(report_id=report_id, tag=t) for t in tags
+            ])
+        await self._session.commit()
+
+    async def list_distinct_tags(self) -> list[tuple[str, int]]:
+        # One row per tag with story count. `desc()` then alphabetical
+        # tiebreaker so the chip strip ordering is stable across loads.
+        # Restricted to public stories — private/draft tags shouldn't
+        # leak into the public browse.
+        stmt = (
+            select(StoryTagModel.tag, func.count(StoryTagModel.report_id))
+            .join(ReportModel, ReportModel.id == StoryTagModel.report_id)
+            .where(ReportModel.visibility.in_(["public_open", "public_auth"]))
+            .group_by(StoryTagModel.tag)
+            .order_by(func.count(StoryTagModel.report_id).desc(), StoryTagModel.tag)
+        )
+        result = await self._session.execute(stmt)
+        return [(row[0], row[1]) for row in result.all()]
 
     # ── Section CRUD ──────────────────────────────────────────────
 

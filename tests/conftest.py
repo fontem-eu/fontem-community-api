@@ -37,11 +37,13 @@ from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
 from src.infra.memory.mem_group_repo import InMemoryGroupRepository
 from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
+from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
 
 from src.services.permission_service import PermissionService
 from src.services.report_service import ReportService
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
+from src.services.tag_service import TagService
 
 from src.domain.user import User
 
@@ -68,10 +70,13 @@ def services():
     issue_repo = InMemoryIssueRepository()
     mod_repo = InMemoryModerationRepository()
 
+    tag_follow_repo = InMemoryTagFollowRepository()
+
     perm_svc = PermissionService(permission_repo, user_repo, group_repo)
     report_svc = ReportService(report_repo, perm_svc)
     issue_svc = IssueService(issue_repo, user_repo)
     mod_svc = ModerationService(mod_repo, user_repo)
+    tag_svc = TagService(report_repo, tag_follow_repo, perm_svc)
 
     return {
         "user_repo": user_repo,
@@ -80,10 +85,12 @@ def services():
         "permission_repo": permission_repo,
         "issue_repo": issue_repo,
         "mod_repo": mod_repo,
+        "tag_follow_repo": tag_follow_repo,
         "perm_svc": perm_svc,
         "report_svc": report_svc,
         "issue_svc": issue_svc,
         "mod_svc": mod_svc,
+        "tag_svc": tag_svc,
     }
 
 

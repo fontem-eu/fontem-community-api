@@ -65,6 +65,7 @@ async def list_reports(
     scope: str = Query("mine", pattern="^(mine|public)$"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    tag: str | None = Query(None, max_length=40),
     *,
     svc: FromDishka[ReportService],
     user: User | None = Depends(get_optional_user),
@@ -73,8 +74,19 @@ async def list_reports(
     # transparency surface. Anonymous callers only see `public_open`
     # reports; signed-in callers also see `public_auth` ones.
     if scope == "public":
-        reports = await svc.list_public(limit, offset, authenticated=user is not None)
-        return [asdict(r) for r in reports]
+        reports = await svc.list_public(
+            limit, offset,
+            authenticated=user is not None,
+            tag=tag,
+        )
+        # Embed tags inline so the feed cards can render the tag pills
+        # without N+1 round-trips. Cheap — at most 3 per story.
+        out = []
+        for r in reports:
+            d = asdict(r)
+            d["tags"] = await svc.get_tags(r.id)
+            out.append(d)
+        return out
     # scope=mine requires auth — re-raise the 401 the optional dep swallowed.
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -110,6 +122,9 @@ async def get_report(
     # Include child reports for dossier tree navigation
     children = await svc.list_children(report_id)
     result["children"] = [{"id": c.id, "title": c.title} for c in children]
+    # Tag pills on the story page render from this; the same payload
+    # also seeds the editor when the owner edits tags.
+    result["tags"] = await svc.get_tags(report_id)
     return result
 
 

@@ -30,12 +30,14 @@ from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
+from src.repositories.tag_follow_repository import TagFollowRepository
 from src.repositories.user_repository import UserRepository
 from src.assistant.repository import AssistRepository
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
 from src.services.report_service import ReportService
+from src.services.tag_service import TagService
 
 
 # ── Database layer ────────────────────────────────────────────
@@ -121,6 +123,11 @@ class RepositoryProvider(Provider):
         from src.assistant.pg_repository import PgAssistRepository
         return PgAssistRepository(session)
 
+    @provide(scope=Scope.REQUEST)
+    def tag_follow_repo(self, session: AsyncSession) -> TagFollowRepository:
+        from src.infra.postgres.pg_tag_follow_repo import PgTagFollowRepository
+        return PgTagFollowRepository(session)
+
 
 # ── Service layer ─────────────────────────────────────────────
 
@@ -154,6 +161,15 @@ class ServiceProvider(Provider):
         self, mod: ModerationRepository, users: UserRepository,
     ) -> ModerationService:
         return ModerationService(mod=mod, users=users)
+
+    @provide(scope=Scope.REQUEST)
+    def tag_service(
+        self,
+        reports: ReportRepository,
+        follows: TagFollowRepository,
+        perms: PermissionService,
+    ) -> TagService:
+        return TagService(reports=reports, follows=follows, perms=perms)
 
 
 # ── Assistant module ──────────────────────────────────────────

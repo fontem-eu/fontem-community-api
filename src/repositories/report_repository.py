@@ -24,7 +24,32 @@ class ReportRepository(ABC):
     @abstractmethod
     async def list_public(
         self, limit: int, offset: int, authenticated: bool = False,
+        tag: str | None = None,
     ) -> list[Report]: ...
+
+    # ── Tags (story side) ─────────────────────────────────────
+    # Tags are slugs (`[a-z0-9-]`). The service layer normalises
+    # before calling these methods; the repo treats them as opaque
+    # strings.
+
+    @abstractmethod
+    async def get_story_tags(self, report_id: str) -> list[str]: ...
+
+    @abstractmethod
+    async def set_story_tags(self, report_id: str, tags: list[str]) -> None:
+        """Replace the full tag set for a story.
+
+        Atomic delete-then-insert; the service layer enforces the
+        ≤3 limit before calling.
+        """
+        ...
+
+    @abstractmethod
+    async def list_distinct_tags(self) -> list[tuple[str, int]]:
+        """Return ``(tag, story_count)`` pairs for every tag in use,
+        ordered by descending count then alphabetical. Used by the
+        feed's browse-by-tag chip strip; cardinality is small."""
+        ...
 
     @abstractmethod
     async def add_section(self, report_id: str, section: Section) -> Section: ...

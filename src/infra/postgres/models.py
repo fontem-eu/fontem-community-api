@@ -294,3 +294,36 @@ class ConversationModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
+
+
+# ── Tags: per-story association + per-user follow list ────────
+# Tags are slugs (lowercase, [a-z0-9-]); the alembic migration
+# enforces this at the DB level via a CHECK constraint and the
+# service layer pre-normalises before insert.
+
+class StoryTagModel(Base):
+    __tablename__ = "story_tags"
+
+    report_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("reports.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tag: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+
+
+class UserFollowedTagModel(Base):
+    __tablename__ = "user_followed_tags"
+
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tag: Mapped[str] = mapped_column(Text, primary_key=True)
+    followed_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )

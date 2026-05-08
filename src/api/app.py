@@ -16,7 +16,7 @@ from sqlalchemy.exc import DBAPIError
 
 from src.api.rate_limit import limiter
 from src.api.routers import (
-    auth, groups, issues, moderation, reports, sharing, sitemap, users,
+    auth, groups, issues, moderation, reports, sharing, sitemap, tags, users,
 )
 from src.assistant import router as assistant_router
 from src.api.di import make_container
@@ -222,6 +222,11 @@ def build_app(database_url: str | None = None) -> FastAPI:
     application.include_router(groups.router)
     application.include_router(moderation.router)
     application.include_router(sitemap.router)
+    # Tags — story-tag write (PUT /data-stories/{id}/tags), public
+    # browse (GET /tags), per-user follow (GET/POST/DELETE
+    # /me/followed-tags). No prefix; tag paths are namespaced by their
+    # own routes.
+    application.include_router(tags.router)
 
     @application.get("/health", tags=["Health"])
     async def health() -> dict:

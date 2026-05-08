@@ -13,6 +13,7 @@ class InMemoryReportRepository(ReportRepository):
         self._reports: dict[str, Report] = {}
         self._sections: dict[str, Section] = {}
         self._versions: dict[str, list[SectionVersion]] = {}
+        self._tags: dict[str, list[str]] = {}
 
     async def create(self, report: Report) -> Report:
         if report.id is None:
@@ -34,6 +35,7 @@ class InMemoryReportRepository(ReportRepository):
 
     async def delete(self, report_id: str) -> None:
         self._reports.pop(report_id, None)
+        self._tags.pop(report_id, None)
         to_remove = [sid for sid, s in self._sections.items() if s.report_id == report_id]
         for sid in to_remove:
             self._sections.pop(sid, None)
@@ -46,15 +48,43 @@ class InMemoryReportRepository(ReportRepository):
 
     async def list_public(
         self, limit: int, offset: int, authenticated: bool = False,
+        tag: str | None = None,
     ) -> list[Report]:
         allowed = ("public_open",) if not authenticated else ("public_open", "public_auth")
         results = [
             deepcopy(r)
             for r in self._reports.values()
             if r.visibility in allowed
+            and (tag is None or tag in self._tags.get(r.id, []))
         ]
         results.sort(key=lambda r: r.updated_at or r.created_at or datetime.min, reverse=True)
         return results[offset : offset + limit]
+
+    # ── Tags ──────────────────────────────────────────────────
+
+    async def get_story_tags(self, report_id: str) -> list[str]:
+        return sorted(self._tags.get(report_id, []))
+
+    async def set_story_tags(self, report_id: str, tags: list[str]) -> None:
+        # Plain replace; service layer enforces the cap + slug.
+        self._tags[report_id] = list(tags)
+
+    async def list_distinct_tags(self) -> list[tuple[str, int]]:
+        # Public-only — match the Pg implementation so the in-memory
+        # tests catch any "private tag leaked into the public chip
+        # strip" regression.
+        public_ids = {
+            r.id for r in self._reports.values()
+            if r.visibility in ("public_open", "public_auth")
+        }
+        counts: dict[str, int] = {}
+        for rid, tags in self._tags.items():
+            if rid not in public_ids:
+                continue
+            for t in tags:
+                counts[t] = counts.get(t, 0) + 1
+        # desc count, then alphabetical
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
     async def add_section(self, report_id: str, section: Section) -> Section:
         if section.id is None:
