@@ -97,5 +97,5 @@ jobs:
         with:
           service: gmr-community-api
           tag: ${{ steps.image.outputs.tag }}
-          env: staging
+          env: testing
           registry-password: ${{ secrets.REGISTRY_PASSWORD }}
