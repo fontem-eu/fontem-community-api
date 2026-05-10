@@ -59,7 +59,13 @@ async def create_report(
     return asdict(report)
 
 
-@router.get("")
+# Anonymous browsing of `scope=public` is intentional — the public
+# feed is the platform's transparency surface. Tell schemathesis (and
+# any other OpenAPI-driven client) that this operation has no security
+# requirement; otherwise it gets flagged as "API accepts requests
+# without authentication". The handler still consumes get_optional_user
+# so signed-in callers see public_auth stories on top of public_open.
+@router.get("", openapi_extra={"security": []})
 @inject
 async def list_reports(
     scope: str = Query("mine", pattern="^(mine|public)$"),
@@ -94,7 +100,10 @@ async def list_reports(
     return [asdict(r) for r in reports]
 
 
-@router.get("/{report_id}")
+# public_open reports are readable anonymously; mark the operation as
+# unauthenticated in the OpenAPI spec so schemathesis stops flagging
+# the 200 responses as "accepts requests without authentication".
+@router.get("/{report_id}", openapi_extra={"security": []})
 @inject
 async def get_report(
     report_id: str,

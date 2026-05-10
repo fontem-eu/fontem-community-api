@@ -82,3 +82,16 @@ RESOURCE_RESPONSES: dict = {
         ),
     },
 }
+
+
+# Used as ``Path(..., pattern=UUID_RE)`` on path parameters that the
+# service layer hands straight to asyncpg as a UUID bind. Without the
+# pattern, FastAPI's ``str`` accepts anything and the bind fails at
+# Postgres with a 400 from the DBAPIError handler — fuzz tooling sees
+# that as a "valid request rejected" finding. The pattern makes
+# schemathesis generate UUID-shaped strings, FastAPI rejects non-matches
+# at validation time with 422, and the handler stops seeing them.
+UUID_RE = (
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)

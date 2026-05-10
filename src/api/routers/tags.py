@@ -60,6 +60,11 @@ async def put_story_tags(
 @router.get(
     "/tags",
     summary="List every tag in use on public stories with story counts",
+    # Public, like the feed itself — tell OpenAPI consumers (e.g.
+    # schemathesis) the operation has no security requirement. Without
+    # this the 200 responses get flagged as "accepts requests without
+    # authentication".
+    openapi_extra={"security": []},
 )
 @inject
 async def list_tags(*, svc: FromDishka[TagService]) -> dict:
