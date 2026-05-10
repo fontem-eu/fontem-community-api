@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -21,6 +22,8 @@ from src.api.routers import (
 from src.assistant import router as assistant_router
 from src.api.di import make_container
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
+
+logger = logging.getLogger(__name__)
 
 
 def _find_value_error(exc: BaseException) -> ValueError | None:
@@ -206,6 +209,17 @@ def build_app(database_url: str | None = None) -> FastAPI:
 
     @application.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        # Caught by the DAST re-run on 2026-05-10: GET /issues with a
+        # 39-digit offset hit asyncpg's int8-range error (`DataError`,
+        # not `ValueError`), bypassed the DBAPIError handler above, and
+        # surfaced as a silent 500. The catch-all needs to log so future
+        # 500s leave a trail. logger.exception emits at ERROR with the
+        # full traceback so a `kubectl logs` is enough to triage.
+        logger.exception(
+            "unhandled exception on %s %s",
+            request.method,
+            request.url.path,
+        )
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     application.include_router(assistant_router.router)

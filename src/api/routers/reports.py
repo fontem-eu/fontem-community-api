@@ -64,7 +64,7 @@ async def create_report(
 async def list_reports(
     scope: str = Query("mine", pattern="^(mine|public)$"),
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=2**31 - 1),
     tag: str | None = Query(None, max_length=40),
     *,
     svc: FromDishka[ReportService],

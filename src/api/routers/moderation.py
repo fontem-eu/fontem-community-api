@@ -52,7 +52,7 @@ async def create_flag(
 @inject
 async def get_queue(
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=2**31 - 1),
     *,
     svc: FromDishka[ModerationService],
     user: User = Depends(get_current_user),
@@ -90,7 +90,7 @@ async def create_sanction(
 @inject
 async def get_log(
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=2**31 - 1),
     *,
     svc: FromDishka[ModerationService],
     user: User = Depends(get_current_user),

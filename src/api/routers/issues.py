@@ -55,7 +55,7 @@ async def list_issues(
     entity_type: str | None = Query(None),
     entity_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=2**31 - 1),
     *,
     svc: FromDishka[IssueService],
     user: User = Depends(get_current_user),
