@@ -32,6 +32,10 @@ Usage:
 """
 from __future__ import annotations
 
+from typing import Annotated
+
+from fastapi import Path
+
 AUTH_RESPONSES: dict = {
     401: {
         "description": (
@@ -84,14 +88,30 @@ RESOURCE_RESPONSES: dict = {
 }
 
 
-# Used as ``Path(..., pattern=UUID_RE)`` on path parameters that the
-# service layer hands straight to asyncpg as a UUID bind. Without the
-# pattern, FastAPI's ``str`` accepts anything and the bind fails at
-# Postgres with a 400 from the DBAPIError handler — fuzz tooling sees
-# that as a "valid request rejected" finding. The pattern makes
-# schemathesis generate UUID-shaped strings, FastAPI rejects non-matches
-# at validation time with 422, and the handler stops seeing them.
 UUID_RE = (
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+
+
+# Drop-in replacement for ``: str`` on path parameters whose values get
+# bound to a UUID column downstream (``{report_id}``, ``{section_id}``,
+# ``{group_id}``, ``{user_id}``, ``{access_id}``, ``{flag_id}``,
+# ``{issue_id}``, ``{uid}``). Without the pattern, FastAPI's plain
+# ``str`` accepts anything; the asyncpg bind fails at Postgres with a
+# 400 from the DBAPIError handler in ``src.api.app``, and fuzz tooling
+# (schemathesis) flags every such 400 as "API rejected schema-compliant
+# request" because *its* schema view said the input was valid. With
+# this Annotated alias FastAPI rejects non-matching path values at
+# validation time (422) and emits ``pattern: ^[0-9a-fA-F]{8}-…$`` in
+# the OpenAPI schema, so schemathesis generates UUID-shaped strings
+# that actually bind cleanly.
+#
+# Usage:
+#
+#     from src.api.openapi_responses import UuidPath
+#
+#     @router.get("/{report_id}")
+#     async def get_report(report_id: UuidPath, ...) -> dict:
+#         ...
+UuidPath = Annotated[str, Path(pattern=UUID_RE)]

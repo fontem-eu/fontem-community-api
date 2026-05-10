@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user, get_optional_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
 from src.infra.minio_client import MinioStorage, ALLOWED_TYPES, MAX_SIZE
 from src.services.report_service import ReportService
@@ -106,7 +106,7 @@ async def list_reports(
 @router.get("/{report_id}", openapi_extra={"security": []})
 @inject
 async def get_report(
-    report_id: str,
+    report_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
     user: User | None = Depends(get_optional_user),
@@ -140,7 +140,7 @@ async def get_report(
 @router.put("/{report_id}")
 @inject
 async def update_report(
-    report_id: str,
+    report_id: UuidPath,
     body: UpdateReportRequest,
     *,
     svc: FromDishka[ReportService],
@@ -153,7 +153,7 @@ async def update_report(
 @router.delete("/{report_id}", status_code=204)
 @inject
 async def delete_report(
-    report_id: str,
+    report_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
     user: User = Depends(get_current_user),
@@ -164,7 +164,7 @@ async def delete_report(
 @router.post("/{report_id}/sections", status_code=201)
 @inject
 async def add_section(
-    report_id: str,
+    report_id: UuidPath,
     body: CreateSectionRequest,
     *,
     svc: FromDishka[ReportService],
@@ -179,8 +179,8 @@ async def add_section(
 @router.put("/{report_id}/sections/{section_id}")
 @inject
 async def update_section(
-    report_id: str,
-    section_id: str,
+    report_id: UuidPath,
+    section_id: UuidPath,
     body: UpdateSectionRequest,
     *,
     svc: FromDishka[ReportService],
@@ -195,8 +195,8 @@ async def update_section(
 @router.delete("/{report_id}/sections/{section_id}", status_code=204)
 @inject
 async def delete_section(
-    report_id: str,
-    section_id: str,
+    report_id: UuidPath,
+    section_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
     user: User = Depends(get_current_user),
@@ -207,8 +207,8 @@ async def delete_section(
 @router.post("/{report_id}/sections/{section_id}/lock")
 @inject
 async def acquire_lock(
-    report_id: str,
-    section_id: str,
+    report_id: UuidPath,
+    section_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
     user: User = Depends(get_current_user),
@@ -220,8 +220,8 @@ async def acquire_lock(
 @router.delete("/{report_id}/sections/{section_id}/lock", status_code=204)
 @inject
 async def release_lock(
-    report_id: str,
-    section_id: str,
+    report_id: UuidPath,
+    section_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
     user: User = Depends(get_current_user),
@@ -232,8 +232,8 @@ async def release_lock(
 @router.get("/{report_id}/sections/{section_id}/versions")
 @inject
 async def list_versions(
-    report_id: str,
-    section_id: str,
+    report_id: UuidPath,
+    section_id: UuidPath,
     limit: int = Query(20, ge=1, le=100),
     *,
     svc: FromDishka[ReportService],
@@ -248,7 +248,7 @@ async def list_versions(
 @router.put("/{report_id}/content")
 @inject
 async def save_document(
-    report_id: str,
+    report_id: UuidPath,
     body: SaveDocumentRequest,
     *,
     svc: FromDishka[ReportService],
@@ -277,7 +277,7 @@ def _get_storage() -> MinioStorage:
 @router.post("/{report_id}/upload")
 @inject
 async def upload_image(
-    report_id: str,
+    report_id: UuidPath,
     file: UploadFile = File(...),
     *,
     svc: FromDishka[ReportService],

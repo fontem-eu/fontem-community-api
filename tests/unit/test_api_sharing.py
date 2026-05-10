@@ -60,6 +60,9 @@ class TestSharingAPI:
             json={"user_id": _stable_uuid("viewer-1"), "level": "viewer"},
             headers=ho,
         ).json()
-        aid = grant.get("id") or grant.get("access_id", "unknown")
+        # set_access returns {"status": "ok"} (no id), so fall back to a
+        # UUID-shaped placeholder. The handler is idempotent — no-op +
+        # 204 when the access_id doesn't match a real grant.
+        aid = grant.get("id") or grant.get("access_id") or "00000000-0000-4000-8000-000000000000"
         resp = client.delete(f"/reports/{r['id']}/access/{aid}", headers=ho)
         assert resp.status_code == 204

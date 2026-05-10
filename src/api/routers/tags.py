@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
 from src.services.exceptions import InvalidInput, NotFound, PermissionDenied
 from src.services.tag_service import (
@@ -40,7 +40,7 @@ class SetStoryTagsRequest(BaseModel):
 )
 @inject
 async def put_story_tags(
-    report_id: str,
+    report_id: UuidPath,
     body: SetStoryTagsRequest,
     *,
     svc: FromDishka[TagService],

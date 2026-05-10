@@ -143,7 +143,7 @@ class TestReportAPI:
         assert resp.status_code == 204
 
     def test_get_nonexistent_report_returns_404(self, client, services):
-        """GET /reports/nonexistent returns 404.
+        """GET /reports/00000000-0000-4000-8000-000000000000 returns 404.
 
         The old handler ran the perm check first and surfaced 403 on
         missing reports to avoid leaking existence. get_viewable now
@@ -152,7 +152,7 @@ class TestReportAPI:
         """
         import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
-        resp = client.get("/reports/nonexistent", headers=make_headers("user-1"))
+        resp = client.get("/reports/00000000-0000-4000-8000-000000000000", headers=make_headers("user-1"))
         assert resp.status_code == 404
 
     def test_canonical_data_stories_path(self, client, services):

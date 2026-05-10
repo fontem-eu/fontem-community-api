@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.assistant.repository import AssistRepository
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
@@ -82,7 +82,7 @@ async def delete_me(
 @router.get("/{user_id}")
 @inject
 async def get_user(
-    user_id: str,
+    user_id: UuidPath,
     *,
     repo: FromDishka[UserRepository],
     user: User = Depends(get_current_user),

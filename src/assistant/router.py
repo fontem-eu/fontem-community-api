@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
 from src.assistant.service import AssistantService, ChatRequest
 

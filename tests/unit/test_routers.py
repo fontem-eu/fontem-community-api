@@ -130,7 +130,7 @@ class TestReportGetAnonymous:
 
     def test_nonexistent_report_404s_for_anonymous(self, client, services):
         _seed(services)
-        resp = client.get("/reports/does-not-exist")
+        resp = client.get("/reports/00000000-0000-4000-8000-000000000000")
         assert resp.status_code == 404
 
 
@@ -148,7 +148,7 @@ class TestReportUpdate:
     def test_update_nonexistent_report_denied(self, client, services):
         _seed(services)
         h = make_headers("user-1")
-        resp = client.put("/reports/nonexistent", json={"title": "X"}, headers=h)
+        resp = client.put("/reports/00000000-0000-4000-8000-000000000000", json={"title": "X"}, headers=h)
         assert resp.status_code == 403
 
 
@@ -310,7 +310,7 @@ class TestIssueGet:
 
     def test_get_nonexistent_issue(self, client, services):
         _seed(services)
-        resp = client.get("/issues/nonexistent", headers=make_headers("user-1"))
+        resp = client.get("/issues/00000000-0000-4000-8000-000000000000", headers=make_headers("user-1"))
         assert resp.status_code == 404
 
 
@@ -348,7 +348,7 @@ class TestIssueVoting:
     def test_vote_nonexistent_issue(self, client, services):
         _seed(services)
         resp = client.post(
-            "/issues/nonexistent/vote",
+            "/issues/00000000-0000-4000-8000-000000000000/vote",
             json={"direction": "up"},
             headers=make_headers("user-1"),
         )
@@ -382,7 +382,7 @@ class TestGroupCRUD:
 
     def test_get_nonexistent_group(self, client, services):
         _seed(services)
-        resp = client.get("/groups/nonexistent", headers=make_headers("user-1"))
+        resp = client.get("/groups/00000000-0000-4000-8000-000000000000", headers=make_headers("user-1"))
         assert resp.status_code == 404
 
     def test_add_member(self, client, services):
@@ -410,7 +410,7 @@ class TestGroupCRUD:
     def test_add_member_to_nonexistent_group(self, client, services):
         _seed(services)
         resp = client.post(
-            "/groups/nonexistent/members",
+            "/groups/00000000-0000-4000-8000-000000000000/members",
             json={"user_id": _stable_uuid("user-1")},
             headers=make_headers("user-1"),
         )
@@ -437,7 +437,7 @@ class TestGetOtherUser:
 
     def test_get_nonexistent_user(self, client, services):
         _seed(services)
-        resp = client.get("/users/ghost", headers=make_headers("user-1"))
+        resp = client.get("/users/00000000-0000-4000-8000-000000000000", headers=make_headers("user-1"))
         assert resp.status_code == 404
 
 

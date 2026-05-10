@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
 from src.repositories.permission_repository import PermissionRepository
 from src.services.permission_service import PermissionService
@@ -28,7 +28,7 @@ class SetAccessRequest(BaseModel):
 @router.get("")
 @inject
 async def list_access(
-    report_id: str,
+    report_id: UuidPath,
     *,
     perms_svc: FromDishka[PermissionService],
     perms_repo: FromDishka[PermissionRepository],
@@ -42,7 +42,7 @@ async def list_access(
 @router.post("", status_code=201)
 @inject
 async def set_access(
-    report_id: str,
+    report_id: UuidPath,
     body: SetAccessRequest,
     *,
     perms_svc: FromDishka[PermissionService],
@@ -60,8 +60,8 @@ async def set_access(
 @router.delete("/{access_id}", status_code=204)
 @inject
 async def remove_access(
-    report_id: str,
-    access_id: str,
+    report_id: UuidPath,
+    access_id: UuidPath,
     *,
     perms_svc: FromDishka[PermissionService],
     perms_repo: FromDishka[PermissionRepository],

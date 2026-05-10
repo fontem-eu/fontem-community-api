@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
 from src.services.issue_service import IssueService
 
@@ -70,7 +70,7 @@ async def list_issues(
 @router.get("/{issue_id}")
 @inject
 async def get_issue(
-    issue_id: str,
+    issue_id: UuidPath,
     *,
     svc: FromDishka[IssueService],
     user: User = Depends(get_current_user),
@@ -86,7 +86,7 @@ async def get_issue(
 @router.put("/{issue_id}/status")
 @inject
 async def update_status(
-    issue_id: str,
+    issue_id: UuidPath,
     body: UpdateStatusRequest,
     *,
     svc: FromDishka[IssueService],
@@ -99,7 +99,7 @@ async def update_status(
 @router.post("/{issue_id}/comments", status_code=201)
 @inject
 async def add_comment(
-    issue_id: str,
+    issue_id: UuidPath,
     body: AddCommentRequest,
     *,
     svc: FromDishka[IssueService],
@@ -112,7 +112,7 @@ async def add_comment(
 @router.post("/{issue_id}/vote")
 @inject
 async def vote(
-    issue_id: str,
+    issue_id: UuidPath,
     body: VoteRequest,
     *,
     svc: FromDishka[IssueService],

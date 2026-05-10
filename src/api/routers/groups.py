@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.group import Group
 from src.domain.user import User
 from src.repositories.group_repository import GroupRepository
@@ -42,7 +42,7 @@ async def create_group(
 @router.get("/{group_id}")
 @inject
 async def get_group(
-    group_id: str,
+    group_id: UuidPath,
     *,
     repo: FromDishka[GroupRepository],
     user: User = Depends(get_current_user),
@@ -58,7 +58,7 @@ async def get_group(
 @router.post("/{group_id}/members", status_code=201)
 @inject
 async def add_member(
-    group_id: str,
+    group_id: UuidPath,
     body: AddMemberRequest,
     *,
     repo: FromDishka[GroupRepository],
@@ -74,8 +74,8 @@ async def add_member(
 @router.delete("/{group_id}/members/{uid}", status_code=204)
 @inject
 async def remove_member(
-    group_id: str,
-    uid: str,
+    group_id: UuidPath,
+    uid: UuidPath,
     *,
     repo: FromDishka[GroupRepository],
     user: User = Depends(get_current_user),

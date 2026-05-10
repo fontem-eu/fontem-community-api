@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
 from src.services.moderation_service import ModerationService
 
@@ -64,7 +64,7 @@ async def get_queue(
 @router.post("/moderation/queue/{flag_id}/resolve")
 @inject
 async def resolve_flags(
-    flag_id: str,
+    flag_id: UuidPath,
     body: ResolveFlagsRequest,
     *,
     svc: FromDishka[ModerationService],

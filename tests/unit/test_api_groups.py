@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import pytest
-from tests.conftest import make_headers, seed_user
+from tests.conftest import _stable_uuid, make_headers, seed_user
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,7 @@ class TestGroupAPI:
         g = client.post("/groups", json={"name": "G1"}, headers=h).json()
         resp = client.post(
             f"/groups/{g['id']}/members",
-            json={"user_id": "user-1"},
+            json={"user_id": _stable_uuid("user-1")},
             headers=h,
         )
         assert resp.status_code in (200, 201)
@@ -50,6 +50,6 @@ class TestGroupAPI:
         asyncio.get_event_loop().run_until_complete(self._setup(services))
         h = make_headers("user-1")
         g = client.post("/groups", json={"name": "G1"}, headers=h).json()
-        client.post(f"/groups/{g['id']}/members", json={"user_id": "user-1"}, headers=h)
-        resp = client.delete(f"/groups/{g['id']}/members/user-1", headers=h)
+        client.post(f"/groups/{g['id']}/members", json={"user_id": _stable_uuid("user-1")}, headers=h)
+        resp = client.delete(f"/groups/{g["id"]}/members/{_stable_uuid("user-1")}", headers=h)
         assert resp.status_code == 204
