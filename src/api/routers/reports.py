@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user, get_optional_user
-from src.api.openapi_responses import AUTH_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES
 from src.domain.user import User
 from src.infra.minio_client import MinioStorage, ALLOWED_TYPES, MAX_SIZE
 from src.services.report_service import ReportService
@@ -18,7 +18,7 @@ from src.services.report_service import ReportService
 # (legacy alias kept during the rename window). Routes inside this
 # module use empty/relative paths so the prefix is supplied at include
 # time.
-router = APIRouter(tags=["data-stories"], responses=AUTH_RESPONSES)
+router = APIRouter(tags=["data-stories"], responses=RESOURCE_RESPONSES)
 
 
 class CreateReportRequest(BaseModel):

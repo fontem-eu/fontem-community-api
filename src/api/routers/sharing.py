@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import AUTH_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES
 from src.domain.user import User
 from src.repositories.permission_repository import PermissionRepository
 from src.services.permission_service import PermissionService
@@ -16,7 +16,7 @@ from src.services.permission_service import PermissionService
 # Mounted by app.py at /data-stories (canonical) and /reports (legacy
 # alias). The {report_id} path parameter name is internal — the URL
 # path users see is /data-stories/<uuid>/access.
-router = APIRouter(prefix="/{report_id}/access", tags=["sharing"], responses=AUTH_RESPONSES)
+router = APIRouter(prefix="/{report_id}/access", tags=["sharing"], responses=RESOURCE_RESPONSES)
 
 
 class SetAccessRequest(BaseModel):

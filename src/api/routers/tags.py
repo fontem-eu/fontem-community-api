@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import AUTH_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES
 from src.domain.user import User
 from src.services.exceptions import InvalidInput, NotFound, PermissionDenied
 from src.services.tag_service import (
@@ -16,7 +16,7 @@ from src.services.tag_service import (
 )
 
 
-router = APIRouter(tags=["tags"], responses=AUTH_RESPONSES)
+router = APIRouter(tags=["tags"], responses=RESOURCE_RESPONSES)
 
 
 # ── Story tags ────────────────────────────────────────────────

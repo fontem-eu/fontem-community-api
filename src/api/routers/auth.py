@@ -15,11 +15,35 @@ from jose import jwt as jose_jwt
 from pydantic import BaseModel, EmailStr
 
 from src.api.auth import JWT_ALGORITHM, JWT_SECRET
+from src.api.openapi_responses import AUTH_RESPONSES
 from src.api.rate_limit import limiter
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+# /auth/* surface returns 400 (body validation), 401 (bad credentials),
+# 409 (email already registered), and 429 (rate-limited by the
+# @limiter.limit decorators on each handler) on top of the AUTH_RESPONSES
+# baseline. Documented at the router level so schemathesis's "undocumented
+# HTTP status code" check stops flagging them.
+router = APIRouter(
+    prefix="/auth",
+    tags=["Auth"],
+    responses={
+        **AUTH_RESPONSES,
+        400: {
+            "description": (
+                "Body validation failed at the handler layer "
+                "(e.g. password shorter than 8 characters)."
+            ),
+        },
+        409: {
+            "description": (
+                "Conflict — typically the email address is already "
+                "registered to another account."
+            ),
+        },
+    },
+)
 
 # Brute-force protection: lock account for 15 min after 5 failed attempts
 _MAX_LOGIN_ATTEMPTS = 5
