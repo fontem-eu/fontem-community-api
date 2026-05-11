@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import pytest
-from tests.conftest import make_headers, seed_user
+from tests.conftest import _stable_uuid, make_headers, seed_user
 
 
 @pytest.mark.asyncio
@@ -21,7 +21,7 @@ class TestModerationAPI:
             "/flags",
             json={
                 "target_type": "report",
-                "target_id": "r-1",
+                "target_id": "00000000-0000-4000-8000-000000000001",
                 "reason": "spam",
                 "details": "Obvious spam",
             },
@@ -41,7 +41,7 @@ class TestModerationAPI:
         resp = client.post(
             "/moderation/sanctions",
             json={
-                "user_id": "user-1",
+                "user_id": _stable_uuid("user-1"),
                 "type": "warning",
                 "reason": "test warning",
             },

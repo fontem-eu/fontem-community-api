@@ -5,11 +5,13 @@ from dishka.integrations.fastapi import FromDishka, inject
 from dataclasses import asdict
 from typing import Any
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user, get_optional_user
-from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath, UuidStr
 from src.domain.user import User
 from src.infra.minio_client import MinioStorage, ALLOWED_TYPES, MAX_SIZE
 from src.services.report_service import ReportService
@@ -22,15 +24,18 @@ router = APIRouter(tags=["data-stories"], responses=RESOURCE_RESPONSES)
 
 
 class CreateReportRequest(BaseModel):
-    title: str
-    abstract: str | None = None
-    parent_id: str | None = None  # for dossier nesting
+    title: str = Field(min_length=1, max_length=300)
+    abstract: str | None = Field(default=None, max_length=4000)
+    # UUID-shaped or absent. Lifts the schema-vs-impl gap that made
+    # fuzz tooling 400 on plain-string parent_id inputs and flag the
+    # API behavior as "schema-compliant rejected".
+    parent_id: UuidStr | None = None
 
 
 class UpdateReportRequest(BaseModel):
-    title: str | None = None
-    abstract: str | None = None
-    visibility: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    abstract: str | None = Field(default=None, max_length=4000)
+    visibility: Literal["private", "public_open", "public_auth"] | None = None
 
 
 class CreateSectionRequest(BaseModel):

@@ -35,6 +35,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Path
+from pydantic import Field
 
 AUTH_RESPONSES: dict = {
     401: {
@@ -115,3 +116,10 @@ UUID_RE = (
 #     async def get_report(report_id: UuidPath, ...) -> dict:
 #         ...
 UuidPath = Annotated[str, Path(pattern=UUID_RE)]
+
+
+# Pydantic-friendly variant for ``UUID``-shaped fields inside request
+# bodies (where ``Path()`` doesn't apply). Same regex, emitted as a
+# JSON-schema ``pattern`` on the property. Use inside ``BaseModel``
+# definitions, e.g. ``target_id: UuidStr`` in CreateFlagRequest.
+UuidStr = Annotated[str, Field(pattern=UUID_RE)]

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
@@ -86,9 +88,13 @@ async def list_tags(*, svc: FromDishka[TagService]) -> dict:
 
 
 class FollowTagRequest(BaseModel):
-    tag: str = Field(..., min_length=1, max_length=80)
-    # Loose cap on the raw input — server slug-normalises and length-
-    # caps to MAX_LEN (40) before insert.
+    # Require at least one alphanumeric so the normaliser doesn't 400
+    # on "all-special-chars" inputs that collapse to empty after slug
+    # normalisation. Server still does the full slug normalise +
+    # MAX_LEN (40) cap; this just lifts the obvious rejects into the
+    # OpenAPI shape so schemathesis stops generating gibberish that
+    # the API correctly bounces with 400.
+    tag: str = Field(..., min_length=1, max_length=80, pattern=r".*[A-Za-z0-9].*")
 
 
 @router.get("/me/followed-tags", summary="List the user's followed tags")
@@ -128,7 +134,10 @@ async def follow_tag(
 )
 @inject
 async def unfollow_tag(
-    tag: str,
+    # Slug-shaped path param. Same pattern as FollowTagRequest.tag but
+    # tighter — by the time the caller unfollows, the value should be
+    # the normalised slug (a-z, 0-9, hyphen).
+    tag: Annotated[str, Path(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")],
     *,
     svc: FromDishka[TagService],
     user: User = Depends(get_current_user),

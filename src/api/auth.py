@@ -14,7 +14,6 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
 JWT_ALGORITHM = "HS256"
 
 _bearer_scheme = HTTPBearer()
-_bearer_scheme_optional = HTTPBearer(auto_error=False)
 
 
 async def _resolve_user(
@@ -67,7 +66,7 @@ async def get_current_user(
 
 @inject
 async def get_optional_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme_optional),
+    request: Request,
     user_repo: FromDishka[UserRepository] = None,  # type: ignore[assignment]
 ) -> User | None:
     """Auth dep that returns None for anonymous callers instead of 401-ing.
@@ -76,9 +75,24 @@ async def get_optional_user(
     some code paths (e.g. public feed browsing). A malformed token is
     treated as anonymous rather than a hard error — routes that truly
     require auth should keep using ``get_current_user``.
+
+    Parses ``Authorization`` straight off the request rather than going
+    through ``HTTPBearer``: doing so deliberately keeps the security
+    primitive out of FastAPI's dependency-tree introspection, which is
+    what populates the route's OpenAPI ``security`` block. Routes that
+    use this dep are correctly emitted as "no auth required" in the
+    spec — schemathesis and any other OpenAPI-driven client stop
+    flagging the 2xx anonymous responses as "API accepts requests
+    without authentication". The runtime semantics (anonymous → None,
+    signed-in → User) are unchanged.
     """
-    if credentials is None:
+    header = request.headers.get("authorization")
+    if not header:
         return None
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    credentials = HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
     try:
         return await _resolve_user(credentials, user_repo)
     except HTTPException:

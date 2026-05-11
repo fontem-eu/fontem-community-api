@@ -470,12 +470,12 @@ class TestModerationSanctions:
         h = make_headers("mod-1")
         resp = client.post(
             "/moderation/sanctions",
-            json={"user_id": "bad-user", "type": "warning", "reason": "Spamming"},
+            json={"user_id": _stable_uuid("bad-user"), "type": "warning", "reason": "Spamming"},
             headers=h,
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["user_id"] == "bad-user"
+        assert data["user_id"] == _stable_uuid("bad-user")
         assert data["type"] == "warning"
 
     def test_create_ban_requires_admin(self, client, services):
@@ -484,7 +484,7 @@ class TestModerationSanctions:
         h = make_headers("mod-1")
         resp = client.post(
             "/moderation/sanctions",
-            json={"user_id": "bad-user", "type": "ban", "reason": "Severe abuse"},
+            json={"user_id": _stable_uuid("bad-user"), "type": "ban", "reason": "Severe abuse"},
             headers=h,
         )
         # Moderator cannot ban, only admin can
@@ -496,7 +496,7 @@ class TestModerationSanctions:
         h = make_headers("admin-1")
         resp = client.post(
             "/moderation/sanctions",
-            json={"user_id": "bad-user", "type": "ban", "reason": "Severe abuse"},
+            json={"user_id": _stable_uuid("bad-user"), "type": "ban", "reason": "Severe abuse"},
             headers=h,
         )
         assert resp.status_code == 201
@@ -506,7 +506,7 @@ class TestModerationSanctions:
         _seed(services)
         resp = client.post(
             "/moderation/sanctions",
-            json={"user_id": "someone", "type": "warning", "reason": "test"},
+            json={"user_id": _stable_uuid("someone"), "type": "warning", "reason": "test"},
             headers=make_headers("user-1"),
         )
         assert resp.status_code == 403

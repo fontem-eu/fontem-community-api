@@ -59,7 +59,7 @@ class TestReportAPI:
         rid = create.json()["id"]
         resp = client.put(
             f"/reports/{rid}",
-            json={"title": "New", "visibility": "public"},
+            json={"title": "New", "visibility": "public_open"},
             headers=h,
         )
         assert resp.status_code == 200

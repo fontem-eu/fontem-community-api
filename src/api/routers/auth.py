@@ -12,7 +12,7 @@ import httpx
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, HTTPException, Request
 from jose import jwt as jose_jwt
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from src.api.auth import JWT_ALGORITHM, JWT_SECRET
 from src.api.openapi_responses import AUTH_RESPONSES
@@ -206,9 +206,13 @@ async def google_login(
 
 class RegisterRequest(BaseModel):
     """Local account registration."""
-    email: str
-    password: str
-    name: str
+    email: EmailStr
+    # 8-char minimum mirrors the runtime check below — declaring it on
+    # the Pydantic field gets the constraint into the OpenAPI schema so
+    # fuzz tooling stops generating 4-char passwords and flagging the
+    # legitimate 400 as "API rejected schema-compliant request".
+    password: str = Field(min_length=8, max_length=128)
+    name: str = Field(min_length=1, max_length=200)
 
 
 class LoginRequest(BaseModel):

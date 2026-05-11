@@ -6,10 +6,11 @@ from dataclasses import asdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Literal
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath, UuidStr
 from src.domain.user import User
 from src.services.moderation_service import ModerationService
 
@@ -17,22 +18,27 @@ router = APIRouter(tags=["moderation"], responses=RESOURCE_RESPONSES)
 
 
 class CreateFlagRequest(BaseModel):
-    target_type: str  # report, comment, issue
-    target_id: str
-    reason: str  # inaccurate, spam, harassment, off_topic, other
-    details: str = ""
+    # Enum-shaped fields land in the OpenAPI as ``enum:`` arrays so fuzz
+    # tooling stops generating arbitrary strings and flagging the
+    # legitimate 400 as "API rejected schema-compliant request". The
+    # service layer remains the source of truth for permission checks
+    # and the canonical accept-list.
+    target_type: Literal["report", "data_story", "comment", "issue"]
+    target_id: UuidStr
+    reason: Literal["inaccurate", "spam", "harassment", "off_topic", "other"]
+    details: str = Field(default="", max_length=2000)
 
 
 class ResolveFlagsRequest(BaseModel):
-    target_type: str
-    target_id: str
-    action: str  # dismiss, remove, warn
+    target_type: Literal["report", "data_story", "comment", "issue"]
+    target_id: UuidStr
+    action: Literal["dismiss", "remove", "warn"]
 
 
 class CreateSanctionRequest(BaseModel):
-    user_id: str
-    type: str  # warning, mute, suspend, ban
-    reason: str
+    user_id: UuidStr
+    type: Literal["warning", "mute", "suspend", "ban"]
+    reason: str = Field(min_length=1, max_length=500)
     expires_at: datetime | None = None
 
 
