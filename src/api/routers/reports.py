@@ -33,7 +33,15 @@ class CreateReportRequest(BaseModel):
 
 
 class UpdateReportRequest(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=300)
+    # `min_length=1` lived here briefly to mirror the create-time
+    # constraint after the 2026-05-10 schemathesis pass tightened the
+    # body shape. It was over-restrictive: the editor sends the full
+    # tuple (title/abstract/visibility) on every save, and the smoke
+    # suite hit 422 whenever the editor mounted into an empty-title
+    # state for a frame before the test's page.fill landed. Empty
+    # title isn't ambiguous semantically (it just means "title is
+    # empty"), so accept it here and keep the cap to bound DB writes.
+    title: str | None = Field(default=None, max_length=300)
     abstract: str | None = Field(default=None, max_length=4000)
     visibility: Literal["private", "public_open", "public_auth"] | None = None
 
