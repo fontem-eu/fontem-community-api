@@ -39,7 +39,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: gmr-postgres-credentials
+                  name: fontem-postgres-credentials
                   key: POSTGRES_PASSWORD
             - name: DATABASE_URL
               value: {{ .Values.databaseUrl | quote }}
@@ -58,7 +58,7 @@ spec:
             - name: MINIO_ENDPOINT
               value: {{ .Values.minioEndpoint | default "minio.gmr.svc.cluster.local:9000" | quote }}
             - name: MINIO_BUCKET
-              value: {{ .Values.minioBucket | default "gmr-uploads" | quote }}
+              value: {{ .Values.minioBucket | default "fontem-uploads" | quote }}
             - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
