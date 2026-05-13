@@ -27,13 +27,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          repository: void42/gmr-ci
-          path: .gmr-ci
+          repository: void42/fontem-ci
+          path: .fontem-ci
           token: ${{ secrets.GMR_CI_READ_TOKEN }}
       - name: OSV-Scanner lockfile gate
-        uses: ./.gmr-ci/actions/osv-scan
+        uses: ./.fontem-ci/actions/osv-scan
       - name: Secret scan (gitleaks)
-        uses: ./.gmr-ci/actions/secret-scan
+        uses: ./.fontem-ci/actions/secret-scan
 
   analyze:
     needs: test
@@ -43,8 +43,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          repository: void42/gmr-ci
-          path: .gmr-ci
+          repository: void42/fontem-ci
+          path: .fontem-ci
           token: ${{ secrets.GMR_CI_READ_TOKEN }}
       - name: Install deps and generate coverage
         env:
@@ -53,7 +53,7 @@ jobs:
         run: |
           pip install --no-cache-dir -r requirements.txt pytest pytest-cov
           python3 -m pytest tests/unit/ -q --cov=src --cov-report=xml:coverage.xml || true
-      - uses: ./.gmr-ci/actions/sonar-scan
+      - uses: ./.fontem-ci/actions/sonar-scan
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
 
@@ -70,13 +70,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          repository: void42/gmr-ci
-          path: .gmr-ci
+          repository: void42/fontem-ci
+          path: .fontem-ci
           token: ${{ secrets.GMR_CI_READ_TOKEN }}
 
       - id: sbom
         name: Generate + upload SBOM
-        uses: ./.gmr-ci/actions/sbom-generate
+        uses: ./.fontem-ci/actions/sbom-generate
         with:
           language: python
           project-name: gmr-community-api
@@ -85,15 +85,15 @@ jobs:
 
       - id: image
         name: Build, push, sign, attest
-        uses: ./.gmr-ci/actions/docker-build-sign
+        uses: ./.fontem-ci/actions/docker-build-sign
         with:
-          image: contribute.void42.internal/golden/gmr-community-api
+          image: contribute.void42.internal/fontem/gmr-community-api
           cosign-key: ${{ secrets.COSIGN_KEY }}
           registry-user: ${{ secrets.REGISTRY_USER }}
           registry-password: ${{ secrets.REGISTRY_PASSWORD }}
           sbom-path: ${{ steps.sbom.outputs.sbom-path }}
 
-      - uses: ./.gmr-ci/actions/gitops-bump
+      - uses: ./.fontem-ci/actions/gitops-bump
         with:
           service: gmr-community-api
           tag: ${{ steps.image.outputs.tag }}
