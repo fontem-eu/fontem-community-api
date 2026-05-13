@@ -79,7 +79,7 @@ jobs:
         uses: ./.fontem-ci/actions/sbom-generate
         with:
           language: python
-          project-name: gmr-community-api
+          project-name: fontem-community-api
           project-version: ${{ github.sha }}
           dtrack-key: ${{ secrets.DTRACK_API_KEY }}
 
@@ -87,7 +87,7 @@ jobs:
         name: Build, push, sign, attest
         uses: ./.fontem-ci/actions/docker-build-sign
         with:
-          image: contribute.void42.internal/fontem/gmr-community-api
+          image: contribute.void42.internal/fontem/fontem-community-api
           cosign-key: ${{ secrets.COSIGN_KEY }}
           registry-user: ${{ secrets.REGISTRY_USER }}
           registry-password: ${{ secrets.REGISTRY_PASSWORD }}
@@ -95,7 +95,7 @@ jobs:
 
       - uses: ./.fontem-ci/actions/gitops-bump
         with:
-          service: gmr-community-api
+          service: fontem-community-api
           tag: ${{ steps.image.outputs.tag }}
           env: testing
           registry-password: ${{ secrets.REGISTRY_PASSWORD }}

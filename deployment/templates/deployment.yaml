@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gmr-community-api
+  name: fontem-community-api
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: {{ .Values.replicas | default 1 }}
@@ -12,13 +12,13 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: gmr-community-api
+      app: fontem-community-api
   template:
     metadata:
       labels:
-        app: gmr-community-api
+        app: fontem-community-api
         kube-monkey/enabled: enabled
-        kube-monkey/identifier: gmr-community-api
+        kube-monkey/identifier: fontem-community-api
         kube-monkey/mtbf: "2"
         kube-monkey/kill-mode: fixed
         kube-monkey/kill-value: "1"
@@ -27,7 +27,7 @@ spec:
         - name: regcred
       containers:
         - name: api
-          image: contribute.void42.internal/fontem/gmr-community-api:{{ .Values.version }}
+          image: contribute.void42.internal/fontem/fontem-community-api:{{ .Values.version }}
           ports:
             - containerPort: 8001
           env:
