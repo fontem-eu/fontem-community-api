@@ -34,7 +34,7 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: gmr-jwt-secret
+                  name: fontem-jwt-secret
                   key: JWT_SECRET
             - name: POSTGRES_PASSWORD
               valueFrom:
