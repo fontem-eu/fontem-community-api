@@ -99,3 +99,4 @@ jobs:
           tag: ${{ steps.image.outputs.tag }}
           env: testing
           registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+# retrigger after sonar project create 1779186433
