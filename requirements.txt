@@ -25,3 +25,5 @@ minio>=7.2
 # 0.0.27 fixes the last of them (unbounded-header DoS).
 python-multipart>=0.0.27
 slowapi>=0.1.9
+
+# (retrigger CI to pick up sbom-generate v2 + DT NVD/OSV DB — see void42/ci-actions#6)
