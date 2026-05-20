@@ -5,8 +5,6 @@ tables in the right order without leaving orphans.
 """
 from __future__ import annotations
 
-import uuid
-
 from tests.integration.conftest import make_headers
 
 

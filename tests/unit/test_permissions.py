@@ -8,10 +8,7 @@ import pytest
 
 from tests.conftest import seed_user, _stable_uuid
 
-from src.domain.report import Report
 from src.domain.group import Group
-from src.domain.moderation import Sanction
-from src.services.exceptions import PermissionDenied
 
 
 @pytest.mark.asyncio
@@ -94,7 +91,7 @@ class TestPermissions:
     # PERM-07: Suspended user is denied even with editor access
     async def test_suspended_user_denied(self, services):
         s = services
-        user = await seed_user(s["user_repo"], "editor-1")
+        await seed_user(s["user_repo"], "editor-1")
         await seed_user(s["user_repo"], "owner-1")
         await seed_user(s["user_repo"], "mod-1", roles=["moderator"])
 

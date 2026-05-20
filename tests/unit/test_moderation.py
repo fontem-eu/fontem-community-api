@@ -4,11 +4,13 @@ InMemory repos — 0 I/O.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
-from tests.conftest import seed_user, _stable_uuid
-
-from src.services.exceptions import PermissionDenied, Conflict
+from src.domain.moderation import Sanction
+from src.services.exceptions import Conflict, PermissionDenied
+from tests.conftest import _stable_uuid, seed_user
 
 
 @pytest.mark.asyncio
@@ -20,9 +22,9 @@ class TestModeration:
         for i in range(3):
             await seed_user(s["user_repo"], f"flagger-{i}", trust_level="commenter")
 
-        flag1 = await s["mod_svc"].flag(_stable_uuid("flagger-0"), "report", "rpt-1", "spam", None)
-        flag2 = await s["mod_svc"].flag(_stable_uuid("flagger-1"), "report", "rpt-1", "spam", None)
-        flag3 = await s["mod_svc"].flag(_stable_uuid("flagger-2"), "report", "rpt-1", "spam", None)
+        await s["mod_svc"].flag(_stable_uuid("flagger-0"), "report", "rpt-1", "spam", None)
+        await s["mod_svc"].flag(_stable_uuid("flagger-1"), "report", "rpt-1", "spam", None)
+        await s["mod_svc"].flag(_stable_uuid("flagger-2"), "report", "rpt-1", "spam", None)
 
         count = await s["mod_repo"].count_flags("report", "rpt-1")
         assert count >= 3
@@ -80,7 +82,7 @@ class TestModeration:
     async def test_mute_blocks_user(self, services):
         s = services
         await seed_user(s["user_repo"], "mod-1", roles=["moderator"])
-        user = await seed_user(s["user_repo"], "user-1", trust_level="contributor")
+        await seed_user(s["user_repo"], "user-1", trust_level="contributor")
 
         await s["mod_svc"].sanction(_stable_uuid("mod-1"), _stable_uuid("user-1"), "mute", "spam")
 
@@ -91,13 +93,10 @@ class TestModeration:
     # MOD-07: Expired suspension no longer blocks
     async def test_expired_suspension_allows(self, services):
         s = services
-        from datetime import datetime, timezone, timedelta
-
         await seed_user(s["user_repo"], "admin-1", roles=["admin"])
         await seed_user(s["user_repo"], "user-1")
 
         # Create a suspension that already expired
-        from src.domain.moderation import Sanction
         expired = Sanction(
             user_id=_stable_uuid("user-1"), type="suspend", reason="test",
             applied_by=_stable_uuid("admin-1"),

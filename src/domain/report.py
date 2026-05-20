@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 
+# ── domain dataclass: each attribute is a column on the reports table.
 @dataclass
-class Report:
+class Report:  # pylint: disable=too-many-instance-attributes
     id: str | None = None
     title: str = ""
     abstract: str | None = None

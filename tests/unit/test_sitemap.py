@@ -7,13 +7,18 @@ Pins the contract that crawlers rely on:
   * All three return XML with the correct root element and the
     canonical URL from ``CANONICAL_URL`` baked into absolute `<loc>`s.
 """
-# pylint: disable=missing-function-docstring
+# pylint: disable=unused-argument
+# ── `services` and `monkeypatch` are pulled in for fixture side-effects
+#    (test client wiring, env var scrubbing) but aren't read in the
+#    test body.
 from __future__ import annotations
 
 import asyncio
+import importlib
+import os
 import xml.etree.ElementTree as ET
 
-import pytest
+from src.api.routers import sitemap as sitemap_mod
 from tests.conftest import make_headers, seed_user
 
 
@@ -91,11 +96,7 @@ class TestSitemap:
         # Override the canonical origin per request; the router reads
         # os.environ at import time, so we reload the module after
         # setting the env var.
-        import importlib
-        import os
-
         os.environ["CANONICAL_URL"] = "https://test.fontem.eu"
-        from src.api.routers import sitemap as sitemap_mod
         importlib.reload(sitemap_mod)
 
         # Re-mount the router so the client sees the reloaded instance.

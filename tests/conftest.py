@@ -2,18 +2,36 @@
 Shared fixtures for unit tests.
 All tests use InMemory repositories — 0 I/O, sub-millisecond.
 """
+# pylint: disable=redefined-outer-name
+# ── pytest fixtures shadow the fixture-name parameter on every test
+#    that consumes them; that's the canonical pytest pattern, not a
+#    name-collision bug. Disable module-wide rather than per-line.
 from __future__ import annotations
 
 import uuid
 
 import pytest
+from dishka.integrations.fastapi import setup_dishka
 from jose import jwt
-
 from starlette.testclient import TestClient
 
 from src.api.app import app
-from src.api.auth import JWT_SECRET, JWT_ALGORITHM
+from src.api.auth import JWT_ALGORITHM, JWT_SECRET
 from src.api.rate_limit import limiter
+from src.domain.user import User
+from src.infra.memory.mem_group_repo import InMemoryGroupRepository
+from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
+from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
+from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
+from src.infra.memory.mem_report_repo import InMemoryReportRepository
+from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
+from src.infra.memory.mem_user_repo import InMemoryUserRepository
+from src.services.issue_service import IssueService
+from src.services.moderation_service import ModerationService
+from src.services.permission_service import PermissionService
+from src.services.report_service import ReportService
+from src.services.tag_service import TagService
+from tests.dishka_fixtures import make_test_container
 
 # Disable per-endpoint rate limiting in tests so bursts don't trip auth limits.
 limiter.enabled = False
@@ -30,22 +48,6 @@ def _stable_uuid(raw_id: str) -> str:
         return raw_id  # already a valid UUID
     except ValueError:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, raw_id))
-
-from src.infra.memory.mem_user_repo import InMemoryUserRepository
-from src.infra.memory.mem_report_repo import InMemoryReportRepository
-from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
-from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
-from src.infra.memory.mem_group_repo import InMemoryGroupRepository
-from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
-from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
-
-from src.services.permission_service import PermissionService
-from src.services.report_service import ReportService
-from src.services.issue_service import IssueService
-from src.services.moderation_service import ModerationService
-from src.services.tag_service import TagService
-
-from src.domain.user import User
 
 
 def make_token(user_id: str = "user-1", email: str = "test@test.com",
@@ -101,9 +103,6 @@ def client(services):
     Dishka handles FromDishka[T] injection (auth, migrated endpoints).
     Old Depends(get_*) overrides handle endpoints not yet migrated.
     """
-    from tests.dishka_fixtures import make_test_container
-    from dishka.integrations.fastapi import setup_dishka
-
     # Reset middleware stack so setup_dishka can add its middleware
     app.middleware_stack = None
 

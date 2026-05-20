@@ -1,6 +1,8 @@
 """HTTP-level tests for issue endpoints (covers routers/issues.py)."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from tests.conftest import make_headers, seed_user
 
@@ -14,7 +16,6 @@ class TestIssueAPI:
 
     def test_create_issue(self, client, services):
         """POST /issues creates an issue."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup(services))
         resp = client.post(
             "/issues",
@@ -32,7 +33,6 @@ class TestIssueAPI:
 
     def test_list_issues(self, client, services):
         """GET /issues returns issues."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup(services))
         h = make_headers("user-1")
         client.post(
@@ -45,7 +45,6 @@ class TestIssueAPI:
 
     def test_get_issue(self, client, services):
         """GET /issues/:id returns issue detail."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup(services))
         h = make_headers("user-1")
         create = client.post(
@@ -60,7 +59,6 @@ class TestIssueAPI:
 
     def test_add_comment(self, client, services):
         """POST /issues/:id/comments adds a comment."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup(services))
         h = make_headers("user-1")
         create = client.post(
@@ -74,7 +72,6 @@ class TestIssueAPI:
 
     def test_vote_on_issue(self, client, services):
         """POST /issues/:id/vote records a vote."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup(services))
         h = make_headers("user-1")
         create = client.post(

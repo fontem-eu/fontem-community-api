@@ -1,6 +1,8 @@
 """HTTP-level tests for report endpoints (covers routers/reports.py)."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from tests.conftest import make_headers, seed_user
 
@@ -14,7 +16,6 @@ class TestReportAPI:
 
     def test_create_report(self, client, services):
         """POST /reports creates a report and returns 201."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         resp = client.post(
             "/reports",
@@ -29,7 +30,6 @@ class TestReportAPI:
 
     def test_list_reports(self, client, services):
         """GET /reports returns user's reports."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         client.post("/reports", json={"title": "R1"}, headers=h)
@@ -40,7 +40,6 @@ class TestReportAPI:
 
     def test_get_report(self, client, services):
         """GET /reports/:id returns report with sections."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         create = client.post("/reports", json={"title": "R"}, headers=h)
@@ -52,7 +51,6 @@ class TestReportAPI:
 
     def test_update_report(self, client, services):
         """PUT /reports/:id updates title and visibility."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         create = client.post("/reports", json={"title": "Old"}, headers=h)
@@ -67,7 +65,6 @@ class TestReportAPI:
 
     def test_delete_report(self, client, services):
         """DELETE /reports/:id returns 204."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         create = client.post("/reports", json={"title": "Doomed"}, headers=h)
@@ -77,7 +74,6 @@ class TestReportAPI:
 
     def test_add_section(self, client, services):
         """POST /reports/:id/sections creates a section."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         create = client.post("/reports", json={"title": "R"}, headers=h)
@@ -92,7 +88,6 @@ class TestReportAPI:
 
     def test_section_persists_on_reload(self, client, services):
         """Section content is returned when fetching the report."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         create = client.post("/reports", json={"title": "R"}, headers=h)
@@ -109,7 +104,6 @@ class TestReportAPI:
 
     def test_update_section(self, client, services):
         """PUT /reports/:id/sections/:sid updates content."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         create = client.post("/reports", json={"title": "R"}, headers=h)
@@ -129,7 +123,6 @@ class TestReportAPI:
 
     def test_delete_section(self, client, services):
         """DELETE /reports/:id/sections/:sid returns 204."""
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         create = client.post("/reports", json={"title": "R"}, headers=h)
@@ -150,7 +143,6 @@ class TestReportAPI:
         loads the report first and 404s if it's missing — correct for
         any caller since a nonexistent id tells you nothing either way.
         """
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         resp = client.get("/reports/00000000-0000-4000-8000-000000000000", headers=make_headers("user-1"))
         assert resp.status_code == 404
@@ -160,7 +152,6 @@ class TestReportAPI:
         alias. Cover create + read end-to-end on the new prefix so the
         rename window doesn't silently break the new path.
         """
-        import asyncio
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))
         h = make_headers("user-1")
         create = client.post(

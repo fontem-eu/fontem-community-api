@@ -3,7 +3,6 @@ Integration tests for Sharing/Access — full HTTP API against real PostgreSQL.
 """
 from __future__ import annotations
 
-import pytest
 from tests.integration.conftest import make_headers
 
 

@@ -23,8 +23,17 @@ from sqlalchemy.ext.asyncio import (
 
 from src.assistant.context import TurnLimits
 from src.assistant.mistral_client import MistralProxyClient
+from src.assistant.pg_repository import PgAssistRepository
 from src.assistant.proxy_client import ClaudeProxyClient
+from src.assistant.repository import AssistRepository
 from src.assistant.service import AssistantService, ProxyClient
+from src.infra.postgres.pg_group_repo import PgGroupRepository
+from src.infra.postgres.pg_issue_repo import PgIssueRepository
+from src.infra.postgres.pg_moderation_repo import PgModerationRepository
+from src.infra.postgres.pg_permission_repo import PgPermissionRepository
+from src.infra.postgres.pg_report_repo import PgReportRepository
+from src.infra.postgres.pg_tag_follow_repo import PgTagFollowRepository
+from src.infra.postgres.pg_user_repo import PgUserRepository
 from src.repositories.group_repository import GroupRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
@@ -32,7 +41,6 @@ from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
 from src.repositories.user_repository import UserRepository
-from src.assistant.repository import AssistRepository
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
@@ -90,42 +98,34 @@ class RepositoryProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def user_repo(self, session: AsyncSession) -> UserRepository:
-        from src.infra.postgres.pg_user_repo import PgUserRepository
         return PgUserRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def group_repo(self, session: AsyncSession) -> GroupRepository:
-        from src.infra.postgres.pg_group_repo import PgGroupRepository
         return PgGroupRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def report_repo(self, session: AsyncSession) -> ReportRepository:
-        from src.infra.postgres.pg_report_repo import PgReportRepository
         return PgReportRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def permission_repo(self, session: AsyncSession) -> PermissionRepository:
-        from src.infra.postgres.pg_permission_repo import PgPermissionRepository
         return PgPermissionRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def issue_repo(self, session: AsyncSession) -> IssueRepository:
-        from src.infra.postgres.pg_issue_repo import PgIssueRepository
         return PgIssueRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def moderation_repo(self, session: AsyncSession) -> ModerationRepository:
-        from src.infra.postgres.pg_moderation_repo import PgModerationRepository
         return PgModerationRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def assist_repo(self, session: AsyncSession) -> AssistRepository:
-        from src.assistant.pg_repository import PgAssistRepository
         return PgAssistRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def tag_follow_repo(self, session: AsyncSession) -> TagFollowRepository:
-        from src.infra.postgres.pg_tag_follow_repo import PgTagFollowRepository
         return PgTagFollowRepository(session)
 
 

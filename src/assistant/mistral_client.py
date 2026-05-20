@@ -268,6 +268,28 @@ def _system_prompt_with_today(base: str) -> str:
     return f"{base.rstrip()}\n\nToday's date is {today}."
 
 
+def _format_coverage(cov_start: str | None, cov_end: str | None) -> str:
+    """Render a coverage window into the bullet's middle column."""
+    if cov_start and cov_end:
+        return f"{cov_start} → {cov_end}"
+    if cov_end:
+        return f"through {cov_end}"
+    return "no date range"
+
+
+def _format_freshness(age_h: float | None, stale: bool) -> str:
+    """Render an age-in-hours into a compact "loaded N <unit> ago" hint."""
+    if age_h is None:
+        base = "freshness unknown"
+    elif age_h < 48:
+        base = f"loaded {age_h:.1f}h ago"
+    elif age_h < 24 * 60:
+        base = f"loaded {age_h / 24:.0f}d ago"
+    else:
+        base = f"loaded {age_h / (24 * 7):.0f}w ago"
+    return base + ", STALE" if stale else base
+
+
 def _format_freshness_summary(sources: list[dict]) -> str:
     """Compress a /data-quality/source-freshness response into a short
     block the model can quote when reasoning about coverage.
@@ -283,28 +305,9 @@ def _format_freshness_summary(sources: list[dict]) -> str:
     for src in sorted(sources, key=lambda s: s.get("id") or ""):
         sid = src.get("id") or ""
         label = src.get("label") or sid or "unknown"
-        cov_start = src.get("coverage_start")
-        cov_end = src.get("coverage_end")
         rows = src.get("record_count") or 0
-        stale = bool(src.get("stale"))
-        age_h = src.get("age_hours")
-        if cov_start and cov_end:
-            coverage = f"{cov_start} → {cov_end}"
-        elif cov_end:
-            coverage = f"through {cov_end}"
-        else:
-            coverage = "no date range"
-        # Format age compactly: hours <48, days <60, then weeks.
-        if age_h is None:
-            freshness = "freshness unknown"
-        elif age_h < 48:
-            freshness = f"loaded {age_h:.1f}h ago"
-        elif age_h < 24 * 60:
-            freshness = f"loaded {age_h / 24:.0f}d ago"
-        else:
-            freshness = f"loaded {age_h / (24 * 7):.0f}w ago"
-        if stale:
-            freshness += ", STALE"
+        coverage = _format_coverage(src.get("coverage_start"), src.get("coverage_end"))
+        freshness = _format_freshness(src.get("age_hours"), bool(src.get("stale")))
         lines.append(f"- {label} ({sid}): {coverage}, {rows:,} rows, {freshness}")
     header = (
         "Data coverage at the time of this turn (cite these ranges when "
@@ -325,20 +328,30 @@ def _build_summary(label: str, props: dict, contract_count: int) -> str:
     return base + "."
 
 
+def _capture_names_from_dict(name_cache: dict[str, str], payload: dict) -> None:
+    """The dict-shaped branch of _capture_names. Extracted to drop the
+    cognitive-complexity score below Sonar's 15 threshold.
+    """
+    # `search_entities` shape: {"companies":[...], "authorities":[...], ...}
+    for collection in ("companies", "authorities", "persons", "lobbyists"):
+        for item in payload.get(collection) or []:
+            _capture_names(name_cache, item)
+    # `investigate_entity` shape: {"props": {...}}
+    if "props" in payload:
+        _capture_names(name_cache, payload["props"])
+    # Single entity dict
+    if not payload.get("name"):
+        return
+    name = str(payload["name"])
+    for id_field in ("gmr_id", "authority_id", "entity_id", "tr_id"):
+        if id_field in payload:
+            name_cache[str(payload[id_field])] = name
+
+
 def _capture_names(name_cache: dict[str, str], payload: dict | list) -> None:
     """Walk a tool result and remember any (id, name) pairs we see."""
     if isinstance(payload, dict):
-        # `search_entities` shape: {"companies":[...], "authorities":[...], ...}
-        for collection in ("companies", "authorities", "persons", "lobbyists"):
-            for item in payload.get(collection) or []:
-                _capture_names(name_cache, item)
-        # `investigate_entity` shape: {"props": {...}}
-        if "props" in payload:
-            _capture_names(name_cache, payload["props"])
-        # Single entity dict
-        for id_field in ("gmr_id", "authority_id", "entity_id", "tr_id"):
-            if id_field in payload and payload.get("name"):
-                name_cache[str(payload[id_field])] = str(payload["name"])
+        _capture_names_from_dict(name_cache, payload)
     elif isinstance(payload, list):
         for item in payload:
             _capture_names(name_cache, item)

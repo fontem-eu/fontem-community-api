@@ -19,6 +19,7 @@ class IssueService:
         except ValueError:
             return 0
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def create(
         self,
         user_id: str,

@@ -1,6 +1,7 @@
 """Tests for Google OAuth token exchange (AUTH-GOOGLE)."""
 from __future__ import annotations
 
+import base64
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -136,7 +137,6 @@ class TestGoogleAuthMalformedTokens:
 
     def test_binary_noise_returns_401(self, client):
         """Base64-decodable but non-JSON content must not crash."""
-        import base64
         noise = base64.urlsafe_b64encode(b"\xa9\x00\xff").decode()
         resp = client.post("/auth/google", json={"credential": f"{noise}.x.y"})
         assert resp.status_code == 401

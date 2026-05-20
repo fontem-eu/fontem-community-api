@@ -4,8 +4,9 @@ verify access control, trust levels, and error behavior through public APIs.
 from __future__ import annotations
 
 import pytest
-from tests.conftest import seed_user
+from src.domain.moderation import Sanction
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
+from tests.conftest import seed_user
 
 
 # ── IssueService ───────────────────────────────────────────────
@@ -55,7 +56,7 @@ class TestIssueServiceMutations:
     async def test_resolve_requires_moderator(self, services):
         s = services
         user = await seed_user(s["user_repo"], "u1", trust_level="contributor")
-        mod = await seed_user(s["user_repo"], "mod", trust_level="moderator")
+        await seed_user(s["user_repo"], "mod", trust_level="moderator")
         issue = await s["issue_svc"].create(user.id, "T", "body", "other", "company", "c1")
         with pytest.raises(PermissionDenied, match="Moderator"):
             await s["issue_svc"].resolve(user.id, issue.id, "resolved")
@@ -104,7 +105,6 @@ class TestPermissionServiceMutations:
         s = services
         user = await seed_user(s["user_repo"], "u1")
         r = await s["report_svc"].create(user.id, "Test")
-        from src.domain.moderation import Sanction
         sanction = Sanction(user_id=user.id, type="suspend", reason="test")
         await s["user_repo"].add_sanction(sanction)
         result = await s["perm_svc"].check(user.id, r.id, "viewer")

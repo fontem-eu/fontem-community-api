@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 
 import httpx
 
@@ -68,7 +67,10 @@ TOOLS = [
     },
     {
         "name": "suggest_visualization",
-        "description": "Suggest a visualization to embed in the report based on the conversation context. Returns a pocket-ready config.",
+        "description": (
+            "Suggest a visualization to embed in the report based on the "
+            "conversation context. Returns a pocket-ready config."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -192,7 +194,9 @@ class LLMService:
         except (httpx.ConnectError, httpx.TimeoutException):
             return None  # Proxy unreachable — fall back to API
 
-    async def chat(  # NOSONAR S3776: tool-use loop with fallback branches
+    # NOSONAR S3776: tool-use loop with fallback branches
+    # pylint: disable-next=too-many-locals
+    async def chat(
         self,
         user_message: str,
         history: list[dict] | None = None,
@@ -297,7 +301,10 @@ class LLMService:
 
             # Max iterations reached
             return {
-                "content": "I've made several tool calls but couldn't fully resolve the query. Please try a more specific question.",
+                "content": (
+                    "I've made several tool calls but couldn't fully resolve the "
+                    "query. Please try a more specific question."
+                ),
                 "tool_calls_made": tool_calls_made,
                 "suggestions": suggestions,
                 "messages": messages,

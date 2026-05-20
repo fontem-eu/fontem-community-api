@@ -4,7 +4,11 @@ These use the TestClient + dependency overrides to replace the live
 proxy with a fake. They verify the HTTP contract only — business
 logic of the turn is already covered by test_service.py.
 """
-# pylint: disable=missing-class-docstring,missing-function-docstring,protected-access,unused-import,too-few-public-methods
+# pylint: disable=protected-access,redefined-outer-name,unused-argument
+# ── pytest fixtures shadow the fixture-name parameter on every test
+#    that consumes them; that's the canonical pytest pattern. The
+#    ``fake_assistant`` fixture is autouse=True so passing it as a
+#    test parameter is only there to declare the dependency.
 from __future__ import annotations
 
 import asyncio

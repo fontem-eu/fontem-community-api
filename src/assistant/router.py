@@ -4,9 +4,13 @@ Mounted at ``/assist`` by the app. The router is deliberately thin:
 it validates, dispatches to the service, and streams the result back.
 No business logic lives here.
 """
-from __future__ import annotations
+# NOTE: deliberately *no* ``from __future__ import annotations`` here —
+# FastAPI needs the response_model class objects to be eagerly
+# resolvable (not ForwardRefs) so the serializer can build at startup.
+# Same call as src/api/routers/auth.py.
 
 from collections.abc import AsyncGenerator
+from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query
@@ -14,9 +18,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
-from src.domain.user import User
+from src.api.openapi_responses import RESOURCE_RESPONSES
 from src.assistant.service import AssistantService, ChatRequest
+from src.domain.user import User
 
 
 router = APIRouter(prefix="/assist", tags=["assist"], responses=RESOURCE_RESPONSES)
@@ -74,19 +78,18 @@ class HistoryMessage(BaseModel):
 # ── Endpoints ──────────────────────────────────────────────────
 
 
-# Return annotation is omitted deliberately: with `from __future__ import
-# annotations`, FastAPI treats the annotation as a string ForwardRef and
-# hands it to Pydantic while building the OpenAPI schema, which then
-# raises `PydanticUserError` (StreamingResponse is not a Pydantic type)
-# and crashes /openapi.json with a 500. `response_class=` tells FastAPI
-# this is a streaming endpoint without involving schema generation.
+# Return annotation is omitted deliberately: FastAPI would otherwise
+# try to build a Pydantic response model for ``StreamingResponse``
+# (not a Pydantic type) and crash /openapi.json with a 500.
+# ``response_class=`` tells FastAPI this is a streaming endpoint
+# without involving schema generation.
 @router.post("/chat/stream", response_class=StreamingResponse)
 @inject
 async def chat_stream(
     body: AssistChatBody,
     *,
     service: FromDishka[AssistantService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ):
     """Stream an assistant reply via SSE."""
     req = ChatRequest(
@@ -112,12 +115,12 @@ async def chat_stream(
     )
 
 
-@router.get("/usage", response_model=UsageResponse)
+@router.get("/usage")
 @inject
 async def usage(
     *,
     service: FromDishka[AssistantService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> UsageResponse:
     """Return the current user's token consumption over rolling windows."""
     snapshot = await service.usage_for_user(user.id)
@@ -128,13 +131,13 @@ async def usage(
     )
 
 
-@router.get("/usage-history", response_model=UsageHistoryResponse)
+@router.get("/usage-history")
 @inject
 async def usage_history(
-    days: int = Query(30, ge=1, le=365),
     *,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
     service: FromDishka[AssistantService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> UsageHistoryResponse:
     """Return per-day token totals for the current user over the last N days."""
     rows = await service.usage_history_for_user(user.id, days=days)
@@ -155,7 +158,7 @@ async def usage_history(
 @inject
 async def delete_all_conversations(
     *,
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
     service: FromDishka[AssistantService],
 ) -> dict:
     """Delete all conversation history for the current user."""
@@ -169,13 +172,17 @@ async def get_conversation(
     conversation_key: str,
     *,
     service: FromDishka[AssistantService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     """Return the full stored history for a conversation key, scoped to the user."""
-    conv = await service._repo.find_or_create_conversation(  # pylint: disable=protected-access
-        user.id, conversation_key
-    )
-    messages = await service._repo.list_messages(conv.id)  # pylint: disable=protected-access
+    # AssistantService's public surface is turn-based (chat / usage);
+    # there's no dedicated "fetch a stored conversation" verb because
+    # the only consumer is this introspection endpoint. Reach through
+    # to the repo handle.
+    # pylint: disable=protected-access
+    conv = await service._repo.find_or_create_conversation(user.id, conversation_key)
+    messages = await service._repo.list_messages(conv.id)
+    # pylint: enable=protected-access
     return {
         "conversation_key": conversation_key,
         "messages": [

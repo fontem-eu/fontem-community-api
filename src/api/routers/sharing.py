@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dishka.integrations.fastapi import FromDishka, inject
-
 from dataclasses import asdict
+from typing import Annotated
 
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -32,7 +32,7 @@ async def list_access(
     *,
     perms_svc: FromDishka[PermissionService],
     perms_repo: FromDishka[PermissionRepository],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> list[dict]:
     await perms_svc.require(user.id, report_id, "owner")
     grants = await perms_repo.list_collaborators(report_id)
@@ -47,7 +47,7 @@ async def set_access(
     *,
     perms_svc: FromDishka[PermissionService],
     perms_repo: FromDishka[PermissionRepository],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     await perms_svc.require(user.id, report_id, "owner")
     if body.user_id:
@@ -65,7 +65,7 @@ async def remove_access(
     *,
     perms_svc: FromDishka[PermissionService],
     perms_repo: FromDishka[PermissionRepository],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await perms_svc.require(user.id, report_id, "owner")
     # Find the grant and remove it

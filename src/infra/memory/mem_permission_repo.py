@@ -52,7 +52,6 @@ class InMemoryPermissionRepository(PermissionRepository):
         if v:
             return v
         if self._report_repo:
-            import asyncio
             report = await self._report_repo.get_by_id(report_id)
             if report:
                 return report.visibility

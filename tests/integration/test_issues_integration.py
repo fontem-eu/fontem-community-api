@@ -6,7 +6,6 @@ have 'new_user' trust, so we test the permission check too.
 """
 from __future__ import annotations
 
-import pytest
 from tests.integration.conftest import make_headers
 
 

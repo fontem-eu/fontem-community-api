@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dishka.integrations.fastapi import FromDishka, inject
-
 from dataclasses import asdict
+from typing import Annotated
 
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -26,13 +26,18 @@ class AddMemberRequest(BaseModel):
     user_id: str
 
 
+# ``user`` deps are auth gates: the principal isn't read directly here
+# (creation/membership ops don't care *who* created/joined inside the
+# handler — the service-layer ACL handles that), but the Depends still
+# has to fire so the 401/403 short-circuit happens before the body runs.
+# Underscore-prefix tells pylint we know it's unused.
 @router.post("", status_code=201)
 @inject
 async def create_group(
     body: CreateGroupRequest,
     *,
     repo: FromDishka[GroupRepository],
-    user: User = Depends(get_current_user),
+    _user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     group = Group(name=body.name, description=body.description)
     group = await repo.create(group)
@@ -45,7 +50,7 @@ async def get_group(
     group_id: UuidPath,
     *,
     repo: FromDishka[GroupRepository],
-    user: User = Depends(get_current_user),
+    _user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     group = await repo.get_by_id(group_id)
     if group is None:
@@ -62,7 +67,7 @@ async def add_member(
     body: AddMemberRequest,
     *,
     repo: FromDishka[GroupRepository],
-    user: User = Depends(get_current_user),
+    _user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     group = await repo.get_by_id(group_id)
     if group is None:
@@ -78,6 +83,6 @@ async def remove_member(
     uid: UuidPath,
     *,
     repo: FromDishka[GroupRepository],
-    user: User = Depends(get_current_user),
+    _user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await repo.remove_member(group_id, uid)

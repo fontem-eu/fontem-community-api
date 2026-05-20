@@ -1,6 +1,13 @@
 """Authentication endpoints — Google OAuth + local accounts."""
-from __future__ import annotations
-
+# NOTE: deliberately *no* ``from __future__ import annotations`` here.
+# The handlers return ``TokenResponse`` (a Pydantic model defined later
+# in the file). With the future import, FastAPI gets a ForwardRef it
+# can't resolve when building the response serializer and crashes the
+# request with ``PydanticUserError`` (model not fully defined). Sonar's
+# python:S8409 wants ``response_model=`` dropped because the return
+# annotation already conveys it — but that only works if the
+# annotation evaluates to the actual class, not a string. So we keep
+# the regular (eager) annotations and accept that S8409 is happy.
 import base64
 import json
 import os
@@ -10,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 import httpx
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from jose import jwt as jose_jwt
 from pydantic import BaseModel, EmailStr, Field
 
@@ -137,11 +144,26 @@ async def _verify_google_token(credential: str) -> dict:
     return payload
 
 
-@router.post("/google", response_model=TokenResponse)
+# slowapi's @limiter.limit decorator extracts the client IP off the
+# first positional Request argument; the handler body doesn't use it,
+# but the parameter has to be named ``request`` and typed Request so
+# slowapi can find it. Same on /register and /login below.
+@router.post(
+    "/google",
+    responses={
+        401: {
+            "description": (
+                "Google token verification failed (malformed JWT, "
+                "unknown signing key, decode error, email not verified, "
+                "or the account is banned)."
+            ),
+        },
+    },
+)
 @limiter.limit("10/minute")
 @inject
 async def google_login(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     body: GoogleTokenRequest,
     *,
     user_repo: FromDishka[UserRepository],
@@ -254,11 +276,18 @@ def _issue_jwt(user: User) -> TokenResponse:
     )
 
 
-@router.post("/register", response_model=TokenResponse, status_code=201)
+@router.post(
+    "/register",
+    status_code=201,
+    responses={
+        400: {"description": "Password shorter than 8 characters."},
+        409: {"description": "Email already registered to another account."},
+    },
+)
 @limiter.limit("3/minute")
 @inject
 async def register(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     body: RegisterRequest,
     *,
     user_repo: FromDishka[UserRepository],
@@ -282,11 +311,27 @@ async def register(
     return _issue_jwt(user)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    responses={
+        401: {
+            "description": (
+                "Invalid email or password, or the account is banned."
+            ),
+        },
+        429: {
+            "description": (
+                "Account temporarily locked after too many failed login "
+                "attempts. Different from the router-level ingress 429 — "
+                "this one is account-level brute-force protection."
+            ),
+        },
+    },
+)
 @limiter.limit("5/minute")
 @inject
 async def login(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     body: LoginRequest,
     *,
     user_repo: FromDishka[UserRepository],

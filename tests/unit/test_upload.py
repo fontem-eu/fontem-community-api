@@ -1,6 +1,4 @@
 """Tests for image upload validation logic."""
-import pytest
-
 from src.infra.minio_client import ALLOWED_TYPES, MAX_SIZE, EXT_MAP
 
 

@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.moderation import Sanction
+from src.services.exceptions import Conflict
 from src.domain.user import User
 from src.infra.postgres.models import SanctionModel, UserModel, UserRoleModel
 from src.repositories.user_repository import UserRepository
@@ -46,8 +48,6 @@ class PgUserRepository(UserRepository):
         return self._to_domain(row) if row else None
 
     async def upsert(self, user: User) -> User:
-        from sqlalchemy.exc import IntegrityError
-
         user_id = user.id or str(uuid4())
         now = datetime.now(timezone.utc)
         stmt = pg_insert(UserModel).values(
@@ -74,10 +74,9 @@ class PgUserRepository(UserRepository):
         except IntegrityError as exc:
             await self._session.rollback()
             if "email" in str(exc).lower():
-                from src.services.exceptions import Conflict
                 raise Conflict(f"Email {user.email} already registered") from exc
             raise
-        return (await self.get_by_id(user_id))  # type: ignore[return-value]
+        return await self.get_by_id(user_id)  # type: ignore[return-value]
 
     async def get_roles(self, user_id: str) -> list[str]:
         result = await self._session.execute(

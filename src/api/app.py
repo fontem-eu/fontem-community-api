@@ -1,26 +1,27 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+from dishka.integrations.fastapi import setup_dishka
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import os
-
-from dishka.integrations.fastapi import setup_dishka
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import create_async_engine
 
+from src.api.di import make_container
 from src.api.rate_limit import limiter
 from src.api.routers import (
     auth, groups, issues, moderation, reports, sharing, sitemap, tags, users,
 )
 from src.assistant import router as assistant_router
-from src.api.di import make_container
+from src.infra.postgres.models import Base
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
 logger = logging.getLogger(__name__)
@@ -54,18 +55,20 @@ def _find_value_error(exc: BaseException) -> ValueError | None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    # The FastAPI lifespan protocol passes the bound application as the
+    # first positional argument; this hook only needs the env-derived
+    # DATABASE_URL, so the parameter is underscore-prefixed.
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
-        from sqlalchemy.ext.asyncio import create_async_engine
-        from sqlalchemy import text
         engine = create_async_engine(db_url, connect_args={"timeout": 10, "ssl": None})
         # Ensure schema exists (idempotent — safe for fresh and existing DBs)
-        from src.infra.postgres.models import Base
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with engine.begin() as conn:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"
+            ))
             await conn.execute(text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
                 "failed_login_attempts INTEGER NOT NULL DEFAULT 0"
@@ -174,6 +177,13 @@ def build_app(database_url: str | None = None) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         return response
 
+    # Exception handlers below take ``request`` as the first positional
+    # argument because that's the FastAPI/starlette protocol; the
+    # handler bodies don't read it. The protocol *names* don't have to
+    # be ``request``, but keeping the canonical name avoids confusion
+    # when other engineers grep for "request: Request".
+    # pylint: disable=unused-argument
+
     @application.exception_handler(PermissionDenied)
     async def permission_denied_handler(request: Request, exc: PermissionDenied) -> JSONResponse:
         return JSONResponse(status_code=403, content={"detail": exc.message})
@@ -215,12 +225,17 @@ def build_app(database_url: str | None = None) -> FastAPI:
         # surfaced as a silent 500. The catch-all needs to log so future
         # 500s leave a trail. logger.exception emits at ERROR with the
         # full traceback so a `kubectl logs` is enough to triage.
+        # ``exc`` is implicitly attached to logger.exception via the
+        # current exc_info; we don't reference the parameter directly.
+        del exc
         logger.exception(
             "unhandled exception on %s %s",
             request.method,
             request.url.path,
         )
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    # pylint: enable=unused-argument
 
     application.include_router(assistant_router.router)
     application.include_router(auth.router)

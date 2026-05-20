@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import uuid as _uuid
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import Depends, HTTPException, Request
@@ -24,10 +25,8 @@ async def _resolve_user(
     token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    import uuid as _uuid
+    except JWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
     user_id: str | None = payload.get("sub")
     if user_id is None:

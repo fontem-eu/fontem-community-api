@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from dishka.integrations.fastapi import FromDishka, inject
-
 from dataclasses import asdict
-from typing import Any
+from typing import Annotated, Literal
 
-from typing import Literal
-
-from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
+from dishka.integrations.fastapi import FromDishka, inject
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user, get_optional_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath, UuidStr
 from src.domain.user import User
-from src.infra.minio_client import MinioStorage, ALLOWED_TYPES, MAX_SIZE
+from src.infra.minio_client import ALLOWED_TYPES, MAX_SIZE, MinioStorage
 from src.services.report_service import ReportService
 
 # Mounted by app.py at both /data-stories (canonical) and /reports
@@ -66,7 +63,7 @@ async def create_report(
     body: CreateReportRequest,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     report = await svc.create(user.id, body.title, body.abstract, body.parent_id)
     return asdict(report)
@@ -78,16 +75,24 @@ async def create_report(
 # requirement; otherwise it gets flagged as "API accepts requests
 # without authentication". The handler still consumes get_optional_user
 # so signed-in callers see public_auth stories on top of public_open.
-@router.get("", openapi_extra={"security": []})
+@router.get(
+    "",
+    openapi_extra={"security": []},
+    responses={401: {"description": "Authentication required when scope=mine."}},
+)
 @inject
+# scope/limit/offset/tag are the feed's filtering surface; collapsing
+# them into one request-body BaseModel would just push the same names
+# into a wrapper for no readability gain on the call sites (curl/HTTPie).
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def list_reports(
-    scope: str = Query("mine", pattern="^(mine|public)$"),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0, le=2**31 - 1),
-    tag: str | None = Query(None, max_length=40),
     *,
+    scope: Annotated[str, Query(pattern="^(mine|public)$")] = "mine",
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0, le=2**31 - 1)] = 0,
+    tag: Annotated[str | None, Query(max_length=40)] = None,
     svc: FromDishka[ReportService],
-    user: User | None = Depends(get_optional_user),
+    user: Annotated[User | None, Depends(get_optional_user)],
 ) -> list[dict]:
     # scope=public is browseable anonymously — the feed is the platform's
     # transparency surface. Anonymous callers only see `public_open`
@@ -122,7 +127,7 @@ async def get_report(
     report_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
-    user: User | None = Depends(get_optional_user),
+    user: Annotated[User | None, Depends(get_optional_user)],
 ) -> dict:
     # Anonymous visitors can read `public_open` reports — that's the
     # point of having them. The service layer enforces visibility vs
@@ -157,7 +162,7 @@ async def update_report(
     body: UpdateReportRequest,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     report = await svc.update(user.id, report_id, body.title, body.abstract, body.visibility)
     return asdict(report)
@@ -169,7 +174,7 @@ async def delete_report(
     report_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await svc.delete(user.id, report_id)
 
@@ -181,7 +186,7 @@ async def add_section(
     body: CreateSectionRequest,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     section = await svc.add_section(user.id, report_id, {"html": body.content})
     result = asdict(section)
@@ -189,15 +194,20 @@ async def add_section(
     return result
 
 
+# ``report_id`` on the sub-section routes is part of the URL hierarchy
+# (it scopes the route under the report) but the service-layer call
+# only needs ``section_id`` — the perms gate is keyed on the section's
+# report. The path parameter still has to be named ``report_id`` so
+# FastAPI binds the placeholder; pylint just can't see that.
 @router.put("/{report_id}/sections/{section_id}")
 @inject
 async def update_section(
-    report_id: UuidPath,
+    report_id: UuidPath,  # pylint: disable=unused-argument
     section_id: UuidPath,
     body: UpdateSectionRequest,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     section = await svc.edit_section(user.id, section_id, {"html": body.content})
     result = asdict(section)
@@ -208,11 +218,11 @@ async def update_section(
 @router.delete("/{report_id}/sections/{section_id}", status_code=204)
 @inject
 async def delete_section(
-    report_id: UuidPath,
+    report_id: UuidPath,  # pylint: disable=unused-argument
     section_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await svc.delete_section(user.id, section_id)
 
@@ -220,11 +230,11 @@ async def delete_section(
 @router.post("/{report_id}/sections/{section_id}/lock")
 @inject
 async def acquire_lock(
-    report_id: UuidPath,
+    report_id: UuidPath,  # pylint: disable=unused-argument
     section_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     acquired = await svc.acquire_lock(user.id, section_id)
     return {"acquired": acquired}
@@ -233,11 +243,11 @@ async def acquire_lock(
 @router.delete("/{report_id}/sections/{section_id}/lock", status_code=204)
 @inject
 async def release_lock(
-    report_id: UuidPath,
+    report_id: UuidPath,  # pylint: disable=unused-argument
     section_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await svc.release_lock(user.id, section_id)
 
@@ -245,14 +255,17 @@ async def release_lock(
 @router.get("/{report_id}/sections/{section_id}/versions")
 @inject
 async def list_versions(
-    report_id: UuidPath,
+    report_id: UuidPath,  # pylint: disable=unused-argument
     section_id: UuidPath,
-    limit: int = Query(20, ge=1, le=100),
     *,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    _user: Annotated[User, Depends(get_current_user)],
 ) -> list[dict]:
-    versions = await svc._reports.get_versions(section_id, limit)
+    # Version-list is a thin pass-through: there's no service-layer
+    # business logic on top, just the repo query. Reaching through to
+    # the canonical repo handle is the cleanest seam.
+    versions = await svc._reports.get_versions(section_id, limit)  # pylint: disable=protected-access
     return [asdict(v) for v in versions]
 
 
@@ -265,7 +278,7 @@ async def save_document(
     body: SaveDocumentRequest,
     *,
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     """Save the full report document as TipTap JSON (v2 format)."""
     await svc.save_document(user.id, report_id, {
@@ -277,30 +290,52 @@ async def save_document(
 
 # ── Image Upload ─────────────────────────────────────────────
 
-_storage = None
+# Lazily-constructed MinIO client. Singleton because the underlying
+# httpx pool is expensive to spin up per request, and the credentials
+# come from env vars at process start. Lowercase by intent — module
+# state, not a constant. The pylint "constant naming style" check is
+# specifically for *constants*; this is a cache slot, so disable it.
+_storage: MinioStorage | None = None  # pylint: disable=invalid-name
 
 
 def _get_storage() -> MinioStorage:
-    global _storage
+    global _storage  # pylint: disable=global-statement
     if _storage is None:
         _storage = MinioStorage()
     return _storage
 
 
-@router.post("/{report_id}/upload")
+@router.post(
+    "/{report_id}/upload",
+    responses={
+        400: {
+            "description": (
+                "Upload rejected — unsupported content_type, or file "
+                "exceeds the MAX_SIZE byte cap."
+            ),
+        },
+    },
+)
 @inject
 async def upload_image(
     report_id: UuidPath,
-    file: UploadFile = File(...),
     *,
+    file: Annotated[UploadFile, File(...)],
     svc: FromDishka[ReportService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     """Upload an image to attach to a report."""
-    await svc._perms.require(user.id, report_id, "editor")
+    # Permission check delegates to the canonical PermissionService
+    # owned by ReportService — there's no top-level service for raw
+    # ACL questions, so we reach through. Documented seam.
+    await svc._perms.require(user.id, report_id, "editor")  # pylint: disable=protected-access
 
     if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(400, f"File type {file.content_type} not allowed. Use: {', '.join(ALLOWED_TYPES)}")
+        raise HTTPException(
+            400,
+            f"File type {file.content_type} not allowed. "
+            f"Use: {', '.join(ALLOWED_TYPES)}",
+        )
 
     data = await file.read()
     if len(data) > MAX_SIZE:

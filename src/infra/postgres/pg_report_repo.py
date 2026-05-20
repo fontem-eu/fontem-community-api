@@ -1,10 +1,15 @@
+# ``sqlalchemy.func`` is a magic factory: ``func.count`` is itself a
+# generator that returns a SQL expression object, but pylint's static
+# introspection sees only the descriptor and lights every ``func.count(…)``
+# up as E1102. Suppress at file level — this whole module is the
+# SQL-bound repo, every call here goes through the same machinery.
+# pylint: disable=not-callable
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.report import Report, Section, SectionVersion
@@ -163,7 +168,7 @@ class PgReportRepository(ReportRepository):
             .order_by(StoryTagModel.tag)
         )
         result = await self._session.execute(stmt)
-        return [r for r in result.scalars().all()]
+        return list(result.scalars().all())
 
     async def set_story_tags(self, report_id: str, tags: list[str]) -> None:
         # Atomic replace: drop the old set then insert the new. The

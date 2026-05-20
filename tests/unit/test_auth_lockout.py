@@ -1,22 +1,21 @@
 """Tests for password lockout (AUTH-LOCKOUT)."""
 from __future__ import annotations
 
+import asyncio
+import uuid as _uuid
 from datetime import datetime, timedelta, timezone
 
-import pytest
+import bcrypt
 
 from src.domain.user import User
 
 
 def _register_user(user_repo, email: str, password: str) -> str:
     """Hash a password via bcrypt and seed a user. Returns the user id."""
-    import bcrypt
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    import uuid as _uuid
     uid = str(_uuid.uuid4())
     user = User(id=uid, email=email, name="Test", password_hash=pw_hash)
     # Use the sync helper since fixtures expose async repo methods only
-    import asyncio
     asyncio.get_event_loop().run_until_complete(user_repo.upsert(user))
     return uid
 
@@ -99,8 +98,11 @@ class TestLoginLockout:
         user_repo = services["user_repo"]
         uid = _register_user(user_repo, "expired@test.com", "right")
 
-        # Manually expire a lockout in the past
-        user = user_repo._users[uid]
+        # Manually expire a lockout in the past. Reaching into _users
+        # here is the simplest way to set up a "lock that already
+        # expired" scenario; the InMemory repo has no public seam for
+        # back-dating an existing user's locked_until.
+        user = user_repo._users[uid]  # pylint: disable=protected-access
         user.failed_login_attempts = 5
         user.locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
 

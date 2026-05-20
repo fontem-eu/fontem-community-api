@@ -1,6 +1,4 @@
 """Tests for HTML sanitization — the server-side XSS defense layer."""
-import pytest
-
 from src.services.sanitize import sanitize_html, sanitize_text
 
 

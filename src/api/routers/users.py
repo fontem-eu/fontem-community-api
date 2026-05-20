@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dishka.integrations.fastapi import FromDishka, inject
-
 from dataclasses import asdict
+from typing import Annotated
 
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/users", tags=["users"], responses=RESOURCE_RESPONSES
 
 @router.get("/me")
 async def get_me(
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     return asdict(user)
 
@@ -31,7 +31,7 @@ async def delete_me(
     *,
     session: FromDishka[AsyncSession],
     assist_repo: FromDishka[AssistRepository],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     """Delete the current user's account and all associated data (GDPR Art. 17).
 
@@ -85,7 +85,7 @@ async def get_user(
     user_id: UuidPath,
     *,
     repo: FromDishka[UserRepository],
-    user: User = Depends(get_current_user),
+    _user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     target = await repo.get_by_id(user_id)
     if target is None:

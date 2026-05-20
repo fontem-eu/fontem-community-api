@@ -4,11 +4,11 @@ InMemory repos — 0 I/O.
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from tests.conftest import seed_user, _stable_uuid
-
-from src.services.exceptions import PermissionDenied, Conflict
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,6 @@ class TestReports:
         await s["report_repo"].acquire_lock(section.id, _stable_uuid("user-1"), 0)
 
         # Should succeed because lock expired
-        import time
         time.sleep(0.01)
         assert await s["report_repo"].acquire_lock(section.id, _stable_uuid("user-2"), 300)
 

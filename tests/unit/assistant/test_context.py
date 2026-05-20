@@ -57,7 +57,7 @@ def _turn(role: str, content: str) -> Turn:
 
 class TestTruncateHistory:
     def test_empty_history(self):
-        assert truncate_history([], TurnLimits()) == []
+        assert not truncate_history([], TurnLimits())
 
     def test_keeps_all_when_under_limits(self):
         history = [

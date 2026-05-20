@@ -4,6 +4,14 @@ Integration test fixtures — in-process API against a testcontainers Postgres.
 No cluster dependency. The FastAPI app runs via Starlette TestClient against
 a disposable Postgres container spun up once per test session.
 """
+# pylint: disable=redefined-outer-name
+# ── pytest fixtures shadow the fixture-name parameter on every test
+#    that consumes them; that's the canonical pytest pattern. Disable
+#    module-wide rather than per-line on every fixture.
+# pylint: disable=protected-access
+# ── _storage on the reports module is a lazily-initialised cache that
+#    has to be cleared from outside the module so the test MinIO env
+#    wins. Reaching through is intentional.
 from __future__ import annotations
 
 import os
@@ -14,14 +22,15 @@ from jose import jwt
 from testcontainers.minio import MinioContainer
 from testcontainers.postgres import PostgresContainer
 
+# Disable per-endpoint rate limiting in tests so bursts don't trip auth limits.
+from src.api.rate_limit import limiter as _limiter
+
 # ── JWT helpers ──────────────────────────────────────────────
 
 # Must match src/api/auth.py default
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-do-not-use-in-production")
 JWT_ALGORITHM = "HS256"
 
-# Disable per-endpoint rate limiting in tests so bursts don't trip auth limits.
-from src.api.rate_limit import limiter as _limiter
 _limiter.enabled = False
 
 
@@ -45,14 +54,20 @@ def make_headers(user_id: str | None = None, **kwargs) -> dict:
 @pytest.fixture(scope="session")
 def _postgres():
     """Disposable Postgres container for the test session."""
+    # Local imports: SQLAlchemy + ORM-model load is expensive and
+    # not needed unless the integration tests actually run (the unit
+    # suite doesn't reach this fixture).
+    # pylint: disable-next=import-outside-toplevel
+    from sqlalchemy import create_engine
+    # pylint: disable-next=import-outside-toplevel
+    from src.infra.postgres.models import Base
+
     pg = PostgresContainer("postgres:16-alpine")
     pg.start()
     sync_url = pg.get_connection_url()
     async_url = sync_url.replace("psycopg2", "asyncpg")
 
     # Create schema from ORM models
-    from sqlalchemy import create_engine
-    from src.infra.postgres.models import Base
     engine = create_engine(sync_url)
     Base.metadata.create_all(engine)
     engine.dispose()
@@ -100,9 +115,14 @@ def _minio():
 @pytest.fixture(scope="session")
 def _test_client(_postgres, _minio):
     """Session-scoped TestClient — lifespan fires once, not per test."""
+    # Local imports: TestClient + build_app are heavy (fast-api + dishka
+    # + sqlalchemy graph). Skip the cost when only unit tests run.
+    # pylint: disable-next=import-outside-toplevel
     from starlette.testclient import TestClient
+    # pylint: disable-next=import-outside-toplevel
     from src.api.app import build_app
-    # Reset the lazy-initialized storage cache so the test MinIO env wins
+    # Reset the lazy-initialized storage cache so the test MinIO env wins.
+    # pylint: disable-next=import-outside-toplevel
     import src.api.routers.reports as reports_module
     reports_module._storage = None
     application = build_app(os.environ["DATABASE_URL"])

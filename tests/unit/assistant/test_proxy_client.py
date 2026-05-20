@@ -5,7 +5,9 @@ re-emitted each line as its own SSE "event" which silently broke the
 downstream parser (which requires whole event blocks). These tests
 pin the new contract: yield one complete block per iteration.
 """
-# pylint: disable=missing-class-docstring,missing-function-docstring,protected-access
+# pylint: disable=protected-access,unused-argument
+# ── ``*a, **kw`` on _FakeAsyncClient.stream is the httpx.stream() ABI
+#    pattern: tests don't read the args, they just match the signature.
 from __future__ import annotations
 
 import pytest

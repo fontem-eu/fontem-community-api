@@ -16,7 +16,6 @@ class TagFollowRepository(ABC):
         """Idempotent. Service layer enforces the ≤50-per-user cap
         before calling; the repo treats it as a plain insert (with
         ON CONFLICT DO NOTHING for races)."""
-        ...
 
     @abstractmethod
     async def unfollow(self, user_id: str, tag: str) -> None: ...
@@ -24,4 +23,3 @@ class TagFollowRepository(ABC):
     @abstractmethod
     async def count(self, user_id: str) -> int:
         """Used by the service layer to enforce the 50-tag follow cap."""
-        ...

@@ -67,6 +67,7 @@ class ReportService:
             await self._perms.require(user_id, report_id, "viewer")
         return report
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def update(
         self,
         user_id: str,

@@ -3,11 +3,15 @@ Security tests (AUTH-SEC + AUTHZ-SEC + DATA-SEC).
 Tests authentication, privilege escalation, and data integrity.
 Uses TestClient with InMemory repos.
 """
+# pylint: disable=unused-argument
+# ── ``services`` is pulled in for the fixture's side-effect (wiring the
+#    test client's dishka container) on the tests that don't read it.
 from __future__ import annotations
+
+import time
 
 import pytest
 from jose import jwt
-from starlette.testclient import TestClient
 
 from tests.conftest import make_headers, make_token, seed_user, _stable_uuid
 from src.api.auth import JWT_SECRET, JWT_ALGORITHM
@@ -23,7 +27,6 @@ class TestAuthSecurity:
 
     # AUTH-SEC-02: Expired JWT -> 401
     def test_expired_token_returns_401(self, client):
-        import time
         token = jwt.encode(
             {"sub": "user-1", "email": "a@b.com", "name": "X", "exp": int(time.time()) - 100},
             JWT_SECRET, algorithm=JWT_ALGORITHM,

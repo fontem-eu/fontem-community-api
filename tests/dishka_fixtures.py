@@ -12,7 +12,6 @@ newly migrated ones use dishka. Once all endpoints are migrated,
 from __future__ import annotations
 
 from dishka import Provider, Scope, provide, make_async_container
-from dishka.integrations.fastapi import setup_dishka
 
 from src.assistant.proxy_client import ClaudeProxyClient
 from src.assistant.repository import AssistRepository, InMemoryAssistRepository

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.report import Report
 from src.services.exceptions import InvalidInput, NotFound, PermissionDenied
 from src.services.tag_service import (
     MAX_FOLLOWED_TAGS_PER_USER,
@@ -12,7 +11,7 @@ from src.services.tag_service import (
     normalise_tag,
     normalise_tags,
 )
-from tests.conftest import _stable_uuid, seed_user, make_headers
+from tests.conftest import seed_user, make_headers
 
 
 # ── normalise_tag — pure function ─────────────────────────────
@@ -130,8 +129,10 @@ async def test_list_public_filters_by_tag(services):
     a = await services["report_svc"].create(user.id, "A", None)
     b = await services["report_svc"].create(user.id, "B", None)
     # Make both public_open
-    a.visibility = "public_open"; await services["report_repo"].update(a)
-    b.visibility = "public_open"; await services["report_repo"].update(b)
+    a.visibility = "public_open"
+    await services["report_repo"].update(a)
+    b.visibility = "public_open"
+    await services["report_repo"].update(b)
     await services["tag_svc"].set_story_tags(user.id, a.id, ["procurement"])
     await services["tag_svc"].set_story_tags(user.id, b.id, ["lobbying"])
 
@@ -149,7 +150,8 @@ async def test_list_distinct_tags_excludes_private(services):
     user = await seed_user(services["user_repo"], "owner")
     pub = await services["report_svc"].create(user.id, "P", None)
     priv = await services["report_svc"].create(user.id, "Q", None)
-    pub.visibility = "public_open"; await services["report_repo"].update(pub)
+    pub.visibility = "public_open"
+    await services["report_repo"].update(pub)
     # priv stays private
     await services["tag_svc"].set_story_tags(user.id, pub.id, ["public-expenditure"])
     await services["tag_svc"].set_story_tags(user.id, priv.id, ["leak-tag"])
@@ -166,7 +168,7 @@ async def test_list_distinct_tags_excludes_private(services):
 @pytest.mark.asyncio
 async def test_put_story_tags_owner_only(client, services):
     owner = await seed_user(services["user_repo"], "owner")
-    other = await seed_user(services["user_repo"], "other")
+    await seed_user(services["user_repo"], "other")
     report = await services["report_svc"].create(owner.id, "t", None)
 
     r = client.put(
@@ -189,7 +191,8 @@ async def test_put_story_tags_owner_only(client, services):
 async def test_get_tags_endpoint_returns_distinct(client, services):
     user = await seed_user(services["user_repo"], "u")
     a = await services["report_svc"].create(user.id, "A", None)
-    a.visibility = "public_open"; await services["report_repo"].update(a)
+    a.visibility = "public_open"
+    await services["report_repo"].update(a)
     await services["tag_svc"].set_story_tags(user.id, a.id, ["public-expenditure"])
 
     r = client.get("/tags")
@@ -224,8 +227,10 @@ async def test_list_reports_embeds_tags_and_filters(client, services):
     user = await seed_user(services["user_repo"], "u")
     a = await services["report_svc"].create(user.id, "A", None)
     b = await services["report_svc"].create(user.id, "B", None)
-    a.visibility = "public_open"; await services["report_repo"].update(a)
-    b.visibility = "public_open"; await services["report_repo"].update(b)
+    a.visibility = "public_open"
+    await services["report_repo"].update(a)
+    b.visibility = "public_open"
+    await services["report_repo"].update(b)
     await services["tag_svc"].set_story_tags(user.id, a.id, ["procurement"])
     await services["tag_svc"].set_story_tags(user.id, b.id, ["lobbying"])
 

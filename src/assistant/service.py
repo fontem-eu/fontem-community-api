@@ -90,7 +90,8 @@ class AssistantService:
 
     # ─────────── Turn handling ────────────
 
-    async def turn(self, req: ChatRequest) -> AsyncIterator[str]:  # NOSONAR S3776: SSE stream reconciliation is inherently sequential
+    # NOSONAR S3776: SSE stream reconciliation is inherently sequential
+    async def turn(self, req: ChatRequest) -> AsyncIterator[str]:
         """Handle a single chat turn, streaming SSE lines back to the caller.
 
         Persists a user row before calling the proxy (so even cancelled

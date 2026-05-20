@@ -12,7 +12,9 @@ yields complete SSE event blocks. These tests pin:
   4. Missing API key / missing message are graceful errors.
   5. Max-iteration ceiling prevents runaway tool loops.
 """
-# pylint: disable=missing-class-docstring,missing-function-docstring,protected-access
+# pylint: disable=protected-access,expression-not-assigned
+# ── ``[_ async for _ in stream(...)]`` is the test-side drain idiom
+#    for an async-generator; the list is intentionally discarded.
 from __future__ import annotations
 
 import json

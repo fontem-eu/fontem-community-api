@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
-from tests.integration.conftest import make_headers, make_token
+from tests.integration.conftest import make_headers
 
 
 class TestAuth:

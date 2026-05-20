@@ -55,7 +55,7 @@ def test_python_enum_matches_advertised_action_constant():
     )
 
 
-def test_legacy_actions_are_NOT_advertised_to_the_model():
+def test_legacy_actions_are_not_advertised_to_the_model():
     """`add_section` / `update_section` were section-model holdovers.
 
     They're still callable from old chat history (the frontend keeps

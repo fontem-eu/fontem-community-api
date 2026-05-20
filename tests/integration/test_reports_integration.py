@@ -6,7 +6,6 @@ dossier nesting, permissions, and persistence across requests.
 """
 from __future__ import annotations
 
-import pytest
 from tests.integration.conftest import make_headers
 
 

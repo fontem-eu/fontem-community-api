@@ -1,0 +1,40 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+# 120-char lines are the de-facto Python standard now (Black, Ruff and
+# every modern tooling default). The 80-char origin was a 1970s
+# terminal width that hasn't been relevant for a decade. Lifting to 120
+# absorbs the JSON-payload-in-test-body lines and the SQL-DDL strings
+# in src/api/app.py without sprawling readability cost.
+[tool.pylint.format]
+max-line-length = 120
+
+# ``nh3`` ships as a PyO3 rust binding; pylint can't introspect compiled
+# extensions, so accessing nh3.clean() lights up "module has no member"
+# false positives. Whitelist the package for introspection.
+[tool.pylint.main]
+extension-pkg-allow-list = ["nh3"]
+
+
+# Pylint config — disable stylistic rules that don't fit this internal
+# FastAPI community-API service:
+#   missing-{module,class,function}-docstring (C0114/5/6) — handlers
+#     are typed against Pydantic request/response models; the signature
+#     plus router decorator already documents the surface. Doc-stubs on
+#     every endpoint would just be lint-debt with no reader value.
+#   too-few-public-methods (R0903) — Pydantic request/response BaseModel
+#     definitions and frozen domain dataclasses legitimately have no
+#     methods; that's the whole point.
+#   duplicate-code (R0801) — pylint's similarity detector flags the
+#     near-identical per-router `Depends(get_current_user)` plumbing
+#     and the symmetric test fixtures across unit / integration suites.
+#     The pattern is intrinsic to FastAPI + pytest, not noise.
+[tool.pylint."messages control"]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "too-few-public-methods",
+    "duplicate-code",
+]

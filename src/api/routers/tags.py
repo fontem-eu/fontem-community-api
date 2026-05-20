@@ -1,9 +1,9 @@
 """Tag endpoints — story tags + per-user followed tags + browse."""
 from __future__ import annotations
 
-from dishka.integrations.fastapi import FromDishka, inject
 from typing import Annotated
 
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
@@ -39,6 +39,11 @@ class SetStoryTagsRequest(BaseModel):
 @router.put(
     "/data-stories/{report_id}/tags",
     summary="Replace the tag set for a story (owner only)",
+    responses={
+        404: {"description": "Story not found."},
+        403: {"description": "Caller is not the story owner."},
+        400: {"description": "Tag normalisation rejected the input (slug shape / count)."},
+    },
 )
 @inject
 async def put_story_tags(
@@ -46,7 +51,7 @@ async def put_story_tags(
     body: SetStoryTagsRequest,
     *,
     svc: FromDishka[TagService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     try:
         tags = await svc.set_story_tags(user.id, report_id, body.tags)
@@ -102,7 +107,7 @@ class FollowTagRequest(BaseModel):
 async def list_followed_tags(
     *,
     svc: FromDishka[TagService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     tags = await svc.list_followed(user.id)
     return {"tags": tags}
@@ -112,13 +117,16 @@ async def list_followed_tags(
     "/me/followed-tags",
     status_code=201,
     summary="Follow a tag",
+    responses={
+        400: {"description": "Tag slug failed normalisation."},
+    },
 )
 @inject
 async def follow_tag(
     body: FollowTagRequest,
     *,
     svc: FromDishka[TagService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     try:
         slug = await svc.follow(user.id, body.tag)
@@ -131,6 +139,9 @@ async def follow_tag(
     "/me/followed-tags/{tag}",
     status_code=204,
     summary="Unfollow a tag",
+    responses={
+        400: {"description": "Tag slug failed normalisation."},
+    },
 )
 @inject
 async def unfollow_tag(
@@ -140,7 +151,7 @@ async def unfollow_tag(
     tag: Annotated[str, Path(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")],
     *,
     svc: FromDishka[TagService],
-    user: User = Depends(get_current_user),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     try:
         await svc.unfollow(user.id, tag)

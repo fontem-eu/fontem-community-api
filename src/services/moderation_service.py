@@ -40,6 +40,7 @@ class ModerationService:
     async def _require_admin(self, user_id: str) -> None:
         await self._require_role(user_id, "admin")
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def flag(
         self,
         user_id: str,
@@ -65,14 +66,13 @@ class ModerationService:
             pass
         return flag
 
-    async def sanction(
-        self,
-        moderator_id: str,
-        user_id: str,
-        type: str,
-        reason: str,
-        expires_at: datetime | None = None,
-    ) -> Sanction:
+    # ``type`` mirrors the Sanction.type field and the public REST
+    # body shape (CreateSanctionRequest.type). Renaming it just here
+    # would force every caller into a translation step and trip the
+    # OpenAPI schema diff. The shadow is local-only and obvious.
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments,redefined-builtin
+    async def sanction(self, moderator_id: str, user_id: str, type: str,
+                       reason: str, expires_at: datetime | None = None) -> Sanction:
         if type == "ban":
             await self._require_admin(moderator_id)
         else:

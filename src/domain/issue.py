@@ -4,12 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
+# ── domain dataclass: each attribute is a column on the issues table.
 @dataclass
-class Issue:
+class Issue:  # pylint: disable=too-many-instance-attributes
     id: str | None = None
     title: str = ""
     body_md: str = ""
-    issue_type: str = "other"  # incorrect_data, duplicate_entity, missing_connection, missing_entity, other
+    # incorrect_data, duplicate_entity, missing_connection, missing_entity, other
+    issue_type: str = "other"
     entity_type: str = ""
     entity_id: str = ""
     status: str = "open"  # open, under_review, resolved, rejected, closed

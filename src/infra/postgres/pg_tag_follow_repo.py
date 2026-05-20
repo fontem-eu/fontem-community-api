@@ -1,3 +1,6 @@
+# ``sqlalchemy.func.count`` is a magic factory pylint can't introspect;
+# every call lights up E1102 as a false positive. See pg_report_repo.py.
+# pylint: disable=not-callable
 from __future__ import annotations
 
 from sqlalchemy import delete, func, select
@@ -19,7 +22,7 @@ class PgTagFollowRepository(TagFollowRepository):
             .order_by(UserFollowedTagModel.tag)
         )
         result = await self._session.execute(stmt)
-        return [r for r in result.scalars().all()]
+        return list(result.scalars().all())
 
     async def follow(self, user_id: str, tag: str) -> None:
         # ON CONFLICT DO NOTHING — the (user_id, tag) PK makes this

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from tests.conftest import seed_user, _stable_uuid
-from src.services.exceptions import PermissionDenied, Conflict, NotFound
+from src.services.exceptions import PermissionDenied, NotFound
 
 
 @pytest.mark.asyncio

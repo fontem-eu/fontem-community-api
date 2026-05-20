@@ -200,7 +200,11 @@ class TestTurn:
         events = [
             'event: status\ndata: {"phase": "connecting", "detail": "Starting..."}\n\n',
             'event: status\ndata: {"phase": "thinking", "detail": "Processing"}\n\n',
-            'event: status\ndata: {"phase": "tool_use", "tool": "mcp__gmr__search_entities", "detail": "Searching entities"}\n\n',
+            (
+                'event: status\ndata: {"phase": "tool_use", '
+                '"tool": "mcp__gmr__search_entities", '
+                '"detail": "Searching entities"}\n\n'
+            ),
             'event: chunk\ndata: {"text": "Found "}\n\n',
             'event: chunk\ndata: {"text": "VINCI with 42 contracts."}\n\n',
             'event: usage\ndata: {"input_tokens": 250, "output_tokens": 18}\n\n',

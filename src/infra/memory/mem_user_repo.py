@@ -59,8 +59,9 @@ class InMemoryUserRepository(UserRepository):
         """Add a sanction (called by moderation service)."""
         self._sanctions.setdefault(sanction.user_id, []).append(deepcopy(sanction))
 
-    # Sync alias for tests that need non-async access
-    add_sanction_sync = lambda self, s: self._sanctions.setdefault(s.user_id, []).append(deepcopy(s))
+    # Sync alias for tests that need non-async access.
+    def add_sanction_sync(self, s: Sanction) -> None:
+        self._sanctions.setdefault(s.user_id, []).append(deepcopy(s))
 
     async def lift_sanction(self, sanction_id: str) -> None:
         """Mark a sanction as lifted."""

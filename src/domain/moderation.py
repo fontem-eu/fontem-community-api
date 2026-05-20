@@ -15,8 +15,9 @@ class Flag:
     created_at: datetime | None = None
 
 
+# ── domain dataclass: each attribute is a column on the sanctions table.
 @dataclass
-class Sanction:
+class Sanction:  # pylint: disable=too-many-instance-attributes
     id: str | None = None
     user_id: str = ""
     type: str = "warning"  # warning, mute, suspend, ban

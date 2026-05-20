@@ -1,9 +1,12 @@
+# ``sqlalchemy.func.count`` is a magic factory pylint can't introspect;
+# every call lights up E1102 as a false positive. See pg_report_repo.py.
+# pylint: disable=not-callable
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 

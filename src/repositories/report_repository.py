@@ -42,14 +42,12 @@ class ReportRepository(ABC):
         Atomic delete-then-insert; the service layer enforces the
         ≤3 limit before calling.
         """
-        ...
 
     @abstractmethod
     async def list_distinct_tags(self) -> list[tuple[str, int]]:
         """Return ``(tag, story_count)`` pairs for every tag in use,
         ordered by descending count then alphabetical. Used by the
         feed's browse-by-tag chip strip; cardinality is small."""
-        ...
 
     @abstractmethod
     async def add_section(self, report_id: str, section: Section) -> Section: ...
