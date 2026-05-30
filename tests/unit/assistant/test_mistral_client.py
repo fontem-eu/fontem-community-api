@@ -599,3 +599,39 @@ async def test_freshness_summary_cached_across_turns():
         if c["method"] == "GET" and "source-freshness" in c["url"]
     ]
     assert len(freshness_calls) == 1
+
+
+# ── GMR_API_INTERNAL rename regression ────────────────────────────────
+
+
+def test_default_gmr_api_url_points_at_fontem_api_not_the_stale_gmr_name():
+    """The pre-rename default was http://gmr-api.gmr.svc.cluster.local —
+    that DNS name is now NXDOMAIN in every fontem-* namespace, which
+    silently broke every MCP/assistant tool call (every search,
+    get_company, get_contracts, ...). The deployment manifest now sets
+    GMR_API_INTERNAL explicitly, but a fresh dev/test env still falls
+    back to this default. Pin that the default targets the post-rename
+    Service so a future change can't quietly reintroduce the stale
+    name.
+    """
+    from src.assistant.mistral_client import _DEFAULT_GMR_API  # pylint: disable=import-outside-toplevel
+    assert "gmr-api" not in _DEFAULT_GMR_API
+    assert _DEFAULT_GMR_API == "http://fontem-api"
+
+
+def test_env_override_wins_over_default():
+    """GMR_API_INTERNAL env var override (set by the chart per-env) must
+    take precedence over the in-code default. Pins the two-layer
+    contract: default for dev/test, env override for cluster.
+    """
+    import importlib  # pylint: disable=import-outside-toplevel
+    import os  # pylint: disable=import-outside-toplevel
+    from unittest.mock import patch  # pylint: disable=import-outside-toplevel
+    custom_url = "http://fontem-api.fontem-prod.svc.cluster.local"
+    with patch.dict(os.environ, {"GMR_API_INTERNAL": custom_url}, clear=False):
+        # llm_service.py reads at import time — reload to pick up the
+        # patched env.
+        from src.services import llm_service  # pylint: disable=import-outside-toplevel
+        importlib.reload(llm_service)
+        from src.services.llm_service import GMR_API_URL  # pylint: disable=import-outside-toplevel
+        assert GMR_API_URL == custom_url

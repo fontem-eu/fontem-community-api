@@ -227,7 +227,7 @@ class AssistantProvider(Provider):
                 api_key=os.environ.get("MISTRAL_API_KEY", ""),
                 model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
                 gmr_api_url=os.environ.get(
-                    "GMR_API_INTERNAL", "http://gmr-api.gmr.svc.cluster.local",
+                    "GMR_API_INTERNAL", "http://fontem-api",
                 ),
             )
         url = os.environ.get(

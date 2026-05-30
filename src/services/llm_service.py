@@ -88,7 +88,7 @@ TOOLS = [
 ]
 
 GMR_API_URL = os.environ.get(
-    "GMR_API_INTERNAL", "http://gmr-api.gmr.svc.cluster.local"
+    "GMR_API_INTERNAL", "http://fontem-api"
 )
 
 SYSTEM_PROMPT = """You are a research assistant embedded in the GMR Knowledge Graph platform.

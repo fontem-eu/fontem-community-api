@@ -211,7 +211,7 @@ _TOOL_LABELS = {
 # Default Mistral endpoint. Overridable for tests / self-hosted gateways.
 _MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 _DEFAULT_MODEL = "mistral-small-latest"
-_DEFAULT_GMR_API = "http://gmr-api.gmr.svc.cluster.local"
+_DEFAULT_GMR_API = "http://fontem-api"
 # Bumped 5 → 10. Five is too tight for "investigate this multi-subsidiary
 # corporate group" prompts; ten is enough for most real questions and is
 # still capped well below the model's own context budget.
@@ -388,7 +388,7 @@ class MistralProxyClient:
         )
         # In-memory freshness cache: (cached_at_unix, summary_str).
         # Keyed nowhere — one client instance only ever talks to one
-        # gmr-api, and the cache lives on the instance.
+        # fontem-api, and the cache lives on the instance.
         self._freshness_cache: tuple[float, str] | None = None
 
     async def _get_freshness_summary(self, client: httpx.AsyncClient) -> str:
