@@ -45,6 +45,15 @@ spec:
               value: {{ .Values.databaseUrl | quote }}
             - name: CLAUDE_PROXY_URL
               value: {{ .Values.claudeProxyUrl | quote }}
+            # The Mistral assistant + the legacy MCP tool layer hit
+            # fontem-api via this URL. Pre-rename it was
+            # `gmr-api.gmr.svc.cluster.local`, which is now NXDOMAIN —
+            # silently breaking every search/get-company/contracts tool.
+            # Default `http://fontem-api` resolves namespace-locally
+            # (testing/staging/dast/prod each have their own
+            # fontem-api Service); per-env values can override.
+            - name: GMR_API_INTERNAL
+              value: {{ .Values.gmrApiInternal | default "http://fontem-api" | quote }}
             - name: LLM_PROVIDER
               value: {{ .Values.llmProvider | default "mistral" | quote }}
             - name: MISTRAL_MODEL
