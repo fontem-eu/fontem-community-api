@@ -1,6 +1,7 @@
 """MinIO S3 client for report image uploads."""
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from io import BytesIO
@@ -11,6 +12,24 @@ from minio import Minio
 ALLOWED_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 MAX_SIZE = 5 * 1024 * 1024  # 5 MB
 EXT_MAP = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+
+# Anonymous-GET policy for the uploads bucket. nginx fronts the bucket
+# at `/uploads/<key>` and proxies un-signed GETs straight through, so
+# the bucket has to accept anonymous reads — otherwise the upload
+# returns a 200 with a URL the browser then hits as a 403, which is
+# exactly the "I added an image and it doesn't show up" report. Writes
+# stay credentialed (POST/PUT only via the upload route).
+_PUBLIC_READ_POLICY = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {"AWS": "*"},
+            "Action": ["s3:GetObject"],
+            "Resource": ["arn:aws:s3:::{bucket}/*"],
+        },
+    ],
+}
 
 
 class MinioStorage:
@@ -26,8 +45,12 @@ class MinioStorage:
         self._bucket_ensured = False
 
     def _ensure_bucket(self) -> None:
-        """Create the bucket if it doesn't exist (idempotent, lazy).
+        """Create the bucket if it doesn't exist + grant anonymous read.
 
+        Both steps are idempotent. Anonymous read is required because
+        the editor renders <img src="/uploads/<key>">, nginx proxies
+        that path to MinIO unsigned, and a private bucket would 403
+        every uploaded image even though the upload itself succeeded.
         Done on first upload rather than in __init__ so app startup
         doesn't depend on MinIO being reachable.
         """
@@ -35,6 +58,13 @@ class MinioStorage:
             return
         if not self._client.bucket_exists(self._bucket):
             self._client.make_bucket(self._bucket)
+        # set_bucket_policy is a PUT and replaces whatever's there. We
+        # render the policy fresh from _PUBLIC_READ_POLICY so the bucket
+        # name interpolates correctly even after a rename.
+        policy = json.loads(
+            json.dumps(_PUBLIC_READ_POLICY).replace("{bucket}", self._bucket),
+        )
+        self._client.set_bucket_policy(self._bucket, json.dumps(policy))
         self._bucket_ensured = True
 
     def upload(self, report_id: str, data: bytes, content_type: str) -> str:
