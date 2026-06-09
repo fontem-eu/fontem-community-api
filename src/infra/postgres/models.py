@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
+    CheckConstraint,
     ForeignKey,
+    Index,
     Integer,
     PrimaryKeyConstraint,
     Text,
@@ -323,4 +325,50 @@ class UserFollowedTagModel(Base):
     tag: Mapped[str] = mapped_column(Text, primary_key=True)
     followed_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+
+
+# ── flowers_given ────────────────────────────────────────────
+# Medium-style clap. One row per (user, story) holding the count of
+# flowers that user has given to that story. The service layer caps
+# the count at MAX_FLOWERS_PER_USER (50) per row; the CHECK constraint
+# in the alembic migration mirrors that cap at the DB level.
+#
+# Unique by (user_id, report_id) — composite PK is the obvious choice
+# for an aggregate that's read both ways (mine for the signed-in user,
+# total via SUM(count) across the report).
+
+class FlowerGivenModel(Base):
+    __tablename__ = "flowers_given"
+    # Prod ships via create_all (no alembic in this repo's prod path),
+    # so the CHECK + report_id index live here too — not just in
+    # migration 004 — otherwise the cap's DB backstop and the
+    # SUM(count) hot-path index never reach prod.
+    __table_args__ = (
+        CheckConstraint(
+            "count >= 0 AND count <= 50",
+            name="flowers_given_count_check",
+        ),
+        Index("ix_flowers_given_report_id", "report_id"),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    report_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("reports.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False,
+        default=_utcnow, onupdate=_utcnow,
     )

@@ -18,11 +18,18 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from src.api.di import make_container
 from src.api.rate_limit import limiter
 from src.api.routers import (
-    auth, groups, issues, moderation, reports, sharing, sitemap, tags, users,
+    auth, flowers, groups, issues, moderation, reports, sharing, sitemap, tags, users,
 )
 from src.assistant import router as assistant_router
 from src.infra.postgres.models import Base
-from src.services.exceptions import Conflict, NotFound, PermissionDenied
+from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
+
+
+# Route prefixes for the dual-mount rename window. /data-stories
+# is canonical; /reports is the deprecated alias kept until
+# existing API clients cut over. Drop the alias one release after.
+_DATA_STORIES_PREFIX = "/data-stories"
+_REPORTS_ALIAS_PREFIX = "/reports"
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +203,13 @@ def build_app(database_url: str | None = None) -> FastAPI:
     async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": exc.message})
 
+    @application.exception_handler(InvalidInput)
+    async def invalid_input_handler(request: Request, exc: InvalidInput) -> JSONResponse:
+        # 400 for value-level constraint violations the service layer
+        # raises (per-user flower cap, etc.). Routers no longer need a
+        # per-route try/except: the service raises, this handler maps.
+        return JSONResponse(status_code=400, content={"detail": exc.message})
+
     @application.exception_handler(DBAPIError)
     async def dbapi_error_handler(request: Request, exc: DBAPIError) -> JSONResponse:
         """Translate driver-level argument errors into a 400 instead of 500.
@@ -242,10 +256,15 @@ def build_app(database_url: str | None = None) -> FastAPI:
     # Data stories — canonical path. The /reports alias below keeps
     # existing API clients working through the rename window; remove
     # one release after the frontend cuts over.
-    application.include_router(reports.router, prefix="/data-stories")
-    application.include_router(reports.router, prefix="/reports", deprecated=True)
-    application.include_router(sharing.router, prefix="/data-stories")
-    application.include_router(sharing.router, prefix="/reports", deprecated=True)
+    application.include_router(reports.router, prefix=_DATA_STORIES_PREFIX)
+    application.include_router(reports.router, prefix=_REPORTS_ALIAS_PREFIX, deprecated=True)
+    application.include_router(sharing.router, prefix=_DATA_STORIES_PREFIX)
+    application.include_router(sharing.router, prefix=_REPORTS_ALIAS_PREFIX, deprecated=True)
+    # Flowers — Medium-style clap on a story. Dual-mounted like reports
+    # / sharing during the rename window so /capi/data-stories/{id}/
+    # flowers is canonical and /capi/reports/{id}/flowers still works.
+    application.include_router(flowers.router, prefix=_DATA_STORIES_PREFIX)
+    application.include_router(flowers.router, prefix=_REPORTS_ALIAS_PREFIX, deprecated=True)
     application.include_router(issues.router)
     application.include_router(users.router)
     application.include_router(groups.router)

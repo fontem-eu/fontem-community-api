@@ -32,6 +32,7 @@ from src.infra.postgres.pg_issue_repo import PgIssueRepository
 from src.infra.postgres.pg_moderation_repo import PgModerationRepository
 from src.infra.postgres.pg_permission_repo import PgPermissionRepository
 from src.infra.postgres.pg_report_repo import PgReportRepository
+from src.infra.postgres.pg_flower_repo import PgFlowerRepository
 from src.infra.postgres.pg_tag_follow_repo import PgTagFollowRepository
 from src.infra.postgres.pg_user_repo import PgUserRepository
 from src.repositories.group_repository import GroupRepository
@@ -39,12 +40,14 @@ from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
+from src.repositories.flower_repository import FlowerRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
 from src.repositories.user_repository import UserRepository
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
 from src.services.report_service import ReportService
+from src.services.flower_service import FlowerService
 from src.services.tag_service import TagService
 
 
@@ -128,6 +131,10 @@ class RepositoryProvider(Provider):
     def tag_follow_repo(self, session: AsyncSession) -> TagFollowRepository:
         return PgTagFollowRepository(session)
 
+    @provide(scope=Scope.REQUEST)
+    def flower_repo(self, session: AsyncSession) -> FlowerRepository:
+        return PgFlowerRepository(session)
+
 
 # ── Service layer ─────────────────────────────────────────────
 
@@ -170,6 +177,14 @@ class ServiceProvider(Provider):
         perms: PermissionService,
     ) -> TagService:
         return TagService(reports=reports, follows=follows, perms=perms)
+
+    @provide(scope=Scope.REQUEST)
+    def flower_service(
+        self,
+        flowers: FlowerRepository,
+        reports: ReportRepository,
+    ) -> FlowerService:
+        return FlowerService(flowers=flowers, reports=reports)
 
 
 # ── Assistant module ──────────────────────────────────────────

@@ -22,12 +22,14 @@ from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
+from src.repositories.flower_repository import FlowerRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
 from src.repositories.user_repository import UserRepository
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
 from src.services.report_service import ReportService
+from src.services.flower_service import FlowerService
 from src.services.tag_service import TagService
 
 
@@ -93,8 +95,16 @@ class InMemoryProvider(Provider):
         return self._svc["tag_follow_repo"]
 
     @provide(scope=Scope.REQUEST)
+    def flower_repo(self) -> FlowerRepository:
+        return self._svc["flower_repo"]
+
+    @provide(scope=Scope.REQUEST)
     def tag_service(self) -> TagService:
         return self._svc["tag_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def flower_service(self) -> FlowerService:
+        return self._svc["flower_svc"]
 
     @provide(scope=Scope.APP)
     def proxy_client(self) -> ClaudeProxyClient:

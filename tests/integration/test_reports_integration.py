@@ -52,9 +52,10 @@ class TestReportCRUD:
         h = make_headers(user_id)
         report = client.post("/reports", json={"title": "Old"}, headers=h).json()
         rid = report["id"]
-        resp = client.put(f"/reports/{rid}", json={"title": "New", "visibility": "public"}, headers=h)
+        resp = client.put(f"/reports/{rid}", json={"title": "New", "visibility": "public_open"}, headers=h)
         assert resp.status_code == 200
         assert resp.json()["title"] == "New"
+        assert resp.json()["visibility"] == "public_open"
         # Verify persistence
         fetched = client.get(f"/reports/{rid}", headers=h).json()
         assert fetched["title"] == "New"
