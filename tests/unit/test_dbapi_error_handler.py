@@ -13,6 +13,7 @@ handler with a synthetic DBAPIError directly.
 """
 from __future__ import annotations
 
+import asyncpg.exceptions
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import DBAPIError
 
@@ -74,3 +75,48 @@ def test_dbapi_error_with_nested_valueerror_returns_400(client: TestClient):
     body = resp.json()
     assert "Invalid parameter" in body["detail"]
     assert "invalid UUID" in body["detail"]
+
+
+def test_dbapi_error_with_asyncpg_data_error_returns_400(client: TestClient):
+    """asyncpg's DataError family (null byte, numeric overflow, bad
+    datetime) is the second 4xx-shaped failure asyncpg surfaces — not
+    a ValueError, so the original handler returned 500 and Schemathesis
+    on 2026-06-10 caught two real cases as Server Error: a null byte
+    in a POST /groups body name field, and a null byte in a
+    GET /issues entity_id query param. Both became 400 after this fix.
+    """
+    @client.app.get("/_test/null-byte")
+    def _raise_null_byte():  # pragma: no cover - invoked via HTTP
+        raise DBAPIError(
+            statement="INSERT INTO foo (s) VALUES ($1)",
+            params={"s": "x\x00y"},
+            orig=asyncpg.exceptions.CharacterNotInRepertoireError(
+                'invalid byte sequence for encoding "UTF8": 0x00',
+            ),
+        )
+
+    resp = client.get("/_test/null-byte")
+    assert resp.status_code == 400, resp.text
+    body = resp.json()
+    assert "Invalid value" in body["detail"]
+    assert "CharacterNotInRepertoireError" in body["detail"]
+
+
+def test_dbapi_error_with_asyncpg_numeric_overflow_returns_400(client: TestClient):
+    """Confirm the broader DataError family (not just null bytes) lands
+    in the 400 path — the 2026-05-10 int8-overflow case the generic
+    handler used to log as an unhandled 500 is now a clean 400.
+    """
+    @client.app.get("/_test/int8-overflow")
+    def _raise_overflow():  # pragma: no cover - invoked via HTTP
+        raise DBAPIError(
+            statement="SELECT * FROM foo LIMIT $1 OFFSET $2",
+            params={"limit": 50, "offset": 10**40},
+            orig=asyncpg.exceptions.NumericValueOutOfRangeError(
+                "value out of int8 range",
+            ),
+        )
+
+    resp = client.get("/_test/int8-overflow")
+    assert resp.status_code == 400, resp.text
+    assert "NumericValueOutOfRangeError" in resp.json()["detail"]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
@@ -18,11 +17,32 @@ from src.services.exceptions import NotFound
 router = APIRouter(prefix="/users", tags=["users"], responses=RESOURCE_RESPONSES)
 
 
+def _safe_self_view(user: User) -> dict:
+    """Public fields safe to return to the user themselves on /me.
+
+    Explicitly excludes ``password_hash`` (bcrypt secret),
+    ``failed_login_attempts`` and ``locked_until`` (account-state PII
+    that would help an attacker confirm a hit on an ongoing
+    credential-stuffing run). 2026-06-10 Schemathesis caught
+    ``asdict(user)`` leaking all three in the /me response — this
+    helper is the fix and the OneTrue place that decides what shape
+    the self-view returns.
+    """
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "avatar_url": user.avatar_url,
+        "trust_level": user.trust_level,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+
+
 @router.get("/me")
 async def get_me(
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    return asdict(user)
+    return _safe_self_view(user)
 
 
 @router.delete("/me", status_code=204)

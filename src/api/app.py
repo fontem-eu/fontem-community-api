@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+import asyncpg.exceptions as asyncpg_exc
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -52,6 +53,39 @@ def _find_value_error(exc: BaseException) -> ValueError | None:
             continue
         seen.add(id(cur))
         if isinstance(cur, ValueError):
+            return cur
+        if cur.__cause__ is not None:
+            stack.append(cur.__cause__)
+        orig = getattr(cur, "orig", None)
+        if isinstance(orig, BaseException):
+            stack.append(orig)
+    return None
+
+
+def _find_asyncpg_data_error(exc: BaseException) -> asyncpg_exc.DataError | None:
+    """Walk an exception's cause chain + `.orig` pointer, returning the
+    first asyncpg DataError found (or None).
+
+    Mirrors ``_find_value_error`` but for value-level driver errors
+    that aren't ValueErrors: ``CharacterNotInRepertoireError`` (null
+    byte / non-UTF8 in a string field), ``NumericValueOutOfRangeError``
+    (int8 overflow), ``InvalidDatetimeFormatError``, etc. All subclass
+    ``asyncpg.exceptions.DataError`` and are user-driven (not a bug in
+    our code), so they translate to 400, not 500.
+
+    Schemathesis fuzz on 2026-06-10 caught two of these as 500s:
+    ``POST /groups {name: \"foo\\x00bar\"}`` and
+    ``GET /issues?entity_id=...%00...``. Both flow into Postgres TEXT
+    columns which reject U+0000 with this exact exception family.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        if id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        if isinstance(cur, asyncpg_exc.DataError):
             return cur
         if cur.__cause__ is not None:
             stack.append(cur.__cause__)
@@ -227,7 +261,18 @@ def build_app(database_url: str | None = None) -> FastAPI:
                 status_code=400,
                 content={"detail": f"Invalid parameter: {ve}"},
             )
-        # Not a ValueError chain — connection errors, constraint
+        de = _find_asyncpg_data_error(exc)
+        if de is not None:
+            # Driver-level rejection of an unprocessable value. The
+            # most common one in our DAST runs is a null byte (U+0000)
+            # in a string field — Postgres TEXT can't encode it — but
+            # numeric overflow and bad datetime formats land here too.
+            # All are caller-fixable, so 400 with a short message.
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"Invalid value: {type(de).__name__}"},
+            )
+        # Neither user-input shape — connection errors, constraint
         # violations — fall through to the generic 500 handler.
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 

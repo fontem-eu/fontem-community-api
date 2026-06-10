@@ -86,6 +86,15 @@ RESOURCE_RESPONSES: dict = {
             "to avoid leaking existence)."
         ),
     },
+    409: {
+        "description": (
+            "Conflict — the request can't proceed because the resource "
+            "is in a state that conflicts with the requested operation. "
+            "Common shapes: a user already flagged a target, an issue "
+            "is closed and rejects new comments, a section is locked "
+            "by another editor."
+        ),
+    },
 }
 
 
