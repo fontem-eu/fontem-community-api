@@ -21,6 +21,18 @@ dishka>=1.3
 testcontainers[postgres,minio]>=4.0
 psycopg2-binary>=2.9
 minio>=7.2
+# File-upload security pipeline (2026-06 DAST-driven hardening):
+# - Pillow re-encodes raster images, killing EXIF / ICC payloads,
+#   capping pixel dims (default ~178 Mpx DecompressionBomb check),
+#   and proving the bytes are a real raster. >=10.0.1 closes
+#   CVE-2023-50447 (eval in PIL.ImageMath).
+# - python-magic detects the actual MIME from the leading bytes so
+#   the client can't spoof Content-Type to slip a polyglot through.
+# - clamd talks to the ClamAV daemon over TCP INSTREAM (deployed in
+#   fontem-shared) — the final gate for known-malware signatures.
+Pillow>=10.0.1
+python-magic>=0.4.27
+clamd>=1.0.2
 # python-multipart 0.0.9 had multiple DoS + arbitrary-file-write CVEs.
 # 0.0.27 fixes the last of them (unbounded-header DoS).
 python-multipart>=0.0.27

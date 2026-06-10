@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 from src.api.auth import get_current_user, get_optional_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath, UuidStr
 from src.domain.user import User
-from src.infra.minio_client import ALLOWED_TYPES, MAX_SIZE, MinioStorage
+from src.infra.minio_client import MinioStorage
+from src.services.file_security import scan_and_sanitise, make_clamd_client
 from src.services.report_service import ReportService
 
 # Mounted by app.py at both /data-stories (canonical) and /reports
@@ -296,6 +297,11 @@ async def save_document(
 # state, not a constant. The pylint "constant naming style" check is
 # specifically for *constants*; this is a cache slot, so disable it.
 _storage: MinioStorage | None = None  # pylint: disable=invalid-name
+# Module-scoped cache. None means "not yet initialised"; the actual
+# initialised value can also be None when CLAMAV_HOST is unset (dev
+# runs), so we use a sentinel object to distinguish the two states.
+_CLAMD_SENTINEL = object()
+_clamd_client = _CLAMD_SENTINEL  # pylint: disable=invalid-name
 
 
 def _get_storage() -> MinioStorage:
@@ -305,13 +311,23 @@ def _get_storage() -> MinioStorage:
     return _storage
 
 
+def _get_clamd():
+    """Singleton lazy clamd client; returns None when no env is set
+    (dev / in-memory tests). See file_security.make_clamd_client."""
+    global _clamd_client  # pylint: disable=global-statement
+    if _clamd_client is _CLAMD_SENTINEL:
+        _clamd_client = make_clamd_client()
+    return _clamd_client
+
+
 @router.post(
     "/{report_id}/upload",
     responses={
         400: {
             "description": (
-                "Upload rejected — unsupported content_type, or file "
-                "exceeds the MAX_SIZE byte cap."
+                "Upload rejected — unsupported file type, size over the "
+                "cap, image dimensions over the cap, structurally "
+                "invalid raster, malformed SVG, or AV signature hit."
             ),
         },
     },
@@ -324,23 +340,24 @@ async def upload_image(
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    """Upload an image to attach to a report."""
+    """Upload an image or SVG attachment to a report.
+
+    Goes through the file_security pipeline (magic-byte sniff →
+    raster re-encode or SVG sanitise → clamd INSTREAM). The bytes
+    that reach MinIO are the cleaned, post-sanitisation payload —
+    never the raw client upload. ``file.content_type`` is treated as
+    untrusted; the canonical MIME comes back from the pipeline.
+    """
     # Permission check delegates to the canonical PermissionService
     # owned by ReportService — there's no top-level service for raw
     # ACL questions, so we reach through. Documented seam.
     await svc._perms.require(user.id, report_id, "editor")  # pylint: disable=protected-access
 
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            400,
-            f"File type {file.content_type} not allowed. "
-            f"Use: {', '.join(ALLOWED_TYPES)}",
-        )
-
-    data = await file.read()
-    if len(data) > MAX_SIZE:
-        raise HTTPException(400, f"File too large. Maximum {MAX_SIZE // 1024 // 1024}MB.")
+    raw = await file.read()
+    # InvalidInput from the pipeline propagates to the app-level
+    # handler → 400. No try/except here.
+    cleaned = scan_and_sanitise(raw, clamd_client=_get_clamd())
 
     storage = _get_storage()
-    key = storage.upload(report_id, data, file.content_type)
+    key = storage.upload(report_id, cleaned.data, cleaned.content_type)
     return {"url": storage.get_url(key), "key": key}

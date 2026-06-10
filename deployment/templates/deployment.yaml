@@ -78,6 +78,16 @@ spec:
                 secretKeyRef:
                   name: minio-credentials
                   key: MINIO_ROOT_PASSWORD
+            # ClamAV daemon for the upload pipeline's final gate. The
+            # file_security service degrades to "scan skipped with a
+            # warning log" if CLAMAV_HOST is empty — so omitting this
+            # in dev / unit tests is fine, but every deployed env must
+            # set it. Staging/testing/dast point at the shared
+            # daemon; prod has its own isolated instance.
+            - name: CLAMAV_HOST
+              value: {{ .Values.clamavHost | default "" | quote }}
+            - name: CLAMAV_PORT
+              value: {{ .Values.clamavPort | default "3310" | quote }}
           livenessProbe:
             httpGet:
               path: /health

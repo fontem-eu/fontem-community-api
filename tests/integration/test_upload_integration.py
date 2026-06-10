@@ -53,7 +53,11 @@ class TestImageUpload:
         assert "key" in body and body["key"].startswith(f"{report['id']}/")
         assert body["url"].startswith("/uploads/")
 
-        # Verify the bytes actually landed in the bucket
+        # Verify a PNG actually landed in the bucket. The bytes
+        # won't be identical to ``png`` because the upload pipeline
+        # re-encodes through Pillow to strip metadata — that's the
+        # whole point. Round-trip the stored bytes through PIL and
+        # confirm the dimensions match.
         s3 = _minio.get_client()
         obj = s3.get_object("gmr-uploads", body["key"])
         try:
@@ -61,7 +65,11 @@ class TestImageUpload:
         finally:
             obj.close()
             obj.release_conn()
-        assert stored == png
+        assert stored.startswith(b"\x89PNG\r\n\x1a\n")
+        from PIL import Image as _Image  # pylint: disable=import-outside-toplevel
+        import io as _io  # pylint: disable=import-outside-toplevel
+        with _Image.open(_io.BytesIO(stored)) as _stored_img:
+            assert _stored_img.size == (1, 1)
 
     def test_disallowed_content_type_rejected(self, client, user_id):
         """Non-image content types are rejected with 400."""
@@ -77,11 +85,25 @@ class TestImageUpload:
         assert "not allowed" in resp.json()["detail"].lower()
 
     def test_oversized_file_rejected(self, client, user_id):
-        """Files over 5MB are rejected with 400."""
+        """Files over MAX_RASTER_BYTES are rejected with 400.
+
+        Updated 2026-06 — the pipeline now magic-byte-sniffs before
+        checking size, so a buffer of null bytes claiming to be PNG
+        is rejected at the format gate, not the size gate. Build a
+        real PNG that's actually over the cap (8000x8000 + padding)
+        so we exercise the size-check branch.
+        """
+        from PIL import Image as _Image  # pylint: disable=import-outside-toplevel
+        from src.services.file_security import MAX_RASTER_BYTES as _MAX  # pylint: disable=import-outside-toplevel
         h = make_headers(user_id)
         report = client.post("/reports", json={"title": "TooBig"}, headers=h).json()
 
-        too_big = b"\x00" * (6 * 1024 * 1024)
+        buf = io.BytesIO()
+        # 8000x8000 RGB PNG: compresses well as a flat fill, so pad
+        # the buffer past the cap to force the size check.
+        _Image.new("RGB", (8000, 8000), (255, 0, 0)).save(buf, format="PNG")
+        too_big = buf.getvalue() + b"\x00" * (_MAX - buf.tell() + 1)
+
         resp = client.post(
             f"/reports/{report['id']}/upload",
             files={"file": ("huge.png", io.BytesIO(too_big), "image/png")},

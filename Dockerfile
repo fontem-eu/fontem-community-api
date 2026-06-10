@@ -1,7 +1,11 @@
 FROM python:3.14-slim
 
 COPY void42-ca.crt /usr/local/share/ca-certificates/void42-ca.crt
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+# - ca-certificates: trust the void42 internal PKI (Nexus + Vault PKI).
+# - libmagic1: native lib python-magic loads at import time for MIME
+#   sniffing; without it the upload pipeline can't tell a PNG from a
+#   polyglot at start-up and the app fails to import.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libmagic1 && \
     update-ca-certificates && rm -rf /var/lib/apt/lists/*
 
 ENV PIP_INDEX_URL=https://nexus.void42.internal/repository/pypi-proxy/simple/ \
