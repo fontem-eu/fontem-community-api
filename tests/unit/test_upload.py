@@ -19,9 +19,13 @@ class TestUploadValidation:
         assert "image/webp" in ALLOWED_TYPES
 
     def test_disallowed_types(self):
+        # SVG was added to ALLOWED_TYPES once the file_security
+        # pipeline learned how to sanitise it (strip <script>,
+        # <foreignObject>, on* handlers, javascript: hrefs) — see
+        # services/file_security.py. Test inverted accordingly.
         assert "text/html" not in ALLOWED_TYPES
         assert "application/javascript" not in ALLOWED_TYPES
-        assert "image/svg+xml" not in ALLOWED_TYPES  # SVG can contain scripts
+        assert "image/svg+xml" in ALLOWED_TYPES  # sanitised, not banned
         assert "application/pdf" not in ALLOWED_TYPES
 
     def test_max_size_is_5mb(self):

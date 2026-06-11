@@ -9,9 +9,21 @@ from io import BytesIO
 from minio import Minio
 
 
-ALLOWED_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-MAX_SIZE = 5 * 1024 * 1024  # 5 MB
-EXT_MAP = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+# Format allow-list + extension map for the upload path. The file
+# security pipeline in services/file_security is the source of truth
+# for what content_types may land here — this map just controls the
+# disk filename Suffix. Adding ``image/svg+xml`` so sanitised SVG
+# uploads (allowed by file_security) get a .svg extension instead of
+# being saved as `.bin` (which broke serving via Content-Type sniff).
+ALLOWED_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"}
+MAX_SIZE = 5 * 1024 * 1024  # 5 MB (legacy — file_security enforces the actual cap)
+EXT_MAP = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
+}
 
 # Anonymous-GET policy for the uploads bucket. nginx fronts the bucket
 # at `/uploads/<key>` and proxies un-signed GETs straight through, so
