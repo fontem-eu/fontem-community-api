@@ -135,3 +135,22 @@ Indexes:
 
 The repo commits each write eagerly so a request crash after the
 authz check still leaves the audit row in place.
+
+## Migrating live envs
+
+Prod runs schema via `Base.metadata.create_all` (no alembic; see
+`feedback_no_alembic_in_prod.md`). That auto-creates **new** tables
+(`authz_audit` landed for free) but does **not** ALTER existing ones.
+A new column on an existing table — `groups.created_by` here — has
+to be applied by hand:
+
+```sh
+kubectl -n fontem-<env> exec deploy/postgresql -- env PGPASSWORD=$pg psql -U postgres -d gmr_app -c "
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS created_by UUID
+  REFERENCES users(id) ON DELETE SET NULL;
+"
+```
+
+The IF NOT EXISTS makes the command idempotent so it's safe to run
+in any env in any order. Always staging first, smoke the change,
+then prod.
