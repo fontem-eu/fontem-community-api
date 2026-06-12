@@ -21,6 +21,7 @@ class PgGroupRepository(GroupRepository):
             id=row.id,
             name=row.name,
             description=row.description,
+            created_by=row.created_by,
             created_at=row.created_at,
         )
 
@@ -30,6 +31,7 @@ class PgGroupRepository(GroupRepository):
             id=group.id or str(uuid4()),
             name=group.name,
             description=group.description,
+            created_by=group.created_by,
             created_at=group.created_at or now,
         )
         self._session.add(model)

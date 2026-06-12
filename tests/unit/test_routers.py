@@ -376,8 +376,14 @@ class TestGroupCRUD:
         gid = client.post("/groups", json={"name": "G"}, headers=h).json()["id"]
         resp = client.get(f"/groups/{gid}", headers=h)
         assert resp.status_code == 200
-        assert resp.json()["name"] == "G"
-        assert "members" in resp.json()
+        body = resp.json()
+        assert body["name"] == "G"
+        # Membership is owner-only now and lives at /groups/{id}/members
+        # rather than being inlined in /groups/{id} — the disclosure of
+        # the membership list to any authed caller was a finding in
+        # the 2026-06-11 security review.
+        assert "members" not in body
+        assert body["created_by"] == _stable_uuid("user-1")
 
     def test_get_nonexistent_group(self, client, services):
         _seed(services)
@@ -393,9 +399,9 @@ class TestGroupCRUD:
         assert resp.status_code == 201
         assert resp.json()["status"] == "ok"
 
-        # Verify member appears in group details
-        group = client.get(f"/groups/{gid}", headers=h).json()
-        assert _stable_uuid("user-2") in group["members"]
+        # Verify the member is in the list (owner-only endpoint).
+        members = client.get(f"/groups/{gid}/members", headers=h).json()
+        assert _stable_uuid("user-2") in members["members"]
 
     def test_remove_member(self, client, services):
         _seed(services)

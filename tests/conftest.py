@@ -23,6 +23,7 @@ from src.infra.memory.mem_group_repo import InMemoryGroupRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
 from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
 from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
+from src.infra.memory.mem_authz_audit_repo import InMemoryAuthzAuditRepository
 from src.infra.memory.mem_report_repo import InMemoryReportRepository
 from src.infra.memory.mem_flower_repo import InMemoryFlowerRepository
 from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
@@ -30,6 +31,9 @@ from src.infra.memory.mem_user_repo import InMemoryUserRepository
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
+from src.services.authz import AuthorizationService
+from src.services.authz.audit import AuditLogger
+from src.services.group_service import GroupService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.tag_service import TagService
@@ -73,11 +77,14 @@ def services():
     permission_repo = InMemoryPermissionRepository(group_repo, report_repo)
     issue_repo = InMemoryIssueRepository()
     mod_repo = InMemoryModerationRepository()
+    authz_audit_repo = InMemoryAuthzAuditRepository()
 
     tag_follow_repo = InMemoryTagFollowRepository()
     flower_repo = InMemoryFlowerRepository()
 
+    authz_svc = AuthorizationService(users=user_repo, audit=AuditLogger(authz_audit_repo))
     perm_svc = PermissionService(permission_repo, user_repo, group_repo)
+    group_svc = GroupService(group_repo, user_repo, authz_svc)
     report_svc = ReportService(report_repo, perm_svc)
     issue_svc = IssueService(issue_repo, user_repo)
     mod_svc = ModerationService(mod_repo, user_repo)
@@ -93,7 +100,10 @@ def services():
         "mod_repo": mod_repo,
         "tag_follow_repo": tag_follow_repo,
         "flower_repo": flower_repo,
+        "authz_audit_repo": authz_audit_repo,
+        "authz_svc": authz_svc,
         "perm_svc": perm_svc,
+        "group_svc": group_svc,
         "report_svc": report_svc,
         "issue_svc": issue_svc,
         "mod_svc": mod_svc,

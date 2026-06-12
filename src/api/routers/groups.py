@@ -1,18 +1,31 @@
+"""Groups endpoints.
+
+Routes delegate to :class:`GroupService`, which is the single place
+group state can change. The service runs every mutation through the
+:class:`AuthorizationService` so the policy table (see
+``src/services/authz/policy.py``) is the source of truth for who can
+do what — no per-route ACL logic, no router-level role checks.
+
+The handlers are intentionally thin: pull the user from the JWT,
+hand off to the service, translate domain exceptions into HTTP
+status codes. NotFound / PermissionDenied / InvalidInput / Conflict
+bubble to the app-level exception handlers and become 404 / 403 /
+400 / 409 respectively.
+"""
 from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
-from src.domain.group import Group
 from src.domain.user import User
-from src.repositories.group_repository import GroupRepository
-from src.services.exceptions import NotFound
+from src.services.group_service import GroupService
 
 router = APIRouter(prefix="/groups", tags=["groups"], responses=RESOURCE_RESPONSES)
 
@@ -26,21 +39,15 @@ class AddMemberRequest(BaseModel):
     user_id: str
 
 
-# ``user`` deps are auth gates: the principal isn't read directly here
-# (creation/membership ops don't care *who* created/joined inside the
-# handler — the service-layer ACL handles that), but the Depends still
-# has to fire so the 401/403 short-circuit happens before the body runs.
-# Underscore-prefix tells pylint we know it's unused.
 @router.post("", status_code=201)
 @inject
 async def create_group(
     body: CreateGroupRequest,
     *,
-    repo: FromDishka[GroupRepository],
-    _user: Annotated[User, Depends(get_current_user)],
+    svc: FromDishka[GroupService],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    group = Group(name=body.name, description=body.description)
-    group = await repo.create(group)
+    group = await svc.create(user.id, body.name, body.description)
     return asdict(group)
 
 
@@ -49,15 +56,25 @@ async def create_group(
 async def get_group(
     group_id: UuidPath,
     *,
-    repo: FromDishka[GroupRepository],
-    _user: Annotated[User, Depends(get_current_user)],
+    svc: FromDishka[GroupService],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    group = await repo.get_by_id(group_id)
-    if group is None:
-        raise NotFound(f"Group {group_id} not found")
-    result = asdict(group)
-    result["members"] = await repo.get_members(group_id)
-    return result
+    group = await svc.get(user.id, group_id)
+    return asdict(group)
+
+
+@router.get("/{group_id}/members")
+@inject
+async def list_members(
+    group_id: UuidPath,
+    *,
+    svc: FromDishka[GroupService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """List the user-ids of group members. Owner-only — the policy
+    denies this to non-owners with a 403."""
+    members = await svc.list_members(user.id, group_id)
+    return {"members": members}
 
 
 @router.post("/{group_id}/members", status_code=201)
@@ -66,13 +83,18 @@ async def add_member(
     group_id: UuidPath,
     body: AddMemberRequest,
     *,
-    repo: FromDishka[GroupRepository],
-    _user: Annotated[User, Depends(get_current_user)],
+    svc: FromDishka[GroupService],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    group = await repo.get_by_id(group_id)
-    if group is None:
-        raise NotFound(f"Group {group_id} not found")
-    await repo.add_member(group_id, body.user_id)
+    """Add ``body.user_id`` to ``group_id``.
+
+    Closes the IDOR documented in the 2026-06-11 security review.
+    The service requires GROUPS_MANAGE_MEMBERS on the group, which
+    the policy gates to the creator (or admin). Adding a
+    non-existent user produces a clean 404 instead of the legacy
+    500 from a Postgres FK violation.
+    """
+    await svc.add_member(user.id, group_id, body.user_id)
     return {"status": "ok"}
 
 
@@ -82,7 +104,7 @@ async def remove_member(
     group_id: UuidPath,
     uid: UuidPath,
     *,
-    repo: FromDishka[GroupRepository],
-    _user: Annotated[User, Depends(get_current_user)],
+    svc: FromDishka[GroupService],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    await repo.remove_member(group_id, uid)
+    await svc.remove_member(user.id, group_id, uid)

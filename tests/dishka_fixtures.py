@@ -28,6 +28,8 @@ from src.repositories.user_repository import UserRepository
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
+from src.services.authz import AuthorizationService
+from src.services.group_service import GroupService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.tag_service import TagService
@@ -77,6 +79,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def permission_service(self) -> PermissionService:
         return self._svc["perm_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def authz_service(self) -> AuthorizationService:
+        return self._svc["authz_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def group_service(self) -> GroupService:
+        return self._svc["group_svc"]
 
     @provide(scope=Scope.REQUEST)
     def report_service(self) -> ReportService:

@@ -69,6 +69,16 @@ class GroupModel(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Anchors the authz policy: the creator gets owner-tier rights on
+    # the group (manage members, delete). Nullable for legacy rows
+    # that pre-date the authz service — the policy treats null-owner
+    # rows as admin-only. ondelete=SET NULL so removing a user
+    # doesn't cascade-delete every group they made.
+    created_by: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow
     )
@@ -372,3 +382,37 @@ class FlowerGivenModel(Base):
         TIMESTAMP(timezone=True), nullable=False,
         default=_utcnow, onupdate=_utcnow,
     )
+
+
+# ── authz_audit ──────────────────────────────────────────
+# Central record of every authorization decision the
+# AuthorizationService makes. See src/services/authz/audit.py for the
+# write path. ``user_id`` intentionally NOT a FK so the row survives
+# user deletion (an audit trail that gets deleted with the actor is
+# useless). Plain-text ``action`` (not an enum) so adding a new Action
+# doesn't require an ALTER TYPE on a hot table.
+
+class AuthzAuditModel(Base):
+    __tablename__ = "authz_audit"
+    __table_args__ = (
+        Index("ix_authz_audit_user_timestamp", "user_id", "timestamp"),
+        Index("ix_authz_audit_action_timestamp", "action", "timestamp"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=_new_uuid,
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), nullable=True,
+    )
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    resource_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), nullable=True,
+    )
+    allowed: Mapped[bool] = mapped_column(nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+

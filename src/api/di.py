@@ -27,6 +27,7 @@ from src.assistant.pg_repository import PgAssistRepository
 from src.assistant.proxy_client import ClaudeProxyClient
 from src.assistant.repository import AssistRepository
 from src.assistant.service import AssistantService, ProxyClient
+from src.infra.postgres.pg_authz_audit_repo import PgAuthzAuditRepository
 from src.infra.postgres.pg_group_repo import PgGroupRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
 from src.infra.postgres.pg_moderation_repo import PgModerationRepository
@@ -43,6 +44,9 @@ from src.repositories.report_repository import ReportRepository
 from src.repositories.flower_repository import FlowerRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
 from src.repositories.user_repository import UserRepository
+from src.services.authz import AuthorizationService
+from src.services.authz.audit import AuditLogger, AuthzAuditRepository
+from src.services.group_service import GroupService
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
@@ -104,6 +108,13 @@ class RepositoryProvider(Provider):
         return PgUserRepository(session)
 
     @provide(scope=Scope.REQUEST)
+    def authz_audit_repo(self, session: AsyncSession) -> AuthzAuditRepository:
+        # The audit-log writer. Production uses the Postgres impl; the
+        # tests fixture overrides with an in-memory shim that lets
+        # assertions inspect what was recorded.
+        return PgAuthzAuditRepository(session)
+
+    @provide(scope=Scope.REQUEST)
     def group_repo(self, session: AsyncSession) -> GroupRepository:
         return PgGroupRepository(session)
 
@@ -150,6 +161,24 @@ class ServiceProvider(Provider):
         groups: GroupRepository,
     ) -> PermissionService:
         return PermissionService(perms=perms, users=users, groups=groups)
+
+    @provide(scope=Scope.REQUEST)
+    def authz_service(
+        self,
+        users: UserRepository,
+        audit_repo: AuthzAuditRepository,
+    ) -> AuthorizationService:
+        # Central policy-decision point. See src/services/authz/.
+        return AuthorizationService(users=users, audit=AuditLogger(audit_repo))
+
+    @provide(scope=Scope.REQUEST)
+    def group_service(
+        self,
+        groups: GroupRepository,
+        users: UserRepository,
+        authz: AuthorizationService,
+    ) -> GroupService:
+        return GroupService(groups=groups, users=users, authz=authz)
 
     @provide(scope=Scope.REQUEST)
     def report_service(
