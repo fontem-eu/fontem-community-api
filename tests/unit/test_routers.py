@@ -144,11 +144,15 @@ class TestReportUpdate:
         assert resp.status_code == 200
         assert resp.json()["abstract"] == "New abstract"
 
-    def test_update_nonexistent_report_denied(self, client, services):
+    def test_update_nonexistent_report_returns_404(self, client, services):
+        # Post-authz-migration: the service loads the report before the
+        # policy check, so a missing id surfaces as 404 (the same as
+        # GET). The old 403 was an accidental side-effect of the
+        # PermissionService grant check running before the load.
         _seed(services)
         h = make_headers("user-1")
         resp = client.put("/reports/00000000-0000-4000-8000-000000000000", json={"title": "X"}, headers=h)
-        assert resp.status_code == 403
+        assert resp.status_code == 404
 
 
 class TestSectionLocking:

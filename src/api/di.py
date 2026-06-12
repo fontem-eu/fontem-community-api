@@ -182,21 +182,30 @@ class ServiceProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def report_service(
-        self, reports: ReportRepository, perms: PermissionService,
+        self,
+        reports: ReportRepository,
+        perms: PermissionService,
+        authz: AuthorizationService,
     ) -> ReportService:
-        return ReportService(reports=reports, perms=perms)
+        return ReportService(reports=reports, perms=perms, authz=authz)
 
     @provide(scope=Scope.REQUEST)
     def issue_service(
-        self, issues: IssueRepository, users: UserRepository,
+        self,
+        issues: IssueRepository,
+        users: UserRepository,
+        authz: AuthorizationService,
     ) -> IssueService:
-        return IssueService(issues=issues, users=users)
+        return IssueService(issues=issues, users=users, authz=authz)
 
     @provide(scope=Scope.REQUEST)
     def moderation_service(
-        self, mod: ModerationRepository, users: UserRepository,
+        self,
+        mod: ModerationRepository,
+        users: UserRepository,
+        authz: AuthorizationService,
     ) -> ModerationService:
-        return ModerationService(mod=mod, users=users)
+        return ModerationService(mod=mod, users=users, authz=authz)
 
     @provide(scope=Scope.REQUEST)
     def tag_service(
@@ -204,16 +213,18 @@ class ServiceProvider(Provider):
         reports: ReportRepository,
         follows: TagFollowRepository,
         perms: PermissionService,
+        authz: AuthorizationService,
     ) -> TagService:
-        return TagService(reports=reports, follows=follows, perms=perms)
+        return TagService(reports=reports, follows=follows, perms=perms, authz=authz)
 
     @provide(scope=Scope.REQUEST)
     def flower_service(
         self,
         flowers: FlowerRepository,
         reports: ReportRepository,
+        authz: AuthorizationService,
     ) -> FlowerService:
-        return FlowerService(flowers=flowers, reports=reports)
+        return FlowerService(flowers=flowers, reports=reports, authz=authz)
 
 
 # ── Assistant module ──────────────────────────────────────────

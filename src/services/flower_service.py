@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from src.repositories.flower_repository import FlowerRepository
 from src.repositories.report_repository import ReportRepository
+from src.services.authz import Action, AuthorizationService
 from src.services.exceptions import InvalidInput, NotFound
 
 
@@ -38,9 +39,11 @@ class FlowerService:
         self,
         flowers: FlowerRepository,
         reports: ReportRepository,
+        authz: AuthorizationService,
     ) -> None:
         self._flowers = flowers
         self._reports = reports
+        self._authz = authz
 
     async def get_state(
         self, user_id: str | None, report_id: str,
@@ -73,6 +76,8 @@ class FlowerService:
         publicly visible; raises ``InvalidInput`` if the caller has
         already hit ``MAX_FLOWERS_PER_USER`` on this story.
         """
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(principal, Action.FLOWERS_GIVE)
         report = await self._reports.get_by_id(report_id)
         # `give` requires auth (router uses get_current_user), so the
         # authed allow-set always applies — keep it explicit.

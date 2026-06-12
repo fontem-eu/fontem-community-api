@@ -11,7 +11,8 @@ import re
 
 from src.repositories.report_repository import ReportRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
-from src.services.exceptions import InvalidInput, NotFound, PermissionDenied
+from src.services.authz import Action, AuthorizationService, ResourceRef
+from src.services.exceptions import InvalidInput, NotFound
 from src.services.permission_service import PermissionService
 
 
@@ -65,10 +66,12 @@ class TagService:
         reports: ReportRepository,
         follows: TagFollowRepository,
         perms: PermissionService,
+        authz: AuthorizationService,
     ) -> None:
         self._reports = reports
         self._follows = follows
         self._perms = perms
+        self._authz = authz
 
     # ── Story tags ────────────────────────────────────────────
 
@@ -86,8 +89,13 @@ class TagService:
         report = await self._reports.get_by_id(report_id)
         if report is None:
             raise NotFound(f"story {report_id} not found")
-        if report.created_by != user_id:
-            raise PermissionDenied("only the author can edit tags")
+        principal = await self._authz.principal(user_id)
+        grant = await self._perms.effective_grant(user_id, report_id)
+        await self._authz.require(
+            principal,
+            Action.STORIES_SET_TAGS,
+            ResourceRef.for_story(report, effective_grant=grant),
+        )
         normalised = normalise_tags(tags)
         if len(normalised) > MAX_TAGS_PER_STORY:
             raise InvalidInput(
@@ -106,6 +114,8 @@ class TagService:
         return await self._follows.list(user_id)
 
     async def follow(self, user_id: str, tag: str) -> str:
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(principal, Action.TAGS_FOLLOW)
         slug = normalise_tag(tag)
         # Cheap pre-check; the (user_id, tag) PK + ON CONFLICT in the
         # repo handles the racy case where two requests slip through.
@@ -120,6 +130,8 @@ class TagService:
         return slug
 
     async def unfollow(self, user_id: str, tag: str) -> str:
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(principal, Action.TAGS_FOLLOW)
         slug = normalise_tag(tag)
         await self._follows.unfollow(user_id, slug)
         return slug

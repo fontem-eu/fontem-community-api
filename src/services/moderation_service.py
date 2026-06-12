@@ -1,3 +1,15 @@
+"""Moderation service — flags, sanctions, queue, log.
+
+All policy decisions delegate to :class:`AuthorizationService` so the
+moderation surface is auditable end-to-end. The ban-vs-other-sanction
+split is encoded as two distinct actions (``SANCTIONS_BAN`` /
+``SANCTIONS_CREATE``) — the policy table is the single grep-able
+answer to "who can ban?".
+
+Legacy error messages are preserved verbatim via the
+``_MODERATOR_REQUIRED`` / ``_ADMIN_REQUIRED`` constants — the UI's
+403 banner and several tests match on the exact strings.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -5,40 +17,45 @@ from datetime import datetime
 from src.domain.moderation import Flag, Sanction
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.user_repository import UserRepository
+from src.services.authz import Action, AuthorizationService
 from src.services.exceptions import Conflict, PermissionDenied
 
 AUTO_HIDE_THRESHOLD = 3
 
-TRUST_LEVELS = ["new_user", "commenter", "contributor", "moderator", "admin"]
+# Legacy 403 messages preserved across the migration so the UI's denial
+# banner + the existing test contracts keep working. Single constants
+# because Sonar S1192 flags duplicated literals (and they have to match
+# byte-for-byte across every call site).
+_MODERATOR_REQUIRED = "Moderator role required"
+_ADMIN_REQUIRED = "Admin role required"
 
 
 class ModerationService:
-    def __init__(self, mod: ModerationRepository, users: UserRepository) -> None:
+    def __init__(
+        self,
+        mod: ModerationRepository,
+        users: UserRepository,
+        authz: AuthorizationService,
+    ) -> None:
         self._mod = mod
         self._users = users
+        self._authz = authz
 
-    def _trust_rank(self, level: str) -> int:
-        try:
-            return TRUST_LEVELS.index(level)
-        except ValueError:
-            return 0
+    async def _require(self, user_id: str, action: Action, legacy_message: str) -> None:
+        """Run the policy and surface the legacy 403 message on deny.
 
-    async def _require_role(self, user_id: str, min_level: str) -> None:
-        """Check that user has at least min_level trust or role."""
+        The audit record uses the policy's verdict reason; the
+        exception kept here is purely about preserving the contract
+        the UI + existing tests rely on.
+        """
         user = await self._users.get_by_id(user_id)
         if user is None:
             raise PermissionDenied("User not found")
-        roles = await self._users.get_roles(user_id)
-        has_role = min_level in roles or "admin" in roles
-        has_trust = self._trust_rank(user.trust_level) >= self._trust_rank(min_level)
-        if not (has_role or has_trust):
-            raise PermissionDenied(f"{min_level.capitalize()} role required")
-
-    async def _require_moderator(self, user_id: str) -> None:
-        await self._require_role(user_id, "moderator")
-
-    async def _require_admin(self, user_id: str) -> None:
-        await self._require_role(user_id, "admin")
+        principal = await self._authz.principal(user_id)
+        try:
+            await self._authz.require(principal, action)
+        except PermissionDenied as e:
+            raise PermissionDenied(legacy_message) from e
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def flag(
@@ -49,6 +66,8 @@ class ModerationService:
         reason: str,
         details: str = "",
     ) -> Flag:
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(principal, Action.FLAGS_CREATE)
         already = await self._mod.has_flagged(target_type, target_id, user_id)
         if already:
             raise Conflict("You have already flagged this content")
@@ -62,7 +81,9 @@ class ModerationService:
         flag = await self._mod.add_flag(flag)
         count = await self._mod.count_flags(target_type, target_id)
         if count >= AUTO_HIDE_THRESHOLD:
-            # For now, just return the flag; auto-hide logic will be added later
+            # Auto-hide hook intentionally left dormant — wired up in
+            # the moderation v2 PR once the UI has a "hidden by
+            # community" surface to render.
             pass
         return flag
 
@@ -74,9 +95,9 @@ class ModerationService:
     async def sanction(self, moderator_id: str, user_id: str, type: str,
                        reason: str, expires_at: datetime | None = None) -> Sanction:
         if type == "ban":
-            await self._require_admin(moderator_id)
+            await self._require(moderator_id, Action.SANCTIONS_BAN, _ADMIN_REQUIRED)
         else:
-            await self._require_moderator(moderator_id)
+            await self._require(moderator_id, Action.SANCTIONS_CREATE, _MODERATOR_REQUIRED)
         s = Sanction(
             user_id=user_id,
             type=type,
@@ -89,20 +110,20 @@ class ModerationService:
         return result
 
     async def lift(self, moderator_id: str, sanction_id: str) -> None:
-        await self._require_moderator(moderator_id)
+        await self._require(moderator_id, Action.SANCTIONS_REVOKE, _MODERATOR_REQUIRED)
         await self._mod.lift_sanction(sanction_id)
         await self._users.lift_sanction(sanction_id)
 
     async def get_queue(self, moderator_id: str, limit: int, offset: int) -> list[Flag]:
-        await self._require_moderator(moderator_id)
+        await self._require(moderator_id, Action.FLAGS_READ_QUEUE, _MODERATOR_REQUIRED)
         return await self._mod.list_flagged(limit, offset)
 
     async def resolve_flags(
         self, moderator_id: str, target_type: str, target_id: str, action: str
     ) -> None:
-        await self._require_moderator(moderator_id)
+        await self._require(moderator_id, Action.FLAGS_RESOLVE, _MODERATOR_REQUIRED)
         await self._mod.resolve_flags(target_type, target_id, action, moderator_id)
 
     async def get_log(self, moderator_id: str, limit: int, offset: int) -> list[dict]:
-        await self._require_moderator(moderator_id)
+        await self._require(moderator_id, Action.MODERATION_READ_LOG, _MODERATOR_REQUIRED)
         return await self._mod.get_log(limit, offset)

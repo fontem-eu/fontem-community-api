@@ -85,11 +85,11 @@ def services():
     authz_svc = AuthorizationService(users=user_repo, audit=AuditLogger(authz_audit_repo))
     perm_svc = PermissionService(permission_repo, user_repo, group_repo)
     group_svc = GroupService(group_repo, user_repo, authz_svc)
-    report_svc = ReportService(report_repo, perm_svc)
-    issue_svc = IssueService(issue_repo, user_repo)
-    mod_svc = ModerationService(mod_repo, user_repo)
-    tag_svc = TagService(report_repo, tag_follow_repo, perm_svc)
-    flower_svc = FlowerService(flower_repo, report_repo)
+    report_svc = ReportService(report_repo, perm_svc, authz_svc)
+    issue_svc = IssueService(issue_repo, user_repo, authz_svc)
+    mod_svc = ModerationService(mod_repo, user_repo, authz_svc)
+    tag_svc = TagService(report_repo, tag_follow_repo, perm_svc, authz_svc)
+    flower_svc = FlowerService(flower_repo, report_repo, authz_svc)
 
     return {
         "user_repo": user_repo,

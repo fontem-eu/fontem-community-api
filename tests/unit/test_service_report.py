@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from tests.conftest import seed_user, _stable_uuid
-from src.services.exceptions import NotFound, PermissionDenied
+from src.services.exceptions import NotFound
 
 
 @pytest.mark.asyncio
@@ -35,17 +35,23 @@ class TestReportServiceExtended:
         assert updated.visibility == "public_open"
 
     async def test_update_nonexistent_report(self, services):
-        """update() on nonexistent report raises NotFound."""
+        """update() on nonexistent report raises NotFound.
+
+        The authz migration loads the report first so the policy can
+        see its visibility/owner — that turns the old PermissionDenied
+        (perm-check-before-load) into a NotFound. Cleaner contract,
+        and the same 404 the router was already returning anyway.
+        """
         s = services
         await seed_user(s["user_repo"], "u1")
-        with pytest.raises(PermissionDenied):
+        with pytest.raises(NotFound):
             await s["report_svc"].update(_stable_uuid("u1"), "nonexistent", title="X")
 
     async def test_get_nonexistent_report(self, services):
-        """get() on nonexistent report raises PermissionDenied (checked before 404)."""
+        """get() on nonexistent report raises NotFound (load-first)."""
         s = services
         await seed_user(s["user_repo"], "u1")
-        with pytest.raises(PermissionDenied):
+        with pytest.raises(NotFound):
             await s["report_svc"].get(_stable_uuid("u1"), "nonexistent")
 
     async def test_get_sections(self, services):

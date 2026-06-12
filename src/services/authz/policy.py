@@ -94,12 +94,20 @@ class ResourceRef:
 
     ``visibility`` is None for resource kinds that don't have one
     (everything except stories).
+
+    ``effective_grant`` is the pre-resolved access level the caller
+    holds on this resource (currently only meaningful for stories,
+    where the existing ``PermissionService`` answers user/group
+    access grants — see ``LEVEL_HIERARCHY``). The policy is kept
+    pure: callers fetch the grant via ``PermissionService.check_user_grant``
+    and pass it in; the policy does the comparison.
     """
 
     kind: str
     id: str
     owner_id: str | None = None
     visibility: str | None = None  # 'private' | 'public_open' | 'public_auth' | None
+    effective_grant: str | None = None  # 'viewer' | 'commenter' | 'editor' | 'owner' | None
 
     @classmethod
     def for_group(cls, group) -> "ResourceRef":
@@ -111,12 +119,13 @@ class ResourceRef:
         )
 
     @classmethod
-    def for_story(cls, story) -> "ResourceRef":
+    def for_story(cls, story, effective_grant: str | None = None) -> "ResourceRef":
         return cls(
             kind="story",
             id=story.id,
             owner_id=getattr(story, "created_by", None),
             visibility=getattr(story, "visibility", None),
+            effective_grant=effective_grant,
         )
 
     @classmethod
@@ -210,10 +219,19 @@ def _public_read(_p: Principal, _r: ResourceRef | None) -> Decision:
 
 
 def _trust_at_least_factory(min_level: str) -> Callable[[Principal, ResourceRef | None], Decision]:
-    """Build a check that allows iff the caller meets ``min_level``."""
+    """Build a check that allows iff the caller meets ``min_level``.
+
+    Either path satisfies the gate: an explicit role assignment for
+    ``min_level`` (e.g. an ops-promoted moderator whose ``trust_level``
+    column hasn't caught up yet) or a trust_level ranked at or above
+    ``min_level``. This matches the legacy ModerationService check
+    (``has_role or has_trust``) so the migration doesn't shift policy.
+    """
     def _check(p: Principal, _r: ResourceRef | None) -> Decision:
         if _is_admin(p):
             return Decision.allow(_ADMIN_OVERRIDE_REASON)
+        if min_level in p.roles:
+            return Decision.allow(f"role:{min_level}")
         if _trust_at_least(p, min_level):
             return Decision.allow(f"trust_level>={min_level}")
         return Decision.deny(f"trust_level<{min_level}")
@@ -234,16 +252,37 @@ def _owner_only(p: Principal, r: ResourceRef | None) -> Decision:
     return Decision.deny(f"not owner of {r.kind} {r.id}")
 
 
+# Story-grant level → numeric rank. Matches PermissionService's
+# LEVEL_HIERARCHY so the comparisons line up.
+_GRANT_RANK: dict[str, int] = {
+    "viewer": 0,
+    "commenter": 1,
+    "editor": 2,
+    "owner": 3,
+}
+
+
+def _grant_at_least(grant: str | None, min_level: str) -> bool:
+    """True iff ``grant`` is ranked >= ``min_level``."""
+    if grant is None:
+        return False
+    return _GRANT_RANK.get(grant, -1) >= _GRANT_RANK.get(min_level, 0)
+
+
 def _story_read(p: Principal, r: ResourceRef | None) -> Decision:
     """Read a story.
 
-    - public_open: anyone (even anon — though anon never reaches this
-      function; the router checks for None principal first).
-    - public_auth: any authenticated principal.
-    - private: owner only (grants enforced by the caller via the
-      existing PermissionService; the AuthorizationService trusts
-      that the caller has already loaded the story and resolved the
-      grant).
+    Allows iff:
+      - admin override, or
+      - story is ``public_open`` (anyone, even anon — anon never
+        reaches the policy though; the service builds a None
+        principal and the AuthorizationService denies at the
+        unauthenticated gate before evaluation), or
+      - story is ``public_auth`` and principal is authenticated, or
+      - principal is the story owner, or
+      - principal holds an explicit grant of viewer-or-above (loaded
+        from PermissionService and surfaced via
+        ``ResourceRef.effective_grant``).
     """
     if r is None:
         return Decision.deny("story read requires a story")
@@ -255,11 +294,27 @@ def _story_read(p: Principal, r: ResourceRef | None) -> Decision:
         return Decision.allow("public_auth + authenticated")
     if r.owner_id == p.user_id:
         return Decision.allow("owner")
-    # The caller must have pre-resolved a grant via PermissionService
-    # and surfaced it through ResourceRef in a later iteration. For
-    # now we deny and let the PermissionService layer continue to
-    # handle the grant case in parallel.
-    return Decision.deny("not owner, no grant resolved")
+    if _grant_at_least(r.effective_grant, "viewer"):
+        return Decision.allow(f"granted {r.effective_grant}")
+    return Decision.deny(f"no access to story {r.id}")
+
+
+def _story_edit_factory(min_grant: str) -> Callable[[Principal, ResourceRef | None], Decision]:
+    """Build an "edit-or-grant" check: allow owner or a grant of
+    ``min_grant`` or above. Used for STORIES_EDIT (editor) and
+    STORIES_UPLOAD / STORIES_SET_TAGS (editor — uploading or
+    tagging requires write access, not just view)."""
+    def _check(p: Principal, r: ResourceRef | None) -> Decision:
+        if r is None:
+            return Decision.deny("story edit requires a story")
+        if _is_admin(p):
+            return Decision.allow(_ADMIN_OVERRIDE_REASON)
+        if r.owner_id == p.user_id:
+            return Decision.allow("owner")
+        if _grant_at_least(r.effective_grant, min_grant):
+            return Decision.allow(f"granted {r.effective_grant}")
+        return Decision.deny(f"no {min_grant}-or-above access to story {r.id}")
+    return _check
 
 
 def _issues_comment(p: Principal, _r: ResourceRef | None) -> Decision:
@@ -292,12 +347,13 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     # Stories
     Action.STORIES_CREATE: _trust_at_least_factory("new_user"),  # all signed-in
     Action.STORIES_READ: _story_read,
-    Action.STORIES_EDIT: _owner_only,
-    Action.STORIES_DELETE: _owner_only,
-    Action.STORIES_SHARE: _owner_only,
-    Action.STORIES_UPLOAD: _owner_only,
-    Action.STORIES_SET_TAGS: _owner_only,
-    Action.STORIES_LOCK_SECTION: _owner_only,
+    Action.STORIES_EDIT: _story_edit_factory("editor"),
+    Action.STORIES_EDIT_META: _owner_only,             # meta change: owner only
+    Action.STORIES_DELETE: _owner_only,                # destructive: owner only
+    Action.STORIES_SHARE: _owner_only,                 # grant mgmt: owner only
+    Action.STORIES_UPLOAD: _story_edit_factory("editor"),
+    Action.STORIES_SET_TAGS: _story_edit_factory("editor"),
+    Action.STORIES_LOCK_SECTION: _story_edit_factory("editor"),
 
     # Groups — creation gated by trust; everything else by ownership.
     Action.GROUPS_CREATE: _trust_at_least_factory("new_user"),  # see comment
@@ -313,12 +369,18 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     Action.ISSUES_VOTE: _trust_at_least_factory("commenter"),
     Action.ISSUES_SET_STATUS: _trust_at_least_factory("moderator"),
 
-    # Moderation
-    Action.FLAGS_CREATE: _trust_at_least_factory("commenter"),
+    # Moderation. FLAGS_CREATE accepts any authenticated user — the
+    # community needs a friction-free reporting button. Spam-tier abuse
+    # is handled by the duplicate-flag conflict + the moderator queue.
+    Action.FLAGS_CREATE: _trust_at_least_factory("new_user"),
     Action.FLAGS_READ_QUEUE: _trust_at_least_factory("moderator"),
     Action.FLAGS_RESOLVE: _trust_at_least_factory("moderator"),
     Action.SANCTIONS_CREATE: _trust_at_least_factory("moderator"),
-    Action.SANCTIONS_REVOKE: _trust_at_least_factory("admin"),
+    Action.SANCTIONS_BAN: _trust_at_least_factory("admin"),
+    # Revocation matches the legacy behaviour (moderator-or-above) so
+    # this migration PR doesn't shift policy. Tightening to admin can
+    # ship as a separate change with its own audit trail.
+    Action.SANCTIONS_REVOKE: _trust_at_least_factory("moderator"),
     Action.MODERATION_READ_LOG: _trust_at_least_factory("moderator"),
 
     # Tags

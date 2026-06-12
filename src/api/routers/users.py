@@ -12,6 +12,8 @@ from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.assistant.repository import AssistRepository
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
+from src.services.authz import Action, AuthorizationService
+from src.services.authz.policy import ResourceRef
 from src.services.exceptions import NotFound
 
 router = APIRouter(prefix="/users", tags=["users"], responses=RESOURCE_RESPONSES)
@@ -38,19 +40,32 @@ def _safe_self_view(user: User) -> dict:
     }
 
 
+def _user_ref(user_id: str) -> ResourceRef:
+    """Synthetic ResourceRef for a user. The user *is* their own owner
+    for self-only checks, which lets the policy match on ``r.id == p.user_id``."""
+    return ResourceRef(kind="user", id=user_id, owner_id=user_id)
+
+
 @router.get("/me")
+@inject
 async def get_me(
+    *,
+    authz: FromDishka[AuthorizationService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
+    principal = await authz.principal(user.id)
+    await authz.require(principal, Action.USERS_READ_SELF, _user_ref(user.id))
     return _safe_self_view(user)
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 @router.delete("/me", status_code=204)
 @inject
 async def delete_me(
     *,
     session: FromDishka[AsyncSession],
     assist_repo: FromDishka[AssistRepository],
+    authz: FromDishka[AuthorizationService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     """Delete the current user's account and all associated data (GDPR Art. 17).
@@ -61,6 +76,8 @@ async def delete_me(
     record itself are all removed.
     """
     uid = user.id
+    principal = await authz.principal(uid)
+    await authz.require(principal, Action.USERS_DELETE_SELF, _user_ref(uid))
 
     # Assist conversations (and their messages via FK cascade)
     await assist_repo.delete_user_conversations(uid)
@@ -105,8 +122,11 @@ async def get_user(
     user_id: UuidPath,
     *,
     repo: FromDishka[UserRepository],
-    _user: Annotated[User, Depends(get_current_user)],
+    authz: FromDishka[AuthorizationService],
+    user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
+    principal = await authz.principal(user.id)
+    await authz.require(principal, Action.USERS_READ_PUBLIC, _user_ref(user_id))
     target = await repo.get_by_id(user_id)
     if target is None:
         raise NotFound(f"User {user_id} not found")

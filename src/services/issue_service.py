@@ -1,23 +1,31 @@
+"""Issue + comment service — community feedback channel.
+
+Routes every policy decision through :class:`AuthorizationService`
+(create / comment / vote / resolve) so the audit log captures every
+attempt and the rules sit in one place. Pre-authz validation kept
+deliberately small: only the "user exists" guard, because the test
+contract surfaces ``PermissionDenied("User not found")`` and we want
+that distinct from a generic "unauthenticated" deny.
+"""
 from __future__ import annotations
 
 from src.domain.issue import Comment, Issue
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.user_repository import UserRepository
+from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
-
-TRUST_LEVELS = ["new_user", "commenter", "contributor", "moderator", "admin"]
 
 
 class IssueService:
-    def __init__(self, issues: IssueRepository, users: UserRepository) -> None:
+    def __init__(
+        self,
+        issues: IssueRepository,
+        users: UserRepository,
+        authz: AuthorizationService,
+    ) -> None:
         self._issues = issues
         self._users = users
-
-    def _trust_rank(self, level: str) -> int:
-        try:
-            return TRUST_LEVELS.index(level)
-        except ValueError:
-            return 0
+        self._authz = authz
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def create(
@@ -32,8 +40,8 @@ class IssueService:
         user = await self._users.get_by_id(user_id)
         if user is None:
             raise PermissionDenied("User not found")
-        if self._trust_rank(user.trust_level) < self._trust_rank("contributor"):
-            raise PermissionDenied("Trust level must be at least 'contributor' to create issues")
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(principal, Action.ISSUES_CREATE)
         issue = Issue(
             title=title,
             body_md=body,
@@ -45,15 +53,15 @@ class IssueService:
         return await self._issues.create(issue)
 
     async def add_comment(self, user_id: str, issue_id: str, body: str) -> Comment:
-        # Check not muted/suspended
-        sanction = await self._users.get_active_sanction(user_id)
-        if sanction is not None and sanction.type in ("mute", "suspend"):
-            raise PermissionDenied(f"User is currently {sanction.type}d")
         issue = await self._issues.get_by_id(issue_id)
         if issue is None:
             raise NotFound(f"Issue {issue_id} not found")
         if issue.status in ("closed", "resolved", "rejected"):
             raise Conflict(f"Issue {issue_id} is {issue.status} — no new comments")
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(
+            principal, Action.ISSUES_COMMENT, ResourceRef.for_issue(issue),
+        )
         comment = Comment(
             parent_type="issue",
             parent_id=issue_id,
@@ -66,23 +74,30 @@ class IssueService:
         issue = await self._issues.get_by_id(issue_id)
         if issue is None:
             raise NotFound(f"Issue {issue_id} not found")
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(
+            principal, Action.ISSUES_VOTE, ResourceRef.for_issue(issue),
+        )
         await self._issues.vote(issue_id, user_id, direction)
 
     async def resolve(self, moderator_id: str, issue_id: str, status: str) -> None:
         user = await self._users.get_by_id(moderator_id)
         if user is None:
-            raise PermissionDenied("User not found")
-        roles = await self._users.get_roles(moderator_id)
-        is_mod = (
-            "moderator" in roles
-            or "admin" in roles
-            or self._trust_rank(user.trust_level) >= self._trust_rank("moderator")
-        )
-        if not is_mod:
             raise PermissionDenied("Moderator role required")
         issue = await self._issues.get_by_id(issue_id)
         if issue is None:
             raise NotFound(f"Issue {issue_id} not found")
+        principal = await self._authz.principal(moderator_id)
+        try:
+            await self._authz.require(
+                principal, Action.ISSUES_SET_STATUS, ResourceRef.for_issue(issue),
+            )
+        except PermissionDenied as e:
+            # Preserve the legacy 403 message ("Moderator role required")
+            # the existing tests + UI rely on, while keeping the audit
+            # trail intact (the require call has already recorded the
+            # deny).
+            raise PermissionDenied("Moderator role required") from e
         await self._issues.update_status(issue_id, status)
 
     async def list_for_entity(

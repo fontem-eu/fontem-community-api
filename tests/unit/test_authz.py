@@ -150,9 +150,20 @@ class TestPolicyMatrix:
         assert not evaluate(_principal(trust_level="contributor"), Action.FLAGS_RESOLVE, None).allowed
         assert evaluate(_principal(trust_level="moderator"), Action.FLAGS_RESOLVE, None).allowed
 
-    def test_sanctions_revoke_requires_admin(self):
-        assert not evaluate(_principal(trust_level="moderator"), Action.SANCTIONS_REVOKE, None).allowed
+    def test_sanctions_revoke_requires_moderator(self):
+        # Lift matches the legacy moderator-or-above check so the
+        # migration PR preserves behaviour. Tightening to admin-only
+        # ships as its own change.
+        assert not evaluate(_principal(trust_level="contributor"), Action.SANCTIONS_REVOKE, None).allowed
+        assert evaluate(_principal(trust_level="moderator"), Action.SANCTIONS_REVOKE, None).allowed
         assert evaluate(_principal(trust_level="admin"), Action.SANCTIONS_REVOKE, None).allowed
+
+    def test_sanctions_ban_requires_admin(self):
+        # Bans get their own action so the table answers
+        # "who can ban?" directly. Moderators can mute/suspend/warn
+        # via SANCTIONS_CREATE; only admin can ban.
+        assert not evaluate(_principal(trust_level="moderator"), Action.SANCTIONS_BAN, None).allowed
+        assert evaluate(_principal(trust_level="admin"), Action.SANCTIONS_BAN, None).allowed
 
 
 class TestSanctions:

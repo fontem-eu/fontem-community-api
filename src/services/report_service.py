@@ -1,7 +1,26 @@
+"""Report (story) service — every story-mutation policy decision
+routes through :class:`AuthorizationService`.
+
+Reports are the central resource on the platform, so the policy check
+is also the most layered: visibility (public_open / public_auth /
+private), ownership, *and* an explicit grant table (viewer /
+commenter / editor / owner) maintained by :class:`PermissionService`.
+
+Each method pre-loads the report (so a missing id returns 404, not
+403), pre-resolves the caller's effective grant from
+:class:`PermissionService`, and bundles both into a ``ResourceRef``
+that the policy can decide on without touching the database.
+"""
 from __future__ import annotations
 
 from src.domain.report import Report, Section
 from src.repositories.report_repository import ReportRepository
+from src.services.authz import (
+    Action,
+    AuthorizationService,
+    ResourceRef,
+)
+from src.services.authz.policy import Principal
 from src.services.exceptions import Conflict, NotFound
 from src.services.permission_service import PermissionService
 from src.services.sanitize import sanitize_html, sanitize_text
@@ -14,15 +33,46 @@ class ReportService:
         self,
         reports: ReportRepository,
         perms: PermissionService,
+        authz: AuthorizationService,
     ) -> None:
         self._reports = reports
         self._perms = perms
+        self._authz = authz
+
+    async def _load_for(
+        self, user_id: str | None, report_id: str, action: Action,
+    ) -> tuple[Report, Principal | None]:
+        """Load the report and run the policy check.
+
+        Returns ``(report, principal)`` so the caller can keep using
+        the report without a second DB hit. Pre-loads the principal +
+        effective grant so the policy stays pure.
+
+        Raises :class:`NotFound` for a missing report; the legacy
+        "leak existence via 403 vs 404" mitigation is now superseded
+        by the visibility check inside the policy — anon callers can
+        only reach this with a `public_open` story (other paths use
+        :meth:`get_viewable`) so non-existent vs private is the same
+        from the outside.
+        """
+        report = await self._reports.get_by_id(report_id)
+        if report is None:
+            raise NotFound(f"Report {report_id} not found")
+        principal = await self._authz.principal(user_id)
+        grant = await self._perms.effective_grant(user_id, report_id) if user_id else None
+        await self._authz.require(
+            principal, action,
+            ResourceRef.for_story(report, effective_grant=grant),
+        )
+        return report, principal
 
     async def create(
         self, user_id: str, title: str,
         abstract: str | None = None,
         parent_id: str | None = None,
     ) -> Report:
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(principal, Action.STORIES_CREATE)
         if parent_id is not None:
             parent = await self._reports.get_by_id(parent_id)
             if parent is None:
@@ -38,10 +88,7 @@ class ReportService:
         return report
 
     async def get(self, user_id: str, report_id: str) -> Report:
-        await self._perms.require(user_id, report_id, "viewer")
-        report = await self._reports.get_by_id(report_id)
-        if report is None:
-            raise NotFound(f"Report {report_id} not found")
+        report, _ = await self._load_for(user_id, report_id, Action.STORIES_READ)
         return report
 
     async def get_viewable(
@@ -50,8 +97,8 @@ class ReportService:
         """Fetch a report, honouring its visibility against an optional user.
 
         Anonymous callers (``user_id=None``) only see reports with
-        visibility ``public_open``. Authenticated callers go through the
-        regular permission check (which also honours ``public_auth``).
+        visibility ``public_open``. Authenticated callers go through
+        the standard policy check (which also honours ``public_auth``).
 
         Anonymous attempts to access non-public reports return 404 —
         don't leak whether a private report exists by giving a
@@ -61,10 +108,20 @@ class ReportService:
         if report is None:
             raise NotFound(f"Report {report_id} not found")
         if user_id is None:
+            # Anonymous: short-circuit to 404 for any non-open story
+            # so we don't leak existence via a distinguishable 403.
+            # public_open is the one path open to anon — no policy
+            # decision needed (the AuthorizationService denies None
+            # principals by design; this is the documented exception).
             if report.visibility != "public_open":
                 raise NotFound(f"Report {report_id} not found")
-        else:
-            await self._perms.require(user_id, report_id, "viewer")
+            return report
+        principal = await self._authz.principal(user_id)
+        grant = await self._perms.effective_grant(user_id, report_id)
+        await self._authz.require(
+            principal, Action.STORIES_READ,
+            ResourceRef.for_story(report, effective_grant=grant),
+        )
         return report
 
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
@@ -76,10 +133,7 @@ class ReportService:
         abstract: str | None = None,
         visibility: str | None = None,
     ) -> Report:
-        await self._perms.require(user_id, report_id, "owner")
-        report = await self._reports.get_by_id(report_id)
-        if report is None:
-            raise NotFound(f"Report {report_id} not found")
+        report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT_META)
         if title is not None:
             report.title = sanitize_text(title)
         if abstract is not None:
@@ -90,11 +144,11 @@ class ReportService:
         return report
 
     async def delete(self, user_id: str, report_id: str) -> None:
-        await self._perms.require(user_id, report_id, "owner")
+        await self._load_for(user_id, report_id, Action.STORIES_DELETE)
         await self._reports.delete(report_id)
 
     async def add_section(self, user_id: str, report_id: str, content: dict) -> Section:
-        await self._perms.require(user_id, report_id, "editor")
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
         section = Section(content_json=_sanitize_section(content))
         return await self._reports.add_section(report_id, section)
 
@@ -102,7 +156,7 @@ class ReportService:
         section = await self._reports.get_section(section_id)
         if section is None:
             raise NotFound(f"Section {section_id} not found")
-        await self._perms.require(user_id, section.report_id, "editor")
+        await self._load_for(user_id, section.report_id, Action.STORIES_EDIT)
         # Lock check
         holder = await self._reports.get_lock_holder(section_id)
         if holder is not None and holder != user_id:
@@ -116,17 +170,19 @@ class ReportService:
         section = await self._reports.get_section(section_id)
         if section is None:
             raise NotFound(f"Section {section_id} not found")
-        await self._perms.require(user_id, section.report_id, "editor")
+        await self._load_for(user_id, section.report_id, Action.STORIES_EDIT)
         await self._reports.delete_section(section_id)
 
     async def acquire_lock(self, user_id: str, section_id: str) -> bool:
         section = await self._reports.get_section(section_id)
         if section is None:
             raise NotFound(f"Section {section_id} not found")
-        await self._perms.require(user_id, section.report_id, "editor")
+        await self._load_for(user_id, section.report_id, Action.STORIES_LOCK_SECTION)
         return await self._reports.acquire_lock(section_id, user_id, DEFAULT_LOCK_TTL)
 
     async def release_lock(self, user_id: str, section_id: str) -> None:
+        # No authz check: only the holder can release, enforced at the
+        # repo level by the WHERE-clause on lock_holder.
         await self._reports.release_lock(section_id, user_id)
 
     async def get_sections(self, report_id: str) -> list[Section]:
@@ -165,7 +221,7 @@ class ReportService:
         Replaces all existing sections with one section containing the
         full document. Previous content is saved as a version snapshot.
         """
-        await self._perms.require(user_id, report_id, "editor")
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
         sections = await self._reports.get_sections(report_id)
         if sections:
             # Save a version of the first section before overwriting
@@ -179,6 +235,16 @@ class ReportService:
             # No sections yet — create one
             section = Section(content_json=content)
             await self._reports.add_section(report_id, section)
+
+    async def require_upload(self, user_id: str, report_id: str) -> None:
+        """Authorisation gate for image/SVG upload.
+
+        Exposed as a method so the upload handler in
+        :mod:`src.api.routers.reports` can go through the same
+        single-point check as everything else, rather than reaching
+        into PermissionService directly.
+        """
+        await self._load_for(user_id, report_id, Action.STORIES_UPLOAD)
 
 
 def _sanitize_section(content: dict) -> dict:

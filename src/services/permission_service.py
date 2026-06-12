@@ -63,3 +63,19 @@ class PermissionService:
     ) -> None:
         """Grant a user access to a report (used by ReportService on create)."""
         await self._perms.set_user_access(report_id, user_id, level)
+
+    async def effective_grant(
+        self, user_id: str | None, report_id: str,
+    ) -> str | None:
+        """Return the highest access level ``user_id`` holds on
+        ``report_id`` via the user/group grant table, or None.
+
+        Used by the routers that have migrated to the
+        AuthorizationService: they fetch the grant here and surface
+        it into ``ResourceRef.effective_grant`` so the policy can
+        reason about it without doing I/O. Anonymous callers
+        (``user_id=None``) always come back as None.
+        """
+        if user_id is None:
+            return None
+        return await self._perms.get_report_access(user_id, report_id)

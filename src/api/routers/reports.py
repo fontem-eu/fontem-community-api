@@ -348,10 +348,10 @@ async def upload_image(
     never the raw client upload. ``file.content_type`` is treated as
     untrusted; the canonical MIME comes back from the pipeline.
     """
-    # Permission check delegates to the canonical PermissionService
-    # owned by ReportService — there's no top-level service for raw
-    # ACL questions, so we reach through. Documented seam.
-    await svc._perms.require(user.id, report_id, "editor")  # pylint: disable=protected-access
+    # Upload goes through the same authorisation seam every other
+    # mutating story op uses — the service-level gate audits the
+    # attempt and enforces editor-or-grant.
+    await svc.require_upload(user.id, report_id)
 
     raw = await file.read()
     # InvalidInput from the pipeline propagates to the app-level

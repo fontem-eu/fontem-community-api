@@ -24,7 +24,11 @@ class Action(StrEnum):
     # ── Stories / reports ─────────────────────────────────────
     STORIES_CREATE = "stories:create"
     STORIES_READ = "stories:read"
-    STORIES_EDIT = "stories:edit"
+    STORIES_EDIT = "stories:edit"           # body / sections — editor grant
+    # Metadata changes (title / abstract / visibility) stay owner-only:
+    # flipping a story to public is a content-disclosure decision that
+    # shouldn't ride on a collaborator's editor seat.
+    STORIES_EDIT_META = "stories:edit_meta"
     STORIES_DELETE = "stories:delete"
     STORIES_SHARE = "stories:share"           # manage collaborator grants
     STORIES_UPLOAD = "stories:upload"          # add an attachment
@@ -53,6 +57,11 @@ class Action(StrEnum):
     FLAGS_READ_QUEUE = "flags:read_queue"
     FLAGS_RESOLVE = "flags:resolve"
     SANCTIONS_CREATE = "sanctions:create"
+    # Bans get a separate action because banning is admin-only while
+    # other sanction types (mute/suspend/warning) are moderator-level.
+    # Keeping the split in the catalog means the policy table answers
+    # "what does it take to ban?" in one grep.
+    SANCTIONS_BAN = "sanctions:ban"
     SANCTIONS_REVOKE = "sanctions:revoke"
     MODERATION_READ_LOG = "moderation:read_log"
 
