@@ -62,54 +62,42 @@ def storage_with_mock_client(monkeypatch):
         yield storage, client
 
 
-class TestEnsureBucketPublicRead:
-    """The bucket must accept anonymous GETs.
+class TestEnsureBucketIsPrivate:
+    """The bucket must NOT accept anonymous reads.
 
-    Regression for the silent image-upload bug: upload returned 200
-    with a valid URL, but the browser then hit `/uploads/<key>` and
-    got a 403 because the bucket had no public-read policy. The
-    images never displayed in the editor and never displayed in the
-    rendered story either.
+    Pre-2026-06-13 it did — finding #4 of the platform security
+    review. The new contract: ``_ensure_bucket`` actively clears any
+    pre-existing public policy on first upload (so a deploy heals
+    legacy clusters without a manual ``mc`` step) and never sets
+    one. Reads happen via presigned URLs minted at story-read time,
+    not via bucket-level anonymous access.
     """
 
-    def test_anonymous_get_policy_applied_on_first_upload(self, storage_with_mock_client):  # pylint: disable=redefined-outer-name
+    def test_public_read_policy_is_never_set(self, storage_with_mock_client):  # pylint: disable=redefined-outer-name
         storage, client = storage_with_mock_client
         storage._ensure_bucket()  # pylint: disable=protected-access
-        client.set_bucket_policy.assert_called_once()
-        # The policy JSON must include s3:GetObject for Principal "*"
-        # against the configured bucket name.
-        _, policy_json = client.set_bucket_policy.call_args[0]
-        policy = json.loads(policy_json)
-        stmt = policy["Statement"][0]
-        assert stmt["Effect"] == "Allow"
-        assert stmt["Principal"]["AWS"] == "*"
-        assert "s3:GetObject" in stmt["Action"]
-        assert "arn:aws:s3:::test-bucket/*" in stmt["Resource"]
+        client.set_bucket_policy.assert_not_called()
 
-    def test_policy_is_set_once_per_process(self, storage_with_mock_client):  # pylint: disable=redefined-outer-name
-        # _bucket_ensured short-circuit means we don't pay the
-        # set_bucket_policy round-trip on every upload — only the first.
+    def test_pre_existing_public_policy_is_cleared(self, storage_with_mock_client):  # pylint: disable=redefined-outer-name
+        # Legacy clusters have the public-read policy already attached.
+        # First call to ``_ensure_bucket`` after deploy must delete it
+        # so the bucket self-heals without operator intervention.
+        storage, client = storage_with_mock_client
+        storage._ensure_bucket()  # pylint: disable=protected-access
+        client.delete_bucket_policy.assert_called_once_with("test-bucket")
+
+    def test_ensure_runs_once_per_process(self, storage_with_mock_client):  # pylint: disable=redefined-outer-name
+        # ``_bucket_ensured`` short-circuits subsequent calls so we
+        # don't keep calling delete_bucket_policy on every upload.
         storage, client = storage_with_mock_client
         storage._ensure_bucket()  # pylint: disable=protected-access
         storage._ensure_bucket()  # pylint: disable=protected-access
         storage._ensure_bucket()  # pylint: disable=protected-access
-        assert client.set_bucket_policy.call_count == 1
+        assert client.delete_bucket_policy.call_count == 1
 
-    def test_new_bucket_gets_created_then_policied(self, storage_with_mock_client):  # pylint: disable=redefined-outer-name
+    def test_new_bucket_gets_created_and_left_private(self, storage_with_mock_client):  # pylint: disable=redefined-outer-name
         storage, client = storage_with_mock_client
         client.bucket_exists.return_value = False
         storage._ensure_bucket()  # pylint: disable=protected-access
         client.make_bucket.assert_called_once_with("test-bucket")
-        client.set_bucket_policy.assert_called_once()
-
-    def test_existing_bucket_gets_policy_refreshed(self, storage_with_mock_client):  # pylint: disable=redefined-outer-name
-        """Even when the bucket already exists (e.g. created before the
-        public-read fix shipped), the next upload after restart re-
-        applies the policy. Otherwise pre-existing buckets would never
-        get the fix without manual intervention.
-        """
-        storage, client = storage_with_mock_client
-        client.bucket_exists.return_value = True
-        storage._ensure_bucket()  # pylint: disable=protected-access
-        client.make_bucket.assert_not_called()
-        client.set_bucket_policy.assert_called_once()
+        client.set_bucket_policy.assert_not_called()

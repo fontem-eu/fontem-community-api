@@ -68,6 +68,17 @@ spec:
               value: {{ .Values.minioEndpoint | default "minio.gmr.svc.cluster.local:9000" | quote }}
             - name: MINIO_BUCKET
               value: {{ .Values.minioBucket | default "fontem-uploads" | quote }}
+            # Public-facing MinIO host used for *signing* presigned GET
+            # URLs. nginx in fontem-web proxies /${MINIO_BUCKET}/<key>
+            # to the in-cluster MinIO with the Host header intact, so
+            # this is the user-visible front of the site (e.g.
+            # fontem.staging.void42.internal). Falls back to
+            # MINIO_ENDPOINT for dev where the API and browser share
+            # the same MinIO.
+            - name: MINIO_PUBLIC_ENDPOINT
+              value: {{ .Values.minioPublicEndpoint | default "" | quote }}
+            - name: MINIO_PUBLIC_SECURE
+              value: {{ .Values.minioPublicSecure | default "true" | quote }}
             - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:

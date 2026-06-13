@@ -24,6 +24,7 @@ from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
 from src.repositories.flower_repository import FlowerRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
+from src.infra.minio_client import MinioStorage
 from src.repositories.user_repository import UserRepository
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
@@ -33,6 +34,20 @@ from src.services.group_service import GroupService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.tag_service import TagService
+
+
+class _PresignFake:
+    """Minimal stand-in for ``MinioStorage`` in unit tests.
+
+    Only exposes the surface routers touch: ``presigned_get_url``. The
+    returned URL is deterministic so contract tests can assert against
+    it (e.g., "the GET /reports response replaced /uploads/<key> with
+    https://test-presigned/<key>?sig=stub").
+    """
+
+    @staticmethod
+    def presigned_get_url(key: str) -> str:
+        return f"https://test-presigned/{key}?sig=stub"
 
 
 class InMemoryProvider(Provider):
@@ -75,6 +90,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def assist_repo(self) -> AssistRepository:
         return self._svc.get("assist_repo", InMemoryAssistRepository())
+
+    @provide(scope=Scope.REQUEST)
+    def minio_storage(self) -> MinioStorage:
+        # Test stub if conftest didn't provide one. Tests that exercise
+        # upload URL rewriting put a real ``MinioStorage`` (or a custom
+        # fake with `presigned_get_url`) into the services dict; the
+        # rest get this deterministic stub so endpoints inject cleanly.
+        return self._svc.get("minio_storage", _PresignFake())
 
     @provide(scope=Scope.REQUEST)
     def permission_service(self) -> PermissionService:

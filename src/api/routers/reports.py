@@ -13,6 +13,7 @@ from src.domain.user import User
 from src.infra.minio_client import MinioStorage
 from src.services.file_security import scan_and_sanitise, make_clamd_client
 from src.services.report_service import ReportService
+from src.services.upload_urls import presign_uploads
 
 # Mounted by app.py at both /data-stories (canonical) and /reports
 # (legacy alias kept during the rename window). Routes inside this
@@ -128,6 +129,7 @@ async def get_report(
     report_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
+    storage: FromDishka[MinioStorage],
     user: Annotated[User | None, Depends(get_optional_user)],
 ) -> dict:
     # Anonymous visitors can read `public_open` reports — that's the
@@ -153,7 +155,10 @@ async def get_report(
     # Tag pills on the story page render from this; the same payload
     # also seeds the editor when the owner edits tags.
     result["tags"] = await svc.get_tags(report_id)
-    return result
+    # Rewrite every `/uploads/<key>` reference in the payload to a
+    # freshly-signed URL. Authz has already cleared the read; this is
+    # purely the URL-minting step. The bucket itself is private.
+    return presign_uploads(result, storage.presigned_get_url)
 
 
 @router.put("/{report_id}")
@@ -187,12 +192,13 @@ async def add_section(
     body: CreateSectionRequest,
     *,
     svc: FromDishka[ReportService],
+    storage: FromDishka[MinioStorage],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     section = await svc.add_section(user.id, report_id, {"html": body.content})
     result = asdict(section)
     result["content"] = result.get("content_json", {}).get("html", "")
-    return result
+    return presign_uploads(result, storage.presigned_get_url)
 
 
 # ``report_id`` on the sub-section routes is part of the URL hierarchy
@@ -200,6 +206,7 @@ async def add_section(
 # only needs ``section_id`` — the perms gate is keyed on the section's
 # report. The path parameter still has to be named ``report_id`` so
 # FastAPI binds the placeholder; pylint just can't see that.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 @router.put("/{report_id}/sections/{section_id}")
 @inject
 async def update_section(
@@ -208,12 +215,13 @@ async def update_section(
     body: UpdateSectionRequest,
     *,
     svc: FromDishka[ReportService],
+    storage: FromDishka[MinioStorage],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     section = await svc.edit_section(user.id, section_id, {"html": body.content})
     result = asdict(section)
     result["content"] = result.get("content_json", {}).get("html", "")
-    return result
+    return presign_uploads(result, storage.presigned_get_url)
 
 
 @router.delete("/{report_id}/sections/{section_id}", status_code=204)
@@ -253,6 +261,7 @@ async def release_lock(
     await svc.release_lock(user.id, section_id)
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 @router.get("/{report_id}/sections/{section_id}/versions")
 @inject
 async def list_versions(
@@ -261,13 +270,14 @@ async def list_versions(
     *,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     svc: FromDishka[ReportService],
+    storage: FromDishka[MinioStorage],
     _user: Annotated[User, Depends(get_current_user)],
 ) -> list[dict]:
     # Version-list is a thin pass-through: there's no service-layer
     # business logic on top, just the repo query. Reaching through to
     # the canonical repo handle is the cleanest seam.
     versions = await svc._reports.get_versions(section_id, limit)  # pylint: disable=protected-access
-    return [asdict(v) for v in versions]
+    return presign_uploads([asdict(v) for v in versions], storage.presigned_get_url)
 
 
 # ── v2 Document API ──────────────────────────────────────────

@@ -27,6 +27,7 @@ from src.assistant.pg_repository import PgAssistRepository
 from src.assistant.proxy_client import ClaudeProxyClient
 from src.assistant.repository import AssistRepository
 from src.assistant.service import AssistantService, ProxyClient
+from src.infra.minio_client import MinioStorage
 from src.infra.postgres.pg_authz_audit_repo import PgAuthzAuditRepository
 from src.infra.postgres.pg_group_repo import PgGroupRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
@@ -74,6 +75,13 @@ class DatabaseProvider(Provider):
     @provide(scope=Scope.APP)
     def session_factory(self, engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
         return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    @provide(scope=Scope.APP)
+    def minio_storage(self) -> MinioStorage:
+        # Singleton — MinioStorage owns the upload Minio client (an
+        # http connection pool) and the presign-only public client.
+        # Both are configured from env at first instantiation.
+        return MinioStorage()
 
     @provide(scope=Scope.REQUEST)
     async def session(

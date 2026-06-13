@@ -171,3 +171,58 @@ class TestReportAPI:
         legacy = client.get(f"/reports/{sid}", headers=h)
         assert legacy.status_code == 200
         assert legacy.json()["id"] == sid
+
+
+@pytest.mark.asyncio
+class TestReportPresignedUrls:
+    """SEC-2026-06-11 #4 — bucket is private; reads come through
+    presigned URLs minted by the router on every response.
+
+    The test stub MinioStorage emits
+    ``https://test-presigned/<key>?sig=stub`` so we can assert the
+    rewrite happened without depending on a real MinIO. The end-to-end
+    "the browser can fetch through nginx" leg is covered by the
+    staging smoke suite (STORY-UPLOAD-SEC-1..2).
+    """
+
+    async def _seed_owner(self, services):
+        await seed_user(services["user_repo"], "owner-1")
+
+    def test_get_report_rewrites_uploads_to_presigned_url(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed_owner(services))
+        h = make_headers("owner-1")
+        rid = client.post("/reports", json={"title": "WithImage"}, headers=h).json()["id"]
+        # Plant a stored doc that mimics a real TipTap v1 section with
+        # an embedded /uploads/ image src — same shape the editor saves.
+        key = "0319fb3d-987c-4fc4-8d64-044a4daca389/deadbeef.png"
+        client.post(
+            f"/reports/{rid}/sections",
+            json={"content": f'<p><img src="/uploads/{key}"/></p>'},
+            headers=h,
+        )
+
+        body = client.get(f"/reports/{rid}", headers=h).json()
+        # The section content should now carry the presigned URL, not
+        # the bare /uploads/ path.
+        section_html = body["sections"][0]["content"]
+        assert f"https://test-presigned/{key}?sig=stub" in section_html, section_html
+        assert "/uploads/" not in section_html, section_html
+
+    def test_anonymous_public_open_also_gets_presigned(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed_owner(services))
+        h = make_headers("owner-1")
+        rid = client.post("/reports", json={"title": "Pub"}, headers=h).json()["id"]
+        client.put(
+            f"/reports/{rid}", json={"visibility": "public_open"}, headers=h,
+        )
+        key = "0319fb3d-987c-4fc4-8d64-044a4daca389/cafebabe.jpg"
+        client.post(
+            f"/reports/{rid}/sections",
+            json={"content": f'<img src="/uploads/{key}"/>'},
+            headers=h,
+        )
+        # No auth header — anonymous read of a public_open story.
+        body = client.get(f"/reports/{rid}").json()
+        section_html = body["sections"][0]["content"]
+        assert f"https://test-presigned/{key}?sig=stub" in section_html
+        assert "/uploads/" not in section_html
