@@ -416,3 +416,62 @@ class AuthzAuditModel(Base):
     allowed: Mapped[bool] = mapped_column(nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
 
+class RefreshTokenFamilyModel(Base):
+    """A *family* is one continuous chain of refresh tokens that belong
+    to the same login session — created once at login, rotated on every
+    refresh, killed on logout or refresh-token-reuse detection.
+
+    The novel security property the family enables: if an attacker ever
+    replays a stolen refresh token, the next legitimate refresh on the
+    same family finds the chain already advanced and revokes the entire
+    family. Pre-launch this protects against the "stolen JWT was used
+    for a month" class of bug that the 2026-06-11 review (#6) flagged.
+
+    Cleanup: rows are kept past ``revoked_at`` for forensics; a periodic
+    job (out of scope here) can DELETE families whose ``expires_at`` is
+    in the past. Until that ships, prune by hand if pg disk pressure
+    forces it.
+    """
+
+    __tablename__ = "refresh_token_families"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=_new_uuid,
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # SHA-256 hash of the current refresh token's secret. Plaintext is
+    # NEVER stored — a DB dump shouldn't hand attackers live sessions.
+    current_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    # When the *current* token was minted. Combined with the per-family
+    # TTL window this gives us "if no refresh in 14 days, expire."
+    rotated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False,
+    )
+    # Non-null = family killed. Either user logout, reuse detection, or
+    # "sign out everywhere." Once set, no further refresh succeeds.
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+    )
+    revoked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Loose forensic fingerprints — SHA-256 hashes so a DB leak doesn't
+    # surface raw IPs. Help answer "did this family come from the same
+    # browser as that one?" without storing PII.
+    created_user_agent_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_ip_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_refresh_token_families_user_id", "user_id"),
+        # Hash lookup is the per-refresh hot path; without this every
+        # refresh would be a sequential scan.
+        Index(
+            "ix_refresh_token_families_current_token_hash",
+            "current_token_hash",
+        ),
+    )

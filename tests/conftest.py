@@ -8,7 +8,12 @@ All tests use InMemory repositories — 0 I/O, sub-millisecond.
 #    name-collision bug. Disable module-wide rather than per-line.
 from __future__ import annotations
 
+import os
 import uuid
+
+# Starlette's TestClient speaks plain http; a Secure cookie wouldn't
+# round-trip. Set BEFORE the app + handlers see their first request.
+os.environ.setdefault("FONTEM_COOKIE_INSECURE", "1")
 
 import pytest
 from dishka.integrations.fastapi import setup_dishka
@@ -26,6 +31,7 @@ from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
 from src.infra.memory.mem_authz_audit_repo import InMemoryAuthzAuditRepository
 from src.infra.memory.mem_report_repo import InMemoryReportRepository
 from src.infra.memory.mem_flower_repo import InMemoryFlowerRepository
+from src.infra.memory.mem_refresh_token_repo import InMemoryRefreshTokenRepository
 from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
 from src.services.issue_service import IssueService
@@ -36,6 +42,7 @@ from src.services.authz.audit import AuditLogger
 from src.services.group_service import GroupService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
+from src.services.refresh_token_service import RefreshTokenService
 from src.services.tag_service import TagService
 from tests.dishka_fixtures import make_test_container
 
@@ -81,6 +88,7 @@ def services():
 
     tag_follow_repo = InMemoryTagFollowRepository()
     flower_repo = InMemoryFlowerRepository()
+    refresh_token_repo = InMemoryRefreshTokenRepository()
 
     authz_svc = AuthorizationService(users=user_repo, audit=AuditLogger(authz_audit_repo))
     perm_svc = PermissionService(permission_repo, user_repo, group_repo)
@@ -90,6 +98,7 @@ def services():
     mod_svc = ModerationService(mod_repo, user_repo, authz_svc)
     tag_svc = TagService(report_repo, tag_follow_repo, perm_svc, authz_svc)
     flower_svc = FlowerService(flower_repo, report_repo, authz_svc)
+    refresh_token_svc = RefreshTokenService(refresh_token_repo)
 
     return {
         "user_repo": user_repo,
@@ -100,6 +109,7 @@ def services():
         "mod_repo": mod_repo,
         "tag_follow_repo": tag_follow_repo,
         "flower_repo": flower_repo,
+        "refresh_token_repo": refresh_token_repo,
         "authz_audit_repo": authz_audit_repo,
         "authz_svc": authz_svc,
         "perm_svc": perm_svc,
@@ -109,6 +119,7 @@ def services():
         "mod_svc": mod_svc,
         "tag_svc": tag_svc,
         "flower_svc": flower_svc,
+        "refresh_token_svc": refresh_token_svc,
     }
 
 

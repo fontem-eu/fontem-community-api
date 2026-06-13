@@ -35,6 +35,7 @@ from src.infra.postgres.pg_moderation_repo import PgModerationRepository
 from src.infra.postgres.pg_permission_repo import PgPermissionRepository
 from src.infra.postgres.pg_report_repo import PgReportRepository
 from src.infra.postgres.pg_flower_repo import PgFlowerRepository
+from src.infra.postgres.pg_refresh_token_repo import PgRefreshTokenRepository
 from src.infra.postgres.pg_tag_follow_repo import PgTagFollowRepository
 from src.infra.postgres.pg_user_repo import PgUserRepository
 from src.repositories.group_repository import GroupRepository
@@ -43,6 +44,7 @@ from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
 from src.repositories.flower_repository import FlowerRepository
+from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authz import AuthorizationService
@@ -51,6 +53,7 @@ from src.services.group_service import GroupService
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
+from src.services.refresh_token_service import RefreshTokenService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.tag_service import TagService
@@ -154,12 +157,22 @@ class RepositoryProvider(Provider):
     def flower_repo(self, session: AsyncSession) -> FlowerRepository:
         return PgFlowerRepository(session)
 
+    @provide(scope=Scope.REQUEST)
+    def refresh_token_repo(self, session: AsyncSession) -> RefreshTokenRepository:
+        return PgRefreshTokenRepository(session)
+
 
 # ── Service layer ─────────────────────────────────────────────
 
 
 class ServiceProvider(Provider):
     """Domain services wired from repos."""
+
+    @provide(scope=Scope.REQUEST)
+    def refresh_token_service(
+        self, repo: RefreshTokenRepository,
+    ) -> RefreshTokenService:
+        return RefreshTokenService(repo=repo)
 
     @provide(scope=Scope.REQUEST)
     def permission_service(

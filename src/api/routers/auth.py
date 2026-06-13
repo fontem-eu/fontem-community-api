@@ -1,4 +1,26 @@
-"""Authentication endpoints — Google OAuth + local accounts."""
+"""Authentication endpoints — Google OAuth + local accounts.
+
+Session model (2026-06-13, closes review #6):
+
+- **Access JWT**: 15-minute TTL, returned in the JSON response body.
+  The SPA keeps it in memory only (NOT localStorage) so an XSS
+  regression can't exfil long-lived auth.
+- **Refresh token**: 14-day TTL, opaque random 32 bytes, set as a
+  ``HttpOnly; SameSite=Lax; Secure`` cookie. The browser stores it
+  but JS can't read it — only the server sees the value, and only
+  via the cookie header on /auth/refresh and /auth/logout.
+- **Family rotation**: every /auth/refresh swaps the family's stored
+  hash atomically. Two parallel refreshes race for the row; the
+  loser gets 401. Replaying an already-rotated token (the "stolen
+  refresh" case) hits a hash that's no longer current and gets 401.
+- **Logout**: revokes the family the cookie carries.
+- **Sign-out-everywhere**: revokes every active family for the user.
+
+What's intentionally absent: an admin "revoke this user's sessions"
+verb. The platform UI exposes the same control to the user
+themselves on the account-settings page; we don't want operators
+with one-click force-logout capability.
+"""
 # NOTE: deliberately *no* ``from __future__ import annotations`` here.
 # The handlers return ``TokenResponse`` (a Pydantic model defined later
 # in the file). With the future import, FastAPI gets a ForwardRef it
@@ -9,23 +31,30 @@
 # annotation evaluates to the actual class, not a string. So we keep
 # the regular (eager) annotations and accept that S8409 is happy.
 import base64
+import hashlib
 import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from typing import Annotated
+
 import bcrypt
 import httpx
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import jwt as jose_jwt
 from pydantic import BaseModel, EmailStr, Field
 
-from src.api.auth import JWT_ALGORITHM, JWT_SECRET
+from src.api.auth import JWT_ALGORITHM, JWT_SECRET, get_current_user
 from src.api.openapi_responses import AUTH_RESPONSES
 from src.api.rate_limit import limiter
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
+from src.services.refresh_token_service import (
+    InvalidRefreshToken,
+    RefreshTokenService,
+)
 
 # /auth/* surface returns 400 (body validation), 401 (bad credentials),
 # 409 (email already registered), and 429 (rate-limited by the
@@ -54,6 +83,13 @@ router = APIRouter(
 
 # Brute-force protection: lock account for 15 min after 5 failed attempts
 _MAX_LOGIN_ATTEMPTS = 5
+
+# Banned-account 401 message. Extracted to a constant because three
+# code paths raise the same string (Google login, password login,
+# refresh-on-banned-mid-session) and Sonar S1192 flags the
+# duplication.
+_BANNED_DETAIL = "Account is banned"
+
 _LOCKOUT_MINUTES = 15
 
 GOOGLE_CLIENT_ID = os.environ.get(
@@ -64,7 +100,68 @@ GOOGLE_CLIENT_ID = os.environ.get(
     "1055538305131-87jn8h6gunj55q1akfdkuv6kpg43ld4t.apps.googleusercontent.com",
 )
 
-_TOKEN_EXPIRE_DAYS = 30
+# Access JWT TTL — short by design. The SPA keeps the token in
+# memory and silently refreshes via the httpOnly cookie when it
+# expires; the user-visible session lasts for the 14-day refresh-
+# token window, not this number. Pre-2026-06-13 this was 30 days
+# (review finding #6); the long-lived value now lives in the refresh
+# family server-side.
+_ACCESS_TOKEN_TTL = timedelta(minutes=15)
+
+
+# ── Cookie helpers ──────────────────────────────────────────────────
+
+# The cookie name is namespaced so a co-resident JS library can't
+# accidentally clobber it. ``HttpOnly`` keeps it out of ``document.cookie``;
+# ``Secure`` requires HTTPS so a downgrade can't strip it; ``SameSite=Lax``
+# blocks the standard cross-site CSRF attack without breaking
+# the legitimate top-level navigation flows (clicks from external links).
+_REFRESH_COOKIE_NAME = "fontem_refresh"
+
+
+def _cookie_secure() -> bool:
+    """Set Secure on the cookie unless ``FONTEM_COOKIE_INSECURE=1`` —
+    only the test conftest sets that, because Starlette's TestClient
+    speaks plain http and a Secure cookie wouldn't get echoed back."""
+    return os.environ.get("FONTEM_COOKIE_INSECURE") != "1"
+
+
+def _set_refresh_cookie(response: Response, plaintext: str, ttl_seconds: int) -> None:
+    response.set_cookie(
+        key=_REFRESH_COOKIE_NAME,
+        value=plaintext,
+        max_age=ttl_seconds,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        # The cookie applies to every API path. ``/`` is the root for
+        # the SPA-on-the-same-origin setup we ship; refresh + logout
+        # both live under /auth so anything tighter than ``/`` would
+        # need a separate cookie for the API client to read. Not worth
+        # the split.
+        path="/",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=_REFRESH_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+    )
+
+
+def _hash_request_fingerprint(value: str | None) -> str | None:
+    """SHA-256 a request header so we can store a forensic fingerprint
+    without keeping the plaintext value (UA strings + IPs are PII)."""
+    if not value:
+        return None
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+# ── Request / response shapes ──────────────────────────────────────
 
 
 class GoogleTokenRequest(BaseModel):
@@ -89,12 +186,84 @@ class UserInfo(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """Session JWT issued after successful Google authentication."""
+    """Session JWT issued after successful authentication.
+
+    No refresh token in the body — it rides in an httpOnly cookie so
+    JS can't read it.
+    """
 
     access_token: str
     token_type: str = "bearer"
     expires_in: int
     user: UserInfo
+
+
+class LogoutResponse(BaseModel):
+    ok: bool = True
+    sessions_revoked: int = 1
+
+
+# ── Token issuance ─────────────────────────────────────────────────
+
+
+def _mint_access_jwt(user: User) -> str:
+    now = datetime.now(timezone.utc)
+    expires = now + _ACCESS_TOKEN_TTL
+    return jose_jwt.encode(
+        {
+            "sub": user.id,
+            "email": user.email,
+            "name": user.name,
+            "iat": int(now.timestamp()),
+            "exp": int(expires.timestamp()),
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
+
+
+def _to_token_response(user: User, access_jwt: str) -> TokenResponse:
+    return TokenResponse(
+        access_token=access_jwt,
+        expires_in=int(_ACCESS_TOKEN_TTL.total_seconds()),
+        user=UserInfo(
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            avatar_url=user.avatar_url,
+            trust_level=user.trust_level,
+        ),
+    )
+
+
+async def _issue_session(
+    user: User,
+    request: Request,
+    response: Response,
+    refresh_service: RefreshTokenService,
+) -> TokenResponse:
+    """Mint access JWT + open a refresh family + set the cookie.
+
+    Single seam used by every successful login path (Google, local,
+    register) so the cookie semantics stay byte-for-byte identical.
+    """
+    issued = await refresh_service.issue_for_login(
+        user_id=user.id,
+        user_agent_hash=_hash_request_fingerprint(
+            request.headers.get("user-agent"),
+        ),
+        ip_hash=_hash_request_fingerprint(
+            request.client.host if request.client else None,
+        ),
+    )
+    ttl_seconds = int(
+        (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
+    )
+    _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
+    return _to_token_response(user, _mint_access_jwt(user))
+
+
+# ── Google OAuth ───────────────────────────────────────────────────
 
 
 async def _verify_google_token(credential: str) -> dict:
@@ -104,7 +273,6 @@ async def _verify_google_token(credential: str) -> dict:
         resp.raise_for_status()
         keys = resp.json()
 
-    # Decode JWT header to find the signing key id
     parts = credential.split(".")
     if len(parts) != 3:
         raise HTTPException(status_code=401, detail="Invalid Google token: not a JWT")
@@ -145,9 +313,8 @@ async def _verify_google_token(credential: str) -> dict:
 
 
 # slowapi's @limiter.limit decorator extracts the client IP off the
-# first positional Request argument; the handler body doesn't use it,
-# but the parameter has to be named ``request`` and typed Request so
-# slowapi can find it. Same on /register and /login below.
+# first positional Request argument; the handler body uses it for the
+# session fingerprint too. Same on /register and /login below.
 @router.post(
     "/google",
     responses={
@@ -162,13 +329,16 @@ async def _verify_google_token(credential: str) -> dict:
 )
 @limiter.limit("10/minute")
 @inject
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def google_login(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
+    response: Response,
     body: GoogleTokenRequest,
     *,
     user_repo: FromDishka[UserRepository],
+    refresh_service: FromDishka[RefreshTokenService],
 ) -> TokenResponse:
-    """Exchange a Google ID token for a GMR session JWT."""
+    """Exchange a Google ID token for a Fontem session JWT + refresh cookie."""
     payload = await _verify_google_token(body.credential)
 
     email = payload["email"]
@@ -191,40 +361,15 @@ async def google_login(
         user = User(id=user_id, email=email, name=name, avatar_url=picture)
         user = await user_repo.upsert(user)
 
-    # Check ban
     sanction = await user_repo.get_active_sanction(user.id)
     if sanction is not None and sanction.type == "ban":
-        raise HTTPException(status_code=401, detail="Account is banned")
+        raise HTTPException(status_code=401, detail=_BANNED_DETAIL)
 
-    # Issue JWT
-    now = datetime.now(timezone.utc)
-    expires = now + timedelta(days=_TOKEN_EXPIRE_DAYS)
-    token = jose_jwt.encode(
-        {
-            "sub": user.id,
-            "email": user.email,
-            "name": user.name,
-            "iat": int(now.timestamp()),
-            "exp": int(expires.timestamp()),
-        },
-        JWT_SECRET,
-        algorithm=JWT_ALGORITHM,
-    )
-
-    return TokenResponse(
-        access_token=token,
-        expires_in=_TOKEN_EXPIRE_DAYS * 86400,
-        user=UserInfo(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            avatar_url=user.avatar_url,
-            trust_level=user.trust_level,
-        ),
-    )
+    return await _issue_session(user, request, response, refresh_service)
 
 
-# ── Local account registration + login ────────────────────────
+# ── Local account registration + login ─────────────────────────────
+
 
 class RegisterRequest(BaseModel):
     """Local account registration."""
@@ -271,31 +416,6 @@ _DUMMY_PASSWORD_HASH = bcrypt.hashpw(
 ).decode()
 
 
-def _issue_jwt(user: User) -> TokenResponse:
-    now = datetime.now(timezone.utc)
-    expires = now + timedelta(days=_TOKEN_EXPIRE_DAYS)
-    token = jose_jwt.encode(
-        {
-            "sub": user.id,
-            "email": user.email,
-            "name": user.name,
-            "iat": int(now.timestamp()),
-            "exp": int(expires.timestamp()),
-        },
-        JWT_SECRET,
-        algorithm=JWT_ALGORITHM,
-    )
-    return TokenResponse(
-        access_token=token,
-        expires_in=_TOKEN_EXPIRE_DAYS * 86400,
-        user=UserInfo(
-            id=user.id, email=user.email,
-            name=user.name, avatar_url=user.avatar_url,
-            trust_level=user.trust_level,
-        ),
-    )
-
-
 @router.post(
     "/register",
     status_code=201,
@@ -306,11 +426,14 @@ def _issue_jwt(user: User) -> TokenResponse:
 )
 @limiter.limit("3/minute")
 @inject
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def register(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
+    response: Response,
     body: RegisterRequest,
     *,
     user_repo: FromDishka[UserRepository],
+    refresh_service: FromDishka[RefreshTokenService],
 ) -> TokenResponse:
     """Register a new local account."""
     if len(body.password) < 8:
@@ -328,7 +451,7 @@ async def register(
         password_hash=_hash_password(body.password),
     )
     user = await user_repo.upsert(user)
-    return _issue_jwt(user)
+    return await _issue_session(user, request, response, refresh_service)
 
 
 @router.post(
@@ -350,11 +473,14 @@ async def register(
 )
 @limiter.limit("5/minute")
 @inject
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def login(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
+    response: Response,
     body: LoginRequest,
     *,
     user_repo: FromDishka[UserRepository],
+    refresh_service: FromDishka[RefreshTokenService],
 ) -> TokenResponse:
     """Login with email + password."""
     user = await user_repo.get_by_email(body.email)
@@ -362,10 +488,6 @@ async def login(
     # Always run bcrypt — even when no user matches — so the response
     # time can't distinguish "email exists" from "email doesn't". See
     # the _DUMMY_PASSWORD_HASH comment for the timing-oracle context.
-    # The verify result is unused on the no-user path; the branch
-    # below still 401s. The lockout check is deliberately *after* the
-    # bcrypt round so a locked account doesn't return earlier than a
-    # ban-checked-and-rejected one.
     candidate_hash = (
         user.password_hash
         if user is not None and user.password_hash is not None
@@ -389,12 +511,119 @@ async def login(
         )
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # Check ban
     sanction = await user_repo.get_active_sanction(user.id)
     if sanction is not None and sanction.type == "ban":
-        raise HTTPException(status_code=401, detail="Account is banned")
+        raise HTTPException(status_code=401, detail=_BANNED_DETAIL)
 
-    # Successful login — clear any prior failed attempts
     await user_repo.clear_failed_logins(user.id)
 
-    return _issue_jwt(user)
+    return await _issue_session(user, request, response, refresh_service)
+
+
+# ── Refresh + logout + sign-out-everywhere ─────────────────────────
+
+
+@router.post(
+    "/refresh",
+    responses={
+        401: {
+            "description": (
+                "Refresh cookie missing, expired, or invalidated. The "
+                "SPA's silent-refresh path treats this as 'log out and "
+                "redirect to /login'."
+            ),
+        },
+    },
+)
+@limiter.limit("30/minute")
+@inject
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+async def refresh(
+    request: Request,
+    response: Response,
+    *,
+    user_repo: FromDishka[UserRepository],
+    refresh_service: FromDishka[RefreshTokenService],
+) -> TokenResponse:
+    """Rotate the session — new access JWT, new refresh cookie.
+
+    The cookie carries the current plaintext refresh token. We rotate
+    atomically; success returns a fresh JWT + sets a new cookie. Any
+    failure (unknown token, expired family, lost race) clears the
+    cookie and returns 401 so the SPA redirects to /login.
+    """
+    offered = request.cookies.get(_REFRESH_COOKIE_NAME)
+    if not offered:
+        raise HTTPException(status_code=401, detail="No refresh cookie")
+
+    try:
+        issued = await refresh_service.rotate(offered)
+    except InvalidRefreshToken as e:
+        _clear_refresh_cookie(response)
+        raise HTTPException(status_code=401, detail=str(e)) from e
+
+    user = await user_repo.get_by_id(issued.family.user_id)
+    if user is None:
+        # The user was deleted while the session was live. Treat as
+        # logout — clear the cookie, fail the request.
+        _clear_refresh_cookie(response)
+        raise HTTPException(status_code=401, detail="User no longer exists")
+
+    # Refuse the refresh if the user got banned mid-session. They
+    # could otherwise stay logged in until their access JWT expires
+    # (15 min), which is the right blast-radius but still worth
+    # killing at refresh time.
+    sanction = await user_repo.get_active_sanction(user.id)
+    if sanction is not None and sanction.type == "ban":
+        await refresh_service.revoke(issued.plaintext)
+        _clear_refresh_cookie(response)
+        raise HTTPException(status_code=401, detail=_BANNED_DETAIL)
+
+    ttl_seconds = int(
+        (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
+    )
+    _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
+    return _to_token_response(user, _mint_access_jwt(user))
+
+
+@router.post("/logout")
+@inject
+async def logout(
+    request: Request,
+    response: Response,
+    *,
+    refresh_service: FromDishka[RefreshTokenService],
+) -> LogoutResponse:
+    """Revoke the current session and clear the cookie.
+
+    Idempotent — calling /auth/logout twice is fine. The endpoint is
+    intentionally not auth-gated: the cookie itself is the credential,
+    and we want a logout to succeed even if the access JWT has
+    already expired (otherwise the user couldn't ever sign out from
+    a stale tab without first triggering a refresh).
+    """
+    offered = request.cookies.get(_REFRESH_COOKIE_NAME)
+    if offered:
+        await refresh_service.revoke(offered)
+    _clear_refresh_cookie(response)
+    return LogoutResponse(ok=True, sessions_revoked=1)
+
+
+@router.post("/sign_out_everywhere")
+@inject
+async def sign_out_everywhere(
+    response: Response,
+    *,
+    refresh_service: FromDishka[RefreshTokenService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> LogoutResponse:
+    """Revoke every active session for the calling user.
+
+    Auth-gated by the access JWT (so a stolen *refresh token* alone
+    can't trigger this — the attacker would also need a valid access
+    token, which expires every 15 min and gives the legitimate user
+    a window to notice). User-facing only — there is no admin verb.
+    """
+    revoked = await refresh_service.revoke_all_for_user(user.id)
+    _clear_refresh_cookie(response)
+    return LogoutResponse(ok=True, sessions_revoked=revoked)

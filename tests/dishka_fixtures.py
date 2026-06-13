@@ -23,6 +23,7 @@ from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
 from src.repositories.flower_repository import FlowerRepository
+from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
 from src.infra.minio_client import MinioStorage
 from src.repositories.user_repository import UserRepository
@@ -33,6 +34,7 @@ from src.services.authz import AuthorizationService
 from src.services.group_service import GroupService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
+from src.services.refresh_token_service import RefreshTokenService
 from src.services.tag_service import TagService
 
 
@@ -130,6 +132,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def flower_repo(self) -> FlowerRepository:
         return self._svc["flower_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def refresh_token_repo(self) -> RefreshTokenRepository:
+        return self._svc["refresh_token_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def refresh_token_service(self) -> RefreshTokenService:
+        return self._svc["refresh_token_svc"]
 
     @provide(scope=Scope.REQUEST)
     def tag_service(self) -> TagService:
