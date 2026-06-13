@@ -79,11 +79,20 @@ class MinioStorage:
         # When fallback kicks in the dev MinIO is plaintext too.
         if public_endpoint == endpoint:
             public_secure = False
+        # Pin the region so ``presigned_get_object`` doesn't try to
+        # discover it via a GetBucketLocation call against the public
+        # host. That call goes through nginx + TLS, and the in-cluster
+        # pod doesn't trust the internal CA — without this every
+        # story-with-image read raises ``SSLCertVerificationError``.
+        # MinIO defaults all buckets to ``us-east-1``; pinning here
+        # also saves one HTTP round trip per request.
+        public_region = os.environ.get("MINIO_PUBLIC_REGION", "us-east-1")
         self._presign_client = Minio(
             public_endpoint,
             access_key=access_key,
             secret_key=secret_key,
             secure=public_secure,
+            region=public_region,
         )
 
         self._bucket_ensured = False
