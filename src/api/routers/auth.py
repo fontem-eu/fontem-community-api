@@ -251,6 +251,26 @@ def _check_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
+# Constant-time bcrypt dummy. Computed once at import (the cost of
+# bcrypt.gensalt() is what's expensive, not checkpw) so the missing-
+# user login path takes the same wall-clock as a real bcrypt verify.
+# Closes the timing oracle documented in the 2026-06-11 security
+# review finding #2: pre-fix a real-but-wrong-password login took
+# ~220 ms while a fake-email login returned in ~13 ms, leaking
+# account existence at ~3600 emails/day per IP under the 5/min rate
+# limit. With this dummy in place both paths run a full bcrypt round.
+#
+# Source bytes are `os.urandom` rather than a literal: there's no
+# real credential here (this hash is never compared against user
+# input — it's only the second arg to a bcrypt.checkpw whose result
+# is discarded), but a per-process random source means the hash
+# can't be precomputed offline either, and Sonar S6437 doesn't flag
+# it as a hardcoded password.
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(
+    os.urandom(16), bcrypt.gensalt(),
+).decode()
+
+
 def _issue_jwt(user: User) -> TokenResponse:
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=_TOKEN_EXPIRE_DAYS)
@@ -338,6 +358,21 @@ async def login(
 ) -> TokenResponse:
     """Login with email + password."""
     user = await user_repo.get_by_email(body.email)
+
+    # Always run bcrypt — even when no user matches — so the response
+    # time can't distinguish "email exists" from "email doesn't". See
+    # the _DUMMY_PASSWORD_HASH comment for the timing-oracle context.
+    # The verify result is unused on the no-user path; the branch
+    # below still 401s. The lockout check is deliberately *after* the
+    # bcrypt round so a locked account doesn't return earlier than a
+    # ban-checked-and-rejected one.
+    candidate_hash = (
+        user.password_hash
+        if user is not None and user.password_hash is not None
+        else _DUMMY_PASSWORD_HASH
+    )
+    password_ok = _check_password(body.password, candidate_hash)
+
     if user is None or user.password_hash is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -348,7 +383,7 @@ async def login(
             detail=f"Account temporarily locked. Try again in {_LOCKOUT_MINUTES} minutes.",
         )
 
-    if not _check_password(body.password, user.password_hash):
+    if not password_ok:
         await user_repo.register_failed_login(
             body.email, _MAX_LOGIN_ATTEMPTS, _LOCKOUT_MINUTES,
         )
