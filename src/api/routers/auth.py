@@ -55,6 +55,8 @@ from src.services.refresh_token_service import (
     InvalidRefreshToken,
     RefreshTokenService,
 )
+from src.services.email_verification_service import EmailVerificationService
+from src.services.password_reset_service import PasswordResetService
 
 # /auth/* surface returns 400 (body validation), 401 (bad credentials),
 # 409 (email already registered), and 429 (rate-limited by the
@@ -183,6 +185,10 @@ class UserInfo(BaseModel):
     # The server remains the source of truth and re-checks on every
     # privileged endpoint.
     trust_level: str = "new_user"
+    # Lets the SPA render the "confirm your email" interstitial + gate
+    # the compose affordances without a separate round-trip. The
+    # server still enforces the gate on every participation action.
+    email_verified: bool = True
 
 
 class TokenResponse(BaseModel):
@@ -232,6 +238,7 @@ def _to_token_response(user: User, access_jwt: str) -> TokenResponse:
             name=user.name,
             avatar_url=user.avatar_url,
             trust_level=user.trust_level,
+            email_verified=user.email_verified_at is not None,
         ),
     )
 
@@ -434,8 +441,16 @@ async def register(
     *,
     user_repo: FromDishka[UserRepository],
     refresh_service: FromDishka[RefreshTokenService],
+    verify_service: FromDishka[EmailVerificationService],
 ) -> TokenResponse:
-    """Register a new local account."""
+    """Register a new local account.
+
+    The account is created **unverified** (email_verified_at is NULL).
+    A session is still issued so the SPA can render the "check your
+    email" interstitial and offer resend/logout — but every
+    participation action 403s ("email not verified") until the user
+    clicks the link. See the authz policy's _VERIFIED_REQUIRED set.
+    """
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
@@ -451,6 +466,10 @@ async def register(
         password_hash=_hash_password(body.password),
     )
     user = await user_repo.upsert(user)
+    # Fire the verification mail. issue() swallows mail-provider errors
+    # so a flaky Brevo never 500s a registration — the token is
+    # persisted and the user can hit "resend".
+    await verify_service.issue(user)
     return await _issue_session(user, request, response, refresh_service)
 
 
@@ -627,3 +646,124 @@ async def sign_out_everywhere(
     revoked = await refresh_service.revoke_all_for_user(user.id)
     _clear_refresh_cookie(response)
     return LogoutResponse(ok=True, sessions_revoked=revoked)
+
+
+# ── Email verification + password reset ────────────────────────────
+
+
+class VerifyEmailRequest(BaseModel):
+    """Token from the verification link (SPA reads ?token= and POSTs it)."""
+    token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class SimpleOk(BaseModel):
+    ok: bool = True
+
+
+@router.post(
+    "/verify-email",
+    responses={
+        400: {"description": "Token missing, expired, already used, or invalid."},
+    },
+)
+@limiter.limit("10/minute")
+@inject
+async def verify_email(
+    request: Request,  # pylint: disable=unused-argument
+    body: VerifyEmailRequest,
+    *,
+    verify_service: FromDishka[EmailVerificationService],
+) -> SimpleOk:
+    """Redeem an email-verification link.
+
+    Verification takes effect immediately — the AuthorizationService
+    rebuilds the Principal from the DB every request, so the caller's
+    next participation action succeeds without re-login.
+    """
+    user = await verify_service.consume(body.token)
+    if user is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Verification link is invalid, expired, or already used.",
+        )
+    return SimpleOk(ok=True)
+
+
+@router.post("/resend-verification")
+@limiter.limit("3/minute")
+@inject
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+async def resend_verification(
+    request: Request,  # pylint: disable=unused-argument
+    *,
+    user_repo: FromDishka[UserRepository],
+    verify_service: FromDishka[EmailVerificationService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> SimpleOk:
+    """Re-send the verification link for the signed-in account.
+
+    Auth-gated (you have to be logged in as the account) + rate
+    limited. No-ops silently if the account is somehow already
+    verified, so the response shape can't be used to probe state.
+    """
+    fresh = await user_repo.get_by_id(user.id)
+    if fresh is not None and fresh.email_verified_at is None:
+        await verify_service.issue(fresh)
+    return SimpleOk(ok=True)
+
+
+@router.post("/forgot")
+@limiter.limit("3/minute")
+@inject
+async def forgot_password(
+    request: Request,  # pylint: disable=unused-argument
+    body: ForgotPasswordRequest,
+    *,
+    reset_service: FromDishka[PasswordResetService],
+) -> SimpleOk:
+    """Request a password-reset link.
+
+    ALWAYS returns 200 ok regardless of whether the email matches an
+    account — no account enumeration. The reset service silently
+    no-ops for unknown / OAuth-only emails.
+    """
+    await reset_service.request(body.email)
+    return SimpleOk(ok=True)
+
+
+@router.post(
+    "/reset",
+    responses={
+        400: {"description": "Reset token missing, expired, already used, or invalid."},
+    },
+)
+@limiter.limit("5/minute")
+@inject
+async def reset_password(
+    request: Request,  # pylint: disable=unused-argument
+    body: ResetPasswordRequest,
+    *,
+    reset_service: FromDishka[PasswordResetService],
+) -> SimpleOk:
+    """Redeem a reset token + set a new password.
+
+    On success every refresh-token family for the account is revoked
+    — a reset is the account-recovery path, so any session an attacker
+    holds dies here. The user re-logs in with the new password.
+    """
+    ok = await reset_service.reset(body.token, body.new_password)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="Reset link is invalid, expired, or already used.",
+        )
+    return SimpleOk(ok=True)

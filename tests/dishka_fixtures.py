@@ -24,6 +24,7 @@ from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
 from src.repositories.flower_repository import FlowerRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
+from src.repositories.auth_token_repository import AuthTokenRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
 from src.infra.minio_client import MinioStorage
 from src.repositories.user_repository import UserRepository
@@ -35,6 +36,9 @@ from src.services.group_service import GroupService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
+from src.services.mail_service import MailService
+from src.services.email_verification_service import EmailVerificationService
+from src.services.password_reset_service import PasswordResetService
 from src.services.tag_service import TagService
 
 
@@ -140,6 +144,22 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def refresh_token_service(self) -> RefreshTokenService:
         return self._svc["refresh_token_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def auth_token_repo(self) -> AuthTokenRepository:
+        return self._svc["auth_token_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def mail_service(self) -> MailService:
+        return self._svc["mail_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def email_verification_service(self) -> EmailVerificationService:
+        return self._svc["email_verify_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def password_reset_service(self) -> PasswordResetService:
+        return self._svc["password_reset_svc"]
 
     @provide(scope=Scope.REQUEST)
     def tag_service(self) -> TagService:

@@ -36,6 +36,7 @@ def _safe_self_view(user: User) -> dict:
         "name": user.name,
         "avatar_url": user.avatar_url,
         "trust_level": user.trust_level,
+        "email_verified": user.email_verified_at is not None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 

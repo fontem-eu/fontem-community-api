@@ -80,6 +80,11 @@ class Principal:
     trust_level: str
     roles: frozenset[str] = field(default_factory=frozenset)
     sanction: str | None = None
+    # False until the account confirms its email. "Required"
+    # verification gates every participation action on this (see
+    # _VERIFIED_REQUIRED + evaluate()). Grandfathered + OAuth accounts
+    # land here True.
+    email_verified: bool = True
 
 
 @dataclass(frozen=True)
@@ -172,6 +177,41 @@ _SUSPEND_ALLOWED: frozenset[str] = frozenset({
     Action.GROUPS_READ_MEMBERS,
     Action.ISSUES_READ,
 })
+
+
+# Actions that "Required" email verification gates (2026-06-13
+# decision). Reads + the verification/account-management surface stay
+# open so an unverified user can still see content, find the "verify"
+# prompt, and manage/close their account; everything that *participates*
+# (creating, commenting, voting, flowering, following, flagging,
+# grouping) waits for a confirmed email. Grandfathered + OAuth accounts
+# are already verified so this never bites them.
+_VERIFIED_REQUIRED: frozenset[str] = frozenset({
+    Action.STORIES_CREATE,
+    Action.STORIES_EDIT,
+    Action.STORIES_EDIT_META,
+    Action.STORIES_DELETE,
+    Action.STORIES_SHARE,
+    Action.STORIES_UPLOAD,
+    Action.STORIES_SET_TAGS,
+    Action.STORIES_LOCK_SECTION,
+    Action.GROUPS_CREATE,
+    Action.GROUPS_MANAGE_MEMBERS,
+    Action.GROUPS_DELETE,
+    Action.ISSUES_CREATE,
+    Action.ISSUES_COMMENT,
+    Action.ISSUES_VOTE,
+    Action.FLAGS_CREATE,
+    Action.TAGS_FOLLOW,
+    Action.FLOWERS_GIVE,
+})
+
+
+def _check_email_verified(p: Principal, action: Action) -> Decision | None:
+    """Deny participation actions for an unverified account, else None."""
+    if action in _VERIFIED_REQUIRED and not p.email_verified:
+        return Decision.deny("email not verified")
+    return None
 
 
 def _check_sanction(p: Principal, action: Action) -> Decision | None:
@@ -406,6 +446,9 @@ def evaluate(
     sanction_verdict = _check_sanction(principal, action)
     if sanction_verdict is not None:
         return sanction_verdict
+    verified_verdict = _check_email_verified(principal, action)
+    if verified_verdict is not None:
+        return verified_verdict
     check = POLICY.get(action)
     if check is None:
         # Fail closed — an action that isn't in the table is denied.

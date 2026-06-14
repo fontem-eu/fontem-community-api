@@ -36,6 +36,7 @@ from src.infra.postgres.pg_permission_repo import PgPermissionRepository
 from src.infra.postgres.pg_report_repo import PgReportRepository
 from src.infra.postgres.pg_flower_repo import PgFlowerRepository
 from src.infra.postgres.pg_refresh_token_repo import PgRefreshTokenRepository
+from src.infra.postgres.pg_auth_token_repo import PgAuthTokenRepository
 from src.infra.postgres.pg_tag_follow_repo import PgTagFollowRepository
 from src.infra.postgres.pg_user_repo import PgUserRepository
 from src.repositories.group_repository import GroupRepository
@@ -45,6 +46,7 @@ from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
 from src.repositories.flower_repository import FlowerRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
+from src.repositories.auth_token_repository import AuthTokenRepository
 from src.repositories.tag_follow_repository import TagFollowRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authz import AuthorizationService
@@ -54,6 +56,9 @@ from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
 from src.services.refresh_token_service import RefreshTokenService
+from src.services.mail_service import MailService
+from src.services.email_verification_service import EmailVerificationService
+from src.services.password_reset_service import PasswordResetService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.tag_service import TagService
@@ -161,6 +166,10 @@ class RepositoryProvider(Provider):
     def refresh_token_repo(self, session: AsyncSession) -> RefreshTokenRepository:
         return PgRefreshTokenRepository(session)
 
+    @provide(scope=Scope.REQUEST)
+    def auth_token_repo(self, session: AsyncSession) -> AuthTokenRepository:
+        return PgAuthTokenRepository(session)
+
 
 # ── Service layer ─────────────────────────────────────────────
 
@@ -173,6 +182,31 @@ class ServiceProvider(Provider):
         self, repo: RefreshTokenRepository,
     ) -> RefreshTokenService:
         return RefreshTokenService(repo=repo)
+
+    @provide(scope=Scope.APP)
+    def mail_service(self) -> MailService:
+        return MailService()
+
+    @provide(scope=Scope.REQUEST)
+    def email_verification_service(
+        self,
+        tokens: AuthTokenRepository,
+        users: UserRepository,
+        mail: MailService,
+    ) -> EmailVerificationService:
+        return EmailVerificationService(tokens=tokens, users=users, mail=mail)
+
+    @provide(scope=Scope.REQUEST)
+    def password_reset_service(
+        self,
+        tokens: AuthTokenRepository,
+        users: UserRepository,
+        mail: MailService,
+        refresh: RefreshTokenService,
+    ) -> PasswordResetService:
+        return PasswordResetService(
+            tokens=tokens, users=users, mail=mail, refresh=refresh,
+        )
 
     @provide(scope=Scope.REQUEST)
     def permission_service(

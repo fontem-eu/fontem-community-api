@@ -27,7 +27,8 @@ class TestUserAPI:
 
         # Allowed self-view fields
         assert set(body.keys()) <= {
-            "id", "email", "name", "avatar_url", "trust_level", "created_at",
+            "id", "email", "name", "avatar_url", "trust_level",
+            "email_verified", "created_at",
         }, f"unexpected fields: {set(body.keys())}"
 
         # Hard-fail if any of the leaky fields ever reappear

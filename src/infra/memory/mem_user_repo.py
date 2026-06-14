@@ -85,6 +85,16 @@ class InMemoryUserRepository(UserRepository):
                     )
                 return
 
+    async def mark_email_verified(self, user_id, when) -> None:
+        u = self._users.get(user_id)
+        if u is not None:
+            u.email_verified_at = when
+
+    async def update_password(self, user_id, password_hash: str) -> None:
+        u = self._users.get(user_id)
+        if u is not None:
+            u.password_hash = password_hash
+
     async def clear_failed_logins(self, user_id: str) -> None:
         user = self._users.get(user_id)
         if user is not None:

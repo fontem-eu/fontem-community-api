@@ -32,6 +32,7 @@ from src.infra.memory.mem_authz_audit_repo import InMemoryAuthzAuditRepository
 from src.infra.memory.mem_report_repo import InMemoryReportRepository
 from src.infra.memory.mem_flower_repo import InMemoryFlowerRepository
 from src.infra.memory.mem_refresh_token_repo import InMemoryRefreshTokenRepository
+from src.infra.memory.mem_auth_token_repo import InMemoryAuthTokenRepository
 from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
 from src.services.issue_service import IssueService
@@ -43,6 +44,9 @@ from src.services.group_service import GroupService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
+from src.services.mail_service import MailService
+from src.services.email_verification_service import EmailVerificationService
+from src.services.password_reset_service import PasswordResetService
 from src.services.tag_service import TagService
 from tests.dishka_fixtures import make_test_container
 
@@ -89,6 +93,7 @@ def services():
     tag_follow_repo = InMemoryTagFollowRepository()
     flower_repo = InMemoryFlowerRepository()
     refresh_token_repo = InMemoryRefreshTokenRepository()
+    auth_token_repo = InMemoryAuthTokenRepository()
 
     authz_svc = AuthorizationService(users=user_repo, audit=AuditLogger(authz_audit_repo))
     perm_svc = PermissionService(permission_repo, user_repo, group_repo)
@@ -99,6 +104,10 @@ def services():
     tag_svc = TagService(report_repo, tag_follow_repo, perm_svc, authz_svc)
     flower_svc = FlowerService(flower_repo, report_repo, authz_svc)
     refresh_token_svc = RefreshTokenService(refresh_token_repo)
+    mail_svc = MailService()  # MAIL_SUPPRESS defaults true → no real sends
+    email_verify_svc = EmailVerificationService(auth_token_repo, user_repo, mail_svc)
+    password_reset_svc = PasswordResetService(
+        auth_token_repo, user_repo, mail_svc, refresh_token_svc)
 
     return {
         "user_repo": user_repo,
@@ -110,6 +119,7 @@ def services():
         "tag_follow_repo": tag_follow_repo,
         "flower_repo": flower_repo,
         "refresh_token_repo": refresh_token_repo,
+        "auth_token_repo": auth_token_repo,
         "authz_audit_repo": authz_audit_repo,
         "authz_svc": authz_svc,
         "perm_svc": perm_svc,
@@ -120,6 +130,9 @@ def services():
         "tag_svc": tag_svc,
         "flower_svc": flower_svc,
         "refresh_token_svc": refresh_token_svc,
+        "mail_svc": mail_svc,
+        "email_verify_svc": email_verify_svc,
+        "password_reset_svc": password_reset_svc,
     }
 
 
@@ -144,7 +157,8 @@ def client(services):
 
 async def seed_user(user_repo: InMemoryUserRepository, user_id: str,
                     trust_level: str = "contributor",
-                    roles: list[str] | None = None) -> User:
+                    roles: list[str] | None = None,
+                    email_verified: bool = True) -> User:
     """Create a user with given trust level and roles.
 
     Derives a UUID5 from human-friendly IDs (e.g. "user-1" → UUID5) to match
@@ -153,8 +167,13 @@ async def seed_user(user_repo: InMemoryUserRepository, user_id: str,
     calling services directly.
     """
     derived = _stable_uuid(user_id)
+    # Default to verified — most tests model established accounts. The
+    # "Required" email-verification gate is exercised explicitly in
+    # test_email_verification.py with email_verified=False.
+    from datetime import datetime, timezone
     user = User(id=derived, email=f"{user_id}@test.com", name=user_id,
-                trust_level=trust_level)
+                trust_level=trust_level,
+                email_verified_at=(datetime.now(timezone.utc) if email_verified else None))
     user = await user_repo.upsert(user)
     if roles:
         await user_repo.set_roles(derived, roles)

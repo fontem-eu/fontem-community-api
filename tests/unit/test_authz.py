@@ -25,6 +25,8 @@ import pytest
 
 from src.domain.group import Group
 from src.domain.report import Report
+from datetime import datetime, timezone
+
 from src.domain.user import User
 from src.infra.memory.mem_authz_audit_repo import InMemoryAuthzAuditRepository
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
@@ -49,9 +51,11 @@ def _principal(
     trust_level: str = "new_user",
     roles: frozenset[str] = frozenset(),
     sanction: str | None = None,
+    email_verified: bool = True,
 ) -> Principal:
     return Principal(
         user_id=user_id, trust_level=trust_level, roles=roles, sanction=sanction,
+        email_verified=email_verified,
     )
 
 
@@ -205,7 +209,8 @@ class TestAuthorizationService:
     @pytest.mark.asyncio
     async def test_principal_snapshots_user(self, authz_setup):
         svc, users, _ = authz_setup
-        u = User(id="alice", email="a@x", name="Alice", trust_level="contributor")
+        u = User(id="alice", email="a@x", name="Alice", trust_level="contributor",
+                 email_verified_at=datetime.now(timezone.utc))
         await users.upsert(u)
         p = await svc.principal("alice")
         assert p is not None
@@ -225,7 +230,8 @@ class TestAuthorizationService:
     @pytest.mark.asyncio
     async def test_require_silent_on_allow(self, authz_setup):
         svc, users, _ = authz_setup
-        u = User(id="alice", email="a@x", name="Alice", trust_level="new_user")
+        u = User(id="alice", email="a@x", name="Alice", trust_level="new_user",
+                 email_verified_at=datetime.now(timezone.utc))
         await users.upsert(u)
         p = await svc.principal("alice")
         # No exception → allowed.
@@ -234,7 +240,8 @@ class TestAuthorizationService:
     @pytest.mark.asyncio
     async def test_decide_logs_both_outcomes(self, authz_setup):
         svc, users, audit = authz_setup
-        u = User(id="alice", email="a@x", name="Alice", trust_level="new_user")
+        u = User(id="alice", email="a@x", name="Alice", trust_level="new_user",
+                 email_verified_at=datetime.now(timezone.utc))
         await users.upsert(u)
         p = await svc.principal("alice")
         await svc.decide(p, Action.GROUPS_MANAGE_MEMBERS, _group(owner_id="alice"))

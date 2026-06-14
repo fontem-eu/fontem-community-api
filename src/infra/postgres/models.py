@@ -45,6 +45,9 @@ class UserModel(Base):
     locked_until: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
 
     roles: Mapped[list[UserRoleModel]] = relationship(
         "UserRoleModel", back_populates="user", cascade="all, delete-orphan"
@@ -475,3 +478,46 @@ class RefreshTokenFamilyModel(Base):
             "current_token_hash",
         ),
     )
+
+class AuthTokenModel(Base):
+    """Single-use, hashed tokens for email verification + password reset.
+
+    One table, two purposes (``purpose`` column) so the verification
+    and reset flows share the same single-use + expiry + hash
+    machinery. Plaintext tokens are NEVER stored — only their SHA-256
+    hash, so a DB dump can't be replayed into account takeover.
+
+    ``consumed_at`` non-null = spent. A token is valid iff it exists,
+    matches the offered hash, hasn't been consumed, and hasn't
+    expired. The index on ``token_hash`` makes the consume path a
+    single PK-equivalent lookup.
+    """
+
+    __tablename__ = "auth_tokens"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=_new_uuid,
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    # 'verify_email' | 'password_reset'
+    purpose: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False,
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+
+    __table_args__ = (
+        Index("ix_auth_tokens_token_hash", "token_hash"),
+        Index("ix_auth_tokens_user_id_purpose", "user_id", "purpose"),
+    )
+

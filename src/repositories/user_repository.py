@@ -43,5 +43,16 @@ class UserRepository(ABC):
         """
 
     @abstractmethod
+    async def mark_email_verified(self, user_id: str, when) -> None:
+        """Set ``email_verified_at``. Idempotent — re-verifying is a no-op
+        at the policy layer (the account is already verified)."""
+        ...
+
+    @abstractmethod
+    async def update_password(self, user_id: str, password_hash: str) -> None:
+        """Replace the bcrypt hash. Used by the password-reset flow."""
+        ...
+
+    @abstractmethod
     async def clear_failed_logins(self, user_id: str) -> None:
         """Reset failed-login counter and clear any lock for the given user."""

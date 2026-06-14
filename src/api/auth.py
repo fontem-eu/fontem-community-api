@@ -39,12 +39,23 @@ async def _resolve_user(
     except ValueError:
         user_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, user_id))
 
-    # Auto-create user on first request
+    # Auto-create user on first request. This only fires when no row
+    # exists for a JWT we *signed* — i.e. a deleted account whose token
+    # is still live, or an integration-test token. Such a user already
+    # passed a real auth flow, so we create them email-verified: the
+    # "Required" verification gate is enforced at /auth/register (which
+    # creates email_verified_at=NULL and never reaches this branch,
+    # because the row exists). Lazily-recreated users are NOT fresh
+    # registrants and shouldn't be re-gated.
     user = await user_repo.get_by_id(user_id)
     if user is None:
+        from datetime import datetime, timezone  # local: cycle-free
         email = payload.get("email", f"{user_id}@unknown")
         name = payload.get("name", user_id)
-        user = User(id=user_id, email=email, name=name)
+        user = User(
+            id=user_id, email=email, name=name,
+            email_verified_at=datetime.now(timezone.utc),
+        )
         user = await user_repo.upsert(user)
 
     # Check ban

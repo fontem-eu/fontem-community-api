@@ -18,3 +18,7 @@ class User:  # pylint: disable=too-many-instance-attributes
     created_at: datetime | None = None
     failed_login_attempts: int = 0
     locked_until: datetime | None = None
+    # NULL until the account confirms its email via the verification
+    # link. "Required" verification (2026-06-13 decision) gates every
+    # participation action on this being set — see authz policy.
+    email_verified_at: datetime | None = None

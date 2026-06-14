@@ -31,6 +31,7 @@ class PgUserRepository(UserRepository):
             created_at=row.created_at,
             failed_login_attempts=getattr(row, 'failed_login_attempts', 0) or 0,
             locked_until=getattr(row, 'locked_until', None),
+            email_verified_at=getattr(row, 'email_verified_at', None),
         )
 
     async def get_by_id(self, user_id: str) -> User | None:
@@ -58,6 +59,7 @@ class PgUserRepository(UserRepository):
             password_hash=user.password_hash,
             trust_level=user.trust_level,
             created_at=user.created_at or now,
+            email_verified_at=user.email_verified_at,
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=["id"],
@@ -77,6 +79,22 @@ class PgUserRepository(UserRepository):
                 raise Conflict(f"Email {user.email} already registered") from exc
             raise
         return await self.get_by_id(user_id)  # type: ignore[return-value]
+
+    async def mark_email_verified(self, user_id: str, when: datetime) -> None:
+        await self._session.execute(
+            update(UserModel)
+            .where(UserModel.id == user_id)
+            .values(email_verified_at=when)
+        )
+        await self._session.commit()
+
+    async def update_password(self, user_id: str, password_hash: str) -> None:
+        await self._session.execute(
+            update(UserModel)
+            .where(UserModel.id == user_id)
+            .values(password_hash=password_hash)
+        )
+        await self._session.commit()
 
     async def get_roles(self, user_id: str) -> list[str]:
         result = await self._session.execute(

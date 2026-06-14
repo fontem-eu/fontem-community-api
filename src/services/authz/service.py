@@ -62,6 +62,7 @@ class AuthorizationService:
             trust_level=user.trust_level,
             roles=roles,
             sanction=sanction_type,
+            email_verified=user.email_verified_at is not None,
         )
 
     async def decide(
