@@ -66,8 +66,13 @@ class MailService:
     async def send(self, msg: MailMessage) -> None:
         if self._suppress:
             # The link is the thing a staging dev actually needs; log
-            # the whole text body so it's grep-able in pod logs.
-            logger.info(
+            # the whole text body so it's grep-able in pod logs. WARNING
+            # rather than INFO so it surfaces regardless of the root
+            # logger's level (uvicorn leaves root at WARNING; an INFO
+            # line here would be silently dropped) — and "we did not
+            # actually send this mail" genuinely is a warn-worthy
+            # condition in any env where someone's watching.
+            logger.warning(
                 "MAIL SUPPRESSED → to=%s subject=%r\n--- body ---\n%s\n--- end ---",
                 msg.to_email, msg.subject, msg.text,
             )

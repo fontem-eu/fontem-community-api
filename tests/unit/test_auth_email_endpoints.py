@@ -38,7 +38,7 @@ class TestVerifyEmailEndpoint:
 
     def test_full_register_verify_then_participate(self, client, services, caplog):
         import logging
-        caplog.set_level(logging.INFO, logger="fontem.mail")
+        caplog.set_level(logging.WARNING, logger="fontem.mail")
         client.post("/auth/register", json={
             "email": "verifyme@test.com", "password": "password123", "name": "V",
         })
@@ -83,7 +83,7 @@ class TestForgotResetEndpoints:
         client.post("/auth/register", json={
             "email": "cycle@test.com", "password": "originalpass1", "name": "C",
         })
-        caplog.set_level(logging.INFO, logger="fontem.mail")
+        caplog.set_level(logging.WARNING, logger="fontem.mail")
         client.post("/auth/forgot", json={"email": "cycle@test.com"})
         token = None
         for rec in caplog.records:
