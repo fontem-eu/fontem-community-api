@@ -89,6 +89,28 @@ spec:
                 secretKeyRef:
                   name: minio-credentials
                   key: MINIO_ROOT_PASSWORD
+            # ── Transactional mail (Brevo) ──────────────────────────
+            # BREVO_API_KEY is Vault-backed only in prod; non-prod runs
+            # with MAIL_SUPPRESS=true and no key (optional secretKeyRef
+            # → unset env → MailService logs instead of sending). The
+            # FROM / REPLY-TO identity + suppress flag + the public
+            # base URL for verification/reset links come from values.
+            - name: BREVO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: brevo-credentials
+                  key: BREVO_API_KEY
+                  optional: true
+            - name: MAIL_SUPPRESS
+              value: {{ .Values.mailSuppress | default "true" | quote }}
+            - name: MAIL_FROM
+              value: {{ .Values.mailFrom | default "noreply@fontem.eu" | quote }}
+            - name: MAIL_FROM_NAME
+              value: {{ .Values.mailFromName | default "Fontem" | quote }}
+            - name: MAIL_REPLY_TO
+              value: {{ .Values.mailReplyTo | default "support@fontem.eu" | quote }}
+            - name: APP_BASE_URL
+              value: {{ .Values.appBaseUrl | default "https://fontem.eu" | quote }}
             # ClamAV daemon for the upload pipeline's final gate. The
             # file_security service degrades to "scan skipped with a
             # warning log" if CLAMAV_HOST is empty — so omitting this
