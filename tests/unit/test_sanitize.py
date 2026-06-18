@@ -114,8 +114,11 @@ class TestSanitizeText:
     def test_none_returns_none(self):
         assert sanitize_text(None) is None
 
-    def test_ampersands_and_entities(self):
-        result = sanitize_text("Tom &amp; Jerry <b>show</b>")
-        assert "Tom" in result
-        assert "Jerry" in result
-        assert "<b>" not in result
+    def test_ampersands_not_double_encoded(self):
+        # Regression: title/abstract are plain-text fields rendered by the
+        # client (Vue {{ }} / SSR meta), which escapes on output. Escaping
+        # here as well double-encoded 'X & Y' into the literal 'X &amp; Y'.
+        # sanitize_text must strip tags but return PLAIN text.
+        assert sanitize_text("Mészáros & EU-funded procurement") == "Mészáros & EU-funded procurement"
+        assert sanitize_text("Tom &amp; Jerry <b>show</b>") == "Tom & Jerry show"
+        assert sanitize_text('<script>alert("x")</script>A & B') == "A & B"

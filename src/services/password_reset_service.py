@@ -86,7 +86,7 @@ class PasswordResetService:
                 subject=subject, html=html, text=text,
             ))
         except MailSendError as e:
-            logger.error("password-reset mail to %s failed: %s", user.email, e)
+            logger.exception("password-reset mail to %s failed: %s", user.email, e)
 
     async def reset(self, plaintext: str, new_password: str) -> bool:
         """Redeem the token + rotate the password. Returns False when

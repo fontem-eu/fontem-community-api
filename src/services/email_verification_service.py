@@ -81,7 +81,7 @@ class EmailVerificationService:
             # Never fail the calling flow (register / resend) on a mail
             # error — the token is already persisted, the user can
             # retry. Log loudly for ops.
-            logger.error("verification mail to %s failed: %s", user.email, e)
+            logger.exception("verification mail to %s failed: %s", user.email, e)
 
     async def consume(self, plaintext: str) -> User | None:
         """Redeem a verification token. Returns the now-verified user,

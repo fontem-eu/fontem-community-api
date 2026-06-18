@@ -5,6 +5,8 @@ preserving the subset that TipTap's StarterKit can produce.
 """
 from __future__ import annotations
 
+from html import unescape
+
 import nh3
 
 # Tags that TipTap's StarterKit extension legitimately produces.
@@ -53,7 +55,16 @@ def sanitize_html(html: str) -> str:
 
 
 def sanitize_text(text: str) -> str:
-    """Strip ALL HTML from a plain-text field (title, abstract)."""
+    """Strip ALL HTML tags from a plain-text field (title, abstract) and
+    return PLAIN text.
+
+    nh3 is an HTML sanitizer: even with no tags allowed it HTML-escapes the
+    surviving text (``&`` -> ``&amp;``, ``<`` -> ``&lt;``). Title/abstract are
+    rendered as text by the client (Vue ``{{ }}`` / SSR meta), which escapes on
+    output — escaping here as well double-encoded titles like ``X & Y`` into a
+    literal ``X &amp; Y``. So strip tags with nh3, then decode entities back to
+    plain characters; the client does the single, correct output-escape.
+    """
     if not text:
         return text
-    return nh3.clean(text, tags=set())
+    return unescape(nh3.clean(text, tags=set()))
