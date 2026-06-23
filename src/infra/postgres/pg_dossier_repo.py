@@ -66,3 +66,17 @@ class PgDossierRepository(DossierRepository):
             select(DossierModel).where(DossierModel.created_by == user_id)
         )
         return [self._to_domain(r) for r in result.scalars().all()]
+
+    async def set_investigation(self, dossier_id: str, investigation_id: str | None) -> None:
+        await self._session.execute(
+            DossierModel.__table__.update()
+            .where(DossierModel.id == dossier_id)
+            .values(investigation_id=investigation_id)
+        )
+        await self._session.commit()
+
+    async def list_by_investigation(self, investigation_id: str) -> list[Dossier]:
+        result = await self._session.execute(
+            select(DossierModel).where(DossierModel.investigation_id == investigation_id)
+        )
+        return [self._to_domain(r) for r in result.scalars().all()]

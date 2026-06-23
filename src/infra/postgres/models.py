@@ -116,6 +116,11 @@ class ReportModel(Base):
     dossier_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("dossiers.id", ondelete="SET NULL"), nullable=True
     )
+    # A loose article can be linked straight to an investigation (M4), without
+    # going through a dossier. SET NULL so deleting the investigation orphans it.
+    investigation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("investigations.id", ondelete="SET NULL"), nullable=True
+    )
     created_by: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
     )

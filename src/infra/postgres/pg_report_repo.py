@@ -38,6 +38,7 @@ class PgReportRepository(ReportRepository):
             visibility=row.visibility,
             parent_id=row.parent_id,
             dossier_id=row.dossier_id,
+            investigation_id=row.investigation_id,
             created_by=row.created_by,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -76,6 +77,7 @@ class PgReportRepository(ReportRepository):
             visibility=report.visibility,
             parent_id=report.parent_id,
             dossier_id=report.dossier_id,
+            investigation_id=report.investigation_id,
             created_by=report.created_by,
             created_at=report.created_at or now,
             updated_at=report.updated_at or now,
@@ -344,6 +346,20 @@ class PgReportRepository(ReportRepository):
     async def list_by_dossier(self, dossier_id: str) -> list[Report]:
         result = await self._session.execute(
             select(ReportModel).where(ReportModel.dossier_id == dossier_id)
+        )
+        return [self._report_to_domain(r) for r in result.scalars().all()]
+
+    async def set_investigation(self, report_id: str, investigation_id: str | None) -> None:
+        await self._session.execute(
+            ReportModel.__table__.update()
+            .where(ReportModel.id == report_id)
+            .values(investigation_id=investigation_id)
+        )
+        await self._session.commit()
+
+    async def list_by_investigation(self, investigation_id: str) -> list[Report]:
+        result = await self._session.execute(
+            select(ReportModel).where(ReportModel.investigation_id == investigation_id)
         )
         return [self._report_to_domain(r) for r in result.scalars().all()]
 

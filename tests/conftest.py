@@ -103,8 +103,9 @@ def services():
     perm_svc = PermissionService(permission_repo, user_repo, group_repo)
     group_svc = GroupService(group_repo, user_repo, authz_svc)
     investigation_repo = InMemoryInvestigationRepository()
-    investigation_svc = InvestigationService(investigation_repo, user_repo, authz_svc)
     dossier_repo = InMemoryDossierRepository()
+    investigation_svc = InvestigationService(
+        investigation_repo, user_repo, authz_svc, report_repo, dossier_repo)
     dossier_svc = DossierService(dossier_repo, report_repo, authz_svc)
     report_svc = ReportService(report_repo, perm_svc, authz_svc)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc)

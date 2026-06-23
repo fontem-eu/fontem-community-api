@@ -9,7 +9,9 @@ the pure policy can't see), each with its own test.
 from __future__ import annotations
 
 from src.domain.investigation import Investigation, InvestigationMember
+from src.repositories.dossier_repository import DossierRepository
 from src.repositories.investigation_repository import InvestigationRepository
+from src.repositories.report_repository import ReportRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
@@ -21,15 +23,32 @@ class InvestigationService:
         investigations: InvestigationRepository,
         users: UserRepository,
         authz: AuthorizationService,
+        reports: ReportRepository,
+        dossiers: DossierRepository,
     ) -> None:
         self._inv = investigations
         self._users = users
         self._authz = authz
+        self._reports = reports
+        self._dossiers = dossiers
 
     async def _load(self, investigation_id: str) -> Investigation:
         inv = await self._inv.get_by_id(investigation_id)
         if inv is None:
             raise NotFound(f"Investigation {investigation_id} not found")
+        return inv
+
+    async def _require(
+        self, user_id: str, investigation_id: str, action: Action,
+    ) -> Investigation:
+        """Load the investigation and authorize ``action`` for ``user_id``
+        against it (membership-aware)."""
+        inv = await self._load(investigation_id)
+        membership = await self._inv.get_member(investigation_id, user_id)
+        principal = await self._authz.principal(user_id)
+        await self._authz.require(
+            principal, action, ResourceRef.for_investigation(inv, membership),
+        )
         return inv
 
     # ── investigation CRUD ──
@@ -100,10 +119,44 @@ class InvestigationService:
             principal, Action.INVESTIGATIONS_DELETE,
             ResourceRef.for_investigation(inv, membership),
         )
-        # `content` (cascade|orphan) governs associated articles/dossiers/viz,
-        # which don't exist until M4; both paths currently just remove the
-        # investigation (+ members via FK cascade). Wired fully in M4.
+        # `content` governs the articles + dossiers this investigation aggregates.
+        # (Server-side viz arrive in M5 — nothing to clean up here yet.)
+        articles = await self._reports.list_by_investigation(investigation_id)
+        dossiers = await self._dossiers.list_by_investigation(investigation_id)
+        if content == "cascade":
+            # Delete contained dossiers along with their articles, then the
+            # loose articles linked straight to the investigation.
+            for d in dossiers:
+                for art in await self._reports.list_by_dossier(d.id):  # type: ignore[arg-type]
+                    await self._reports.delete(art.id)  # type: ignore[arg-type]
+                await self._dossiers.delete(d.id)  # type: ignore[arg-type]
+            for art in articles:
+                await self._reports.delete(art.id)  # type: ignore[arg-type]
+        else:  # orphan — detach, keep the content
+            for art in articles:
+                await self._reports.set_investigation(art.id, None)  # type: ignore[arg-type]
+            for d in dossiers:
+                await self._dossiers.set_investigation(d.id, None)  # type: ignore[arg-type]
         await self._inv.delete(investigation_id)
+
+    # ── articles (stories) ──
+    async def add_story(self, user_id: str, investigation_id: str, report_id: str) -> None:
+        """Link an article to the investigation. Gated by `can_write_stories`."""
+        await self._require(user_id, investigation_id, Action.INVESTIGATIONS_ADD_STORY)
+        report = await self._reports.get_by_id(report_id)
+        if report is None:
+            raise NotFound(f"Article {report_id} not found")
+        await self._reports.set_investigation(report_id, investigation_id)
+
+    async def remove_story(self, user_id: str, investigation_id: str, report_id: str) -> None:
+        """Detach an article from the investigation (the article survives)."""
+        await self._require(user_id, investigation_id, Action.INVESTIGATIONS_REMOVE_STORY)
+        await self._reports.set_investigation(report_id, None)
+
+    async def list_stories(self, user_id: str, investigation_id: str) -> list[dict]:
+        await self._require(user_id, investigation_id, Action.INVESTIGATIONS_READ)
+        articles = await self._reports.list_by_investigation(investigation_id)
+        return [{"id": a.id, "title": a.title} for a in articles]
 
     # ── membership ──
     async def list_members(

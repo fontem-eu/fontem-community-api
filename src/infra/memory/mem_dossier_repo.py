@@ -33,3 +33,12 @@ class InMemoryDossierRepository(DossierRepository):
 
     async def list_for_user(self, user_id: str) -> list[Dossier]:
         return [deepcopy(d) for d in self._d.values() if d.created_by == user_id]
+
+    async def set_investigation(self, dossier_id: str, investigation_id: str | None) -> None:
+        d = self._d.get(dossier_id)
+        if d is not None:
+            d.investigation_id = investigation_id
+
+    async def list_by_investigation(self, investigation_id: str) -> list[Dossier]:
+        return [deepcopy(d) for d in self._d.values()
+                if d.investigation_id == investigation_id]

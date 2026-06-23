@@ -174,6 +174,17 @@ class InMemoryReportRepository(ReportRepository):
         results.sort(key=lambda r: r.created_at or datetime.min)
         return results
 
+    async def set_investigation(self, report_id: str, investigation_id: str | None) -> None:
+        r = self._reports.get(report_id)
+        if r is not None:
+            r.investigation_id = investigation_id
+
+    async def list_by_investigation(self, investigation_id: str) -> list[Report]:
+        results = [deepcopy(r) for r in self._reports.values()
+                   if r.investigation_id == investigation_id]
+        results.sort(key=lambda r: r.created_at or datetime.min)
+        return results
+
     async def list_children(self, parent_id: str) -> list[Report]:
         results = [deepcopy(r) for r in self._reports.values() if r.parent_id == parent_id]
         results.sort(key=lambda r: r.created_at or datetime.min)

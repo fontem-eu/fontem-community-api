@@ -20,3 +20,9 @@ class DossierRepository(ABC):
 
     @abstractmethod
     async def list_for_user(self, user_id: str) -> list[Dossier]: ...
+
+    @abstractmethod
+    async def set_investigation(self, dossier_id: str, investigation_id: str | None) -> None: ...
+
+    @abstractmethod
+    async def list_by_investigation(self, investigation_id: str) -> list[Dossier]: ...

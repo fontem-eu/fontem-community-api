@@ -241,13 +241,18 @@ class ServiceProvider(Provider):
         return AuthorizationService(users=users, audit=AuditLogger(audit_repo))
 
     @provide(scope=Scope.REQUEST)
-    def investigation_service(
+    def investigation_service(  # pylint: disable=too-many-positional-arguments
         self,
         investigations: InvestigationRepository,
         users: UserRepository,
         authz: AuthorizationService,
+        reports: ReportRepository,
+        dossiers: DossierRepository,
     ) -> InvestigationService:
-        return InvestigationService(investigations=investigations, users=users, authz=authz)
+        return InvestigationService(
+            investigations=investigations, users=users, authz=authz,
+            reports=reports, dossiers=dossiers,
+        )
 
     @provide(scope=Scope.REQUEST)
     def dossier_service(

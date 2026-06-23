@@ -89,3 +89,9 @@ class ReportRepository(ABC):
 
     @abstractmethod
     async def list_by_dossier(self, dossier_id: str) -> list[Report]: ...
+
+    @abstractmethod
+    async def set_investigation(self, report_id: str, investigation_id: str | None) -> None: ...
+
+    @abstractmethod
+    async def list_by_investigation(self, investigation_id: str) -> list[Report]: ...

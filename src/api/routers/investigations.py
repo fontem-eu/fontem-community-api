@@ -55,6 +55,10 @@ class UpdateMemberRequest(BaseModel):
     is_owner: bool = False
 
 
+class AddStoryRequest(BaseModel):
+    report_id: str
+
+
 def _with_membership(inv: dict, member) -> dict:
     return {**inv, "membership": asdict(member) if member is not None else None}
 
@@ -194,3 +198,39 @@ async def remove_member(
     user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await svc.remove_member(user.id, investigation_id, uid)
+
+
+@router.get("/{investigation_id}/stories")
+@inject
+async def list_stories(
+    investigation_id: UuidPath,
+    *,
+    svc: FromDishka[InvestigationService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    return await svc.list_stories(user.id, investigation_id)
+
+
+@router.post("/{investigation_id}/stories", status_code=201)
+@inject
+async def add_story(
+    investigation_id: UuidPath,
+    body: AddStoryRequest,
+    *,
+    svc: FromDishka[InvestigationService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    await svc.add_story(user.id, investigation_id, body.report_id)
+    return {"status": "ok"}
+
+
+@router.delete("/{investigation_id}/stories/{report_id}", status_code=204)
+@inject
+async def remove_story(
+    investigation_id: UuidPath,
+    report_id: UuidPath,
+    *,
+    svc: FromDishka[InvestigationService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    await svc.remove_story(user.id, investigation_id, report_id)
