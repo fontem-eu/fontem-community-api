@@ -113,6 +113,11 @@ class ResourceRef:
     owner_id: str | None = None
     visibility: str | None = None  # 'private' | 'public_open' | 'public_auth' | None
     effective_grant: str | None = None  # 'viewer' | 'commenter' | 'editor' | 'owner' | None
+    # Investigation membership snapshot (for investigations:* actions):
+    # whether the caller is a member, their capability flags, owner tier.
+    is_member: bool = False
+    member_caps: frozenset[str] = field(default_factory=frozenset)
+    member_is_owner: bool = False
 
     @classmethod
     def for_group(cls, group) -> "ResourceRef":
@@ -139,6 +144,30 @@ class ResourceRef:
             kind="issue",
             id=issue.id,
             owner_id=getattr(issue, "created_by", None),
+        )
+
+    @classmethod
+    def for_investigation(cls, investigation, membership=None) -> "ResourceRef":
+        """Snapshot an investigation + the caller's membership. ``membership``
+        is the caller's InvestigationMember (or None if not a member); its
+        boolean flags become the ``member_caps`` set the policy reasons over."""
+        caps: set[str] = set()
+        is_owner = False
+        if membership is not None:
+            if getattr(membership, "can_write_stories", False):
+                caps.add("write_stories")
+            if getattr(membership, "can_add_viz", False):
+                caps.add("add_viz")
+            if getattr(membership, "can_administer", False):
+                caps.add("administer")
+            is_owner = getattr(membership, "is_owner", False)
+        return cls(
+            kind="investigation",
+            id=investigation.id,
+            owner_id=getattr(investigation, "created_by", None),
+            is_member=membership is not None,
+            member_caps=frozenset(caps),
+            member_is_owner=is_owner,
         )
 
 
@@ -204,6 +233,14 @@ _VERIFIED_REQUIRED: frozenset[str] = frozenset({
     Action.FLAGS_CREATE,
     Action.TAGS_FOLLOW,
     Action.FLOWERS_GIVE,
+    Action.INVESTIGATIONS_CREATE,
+    Action.INVESTIGATIONS_EDIT_META,
+    Action.INVESTIGATIONS_DELETE,
+    Action.INVESTIGATIONS_MANAGE_MEMBERS,
+    Action.INVESTIGATIONS_ADD_STORY,
+    Action.INVESTIGATIONS_REMOVE_STORY,
+    Action.INVESTIGATIONS_ADD_VIZ,
+    Action.INVESTIGATIONS_REMOVE_VIZ,
 })
 
 
@@ -373,6 +410,48 @@ def _issues_comment(p: Principal, _r: ResourceRef | None) -> Decision:
     return Decision.deny("trust_level<commenter")
 
 
+# ── Investigation checks ─────────────────────────────────────
+
+
+def _inv_read(p: Principal, r: ResourceRef | None) -> Decision:
+    """Investigations are member-only: any member (or the creator / admin)
+    can read; everyone else is denied."""
+    if r is None:
+        return Decision.deny("investigation read requires a resource")
+    if _is_admin(p):
+        return Decision.allow(_ADMIN_OVERRIDE_REASON)
+    if r.member_is_owner or r.owner_id == p.user_id:
+        return Decision.allow("owner")
+    if r.is_member:
+        return Decision.allow("member")
+    return Decision.deny(f"not a member of investigation {r.id}")
+
+
+def _inv_cap_factory(cap: str) -> Callable[[Principal, ResourceRef | None], Decision]:
+    """Allow iff admin, an owner (owners hold every capability), the founding
+    creator, or the caller's membership carries ``cap``."""
+    def _check(p: Principal, r: ResourceRef | None) -> Decision:
+        if r is None:
+            return Decision.deny("investigation action requires a resource")
+        if _is_admin(p):
+            return Decision.allow(_ADMIN_OVERRIDE_REASON)
+        if r.member_is_owner or r.owner_id == p.user_id:
+            return Decision.allow("owner")
+        if cap in r.member_caps:
+            return Decision.allow(f"cap:{cap}")
+        return Decision.deny(f"missing investigation capability '{cap}'")
+    return _check
+
+
+def _inv_owner(p: Principal, r: ResourceRef | None) -> Decision:
+    """Owner-only investigation actions (delete)."""
+    if r is None:
+        return Decision.deny("investigation action requires a resource")
+    if _is_admin(p):
+        return Decision.allow(_ADMIN_OVERRIDE_REASON)
+    if r.member_is_owner or r.owner_id == p.user_id:
+        return Decision.allow("owner")
+    return Decision.deny(f"not an owner of investigation {r.id}")
 # ── Registry ─────────────────────────────────────────────────
 
 
@@ -401,6 +480,18 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     Action.GROUPS_READ_MEMBERS: _owner_only,  # only owner sees the list
     Action.GROUPS_MANAGE_MEMBERS: _owner_only,
     Action.GROUPS_DELETE: _owner_only,
+
+    # Investigations — READ is member-only; cap-gated verbs map to the
+    # membership capability flags; DELETE is owner-only.
+    Action.INVESTIGATIONS_CREATE: _trust_at_least_factory("new_user"),
+    Action.INVESTIGATIONS_READ: _inv_read,
+    Action.INVESTIGATIONS_EDIT_META: _inv_cap_factory("administer"),
+    Action.INVESTIGATIONS_MANAGE_MEMBERS: _inv_cap_factory("administer"),
+    Action.INVESTIGATIONS_ADD_STORY: _inv_cap_factory("write_stories"),
+    Action.INVESTIGATIONS_REMOVE_STORY: _inv_cap_factory("write_stories"),
+    Action.INVESTIGATIONS_ADD_VIZ: _inv_cap_factory("add_viz"),
+    Action.INVESTIGATIONS_REMOVE_VIZ: _inv_cap_factory("add_viz"),
+    Action.INVESTIGATIONS_DELETE: _inv_owner,
 
     # Issues
     Action.ISSUES_CREATE: _trust_at_least_factory("contributor"),

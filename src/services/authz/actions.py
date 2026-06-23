@@ -45,6 +45,21 @@ class Action(StrEnum):
     GROUPS_MANAGE_MEMBERS = "groups:manage_members"
     GROUPS_DELETE = "groups:delete"
 
+    # ── Investigations ────────────────────────────────────────
+    # Aggregating workspace. READ is member-only; the cap-gated verbs
+    # map to the investigation_members capability flags; DELETE is
+    # owner-only. Owner invariants (>=1 owner, can't touch another
+    # owner) are enforced in the service, not the policy.
+    INVESTIGATIONS_CREATE = "investigations:create"
+    INVESTIGATIONS_READ = "investigations:read"
+    INVESTIGATIONS_EDIT_META = "investigations:edit_meta"
+    INVESTIGATIONS_DELETE = "investigations:delete"
+    INVESTIGATIONS_MANAGE_MEMBERS = "investigations:manage_members"
+    INVESTIGATIONS_ADD_STORY = "investigations:add_story"
+    INVESTIGATIONS_REMOVE_STORY = "investigations:remove_story"
+    INVESTIGATIONS_ADD_VIZ = "investigations:add_viz"
+    INVESTIGATIONS_REMOVE_VIZ = "investigations:remove_viz"
+
     # ── Issues + comments ─────────────────────────────────────
     ISSUES_CREATE = "issues:create"
     ISSUES_READ = "issues:read"

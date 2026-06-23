@@ -521,3 +521,57 @@ class AuthTokenModel(Base):
         Index("ix_auth_tokens_user_id_purpose", "user_id", "purpose"),
     )
 
+
+
+# ── Investigations ───────────────────────────────────────────
+# Aggregating workspace (M1). Ships via create_all (no alembic in this
+# repo's prod path — same as the other models here). Membership is
+# capability flags, not a linear role; created_by is the founding owner.
+
+class InvestigationModel(Base):
+    __tablename__ = "investigations"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # SET NULL (not CASCADE) so deleting a user doesn't wipe investigations
+    # they founded — mirrors GroupModel.created_by.
+    created_by: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    members: Mapped[list[InvestigationMemberModel]] = relationship(
+        "InvestigationMemberModel",
+        back_populates="investigation",
+        cascade="all, delete-orphan",
+    )
+
+
+class InvestigationMemberModel(Base):
+    __tablename__ = "investigation_members"
+    __table_args__ = (PrimaryKeyConstraint("investigation_id", "user_id"),)
+
+    investigation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    can_write_stories: Mapped[bool] = mapped_column(nullable=False, default=False)
+    can_add_viz: Mapped[bool] = mapped_column(nullable=False, default=False)
+    can_administer: Mapped[bool] = mapped_column(nullable=False, default=False)
+    is_owner: Mapped[bool] = mapped_column(nullable=False, default=False)
+
+    investigation: Mapped[InvestigationModel] = relationship(
+        "InvestigationModel", back_populates="members"
+    )
