@@ -47,6 +47,7 @@ class TestInvestigationsAPI:
         assert add.status_code == 201
         members = client.get(f"/investigations/{inv['id']}/members", headers=h).json()
         assert len(members) == 2
+        assert any(m.get("email") for m in members)  # enriched with user email
         rm = client.delete(f"/investigations/{inv['id']}/members/{u2}", headers=h)
         assert rm.status_code == 204
         assert len(client.get(f"/investigations/{inv['id']}/members", headers=h).json()) == 1

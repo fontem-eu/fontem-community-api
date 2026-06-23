@@ -133,3 +133,25 @@ async def test_delete_requires_owner(services):
     await svc.delete(u1, inv.id)  # owner can
     with pytest.raises(NotFound):
         await svc.get(u1, inv.id)
+
+
+@pytest.mark.asyncio
+async def test_invite_member_by_email(services):
+    await seed_user(services["user_repo"], "u1")
+    await seed_user(services["user_repo"], "u2")  # email seeded as u2@test.com
+    svc = services["investigation_svc"]
+    u1 = _stable_uuid("u1")
+    inv = await svc.create(u1, "I")
+    await svc.set_member(u1, inv.id, target_email="u2@test.com", can_write_stories=True)
+    member = await svc.my_membership(_stable_uuid("u2"), inv.id)
+    assert member is not None and member.can_write_stories
+
+
+@pytest.mark.asyncio
+async def test_invite_unknown_email_404(services):
+    await seed_user(services["user_repo"], "u1")
+    svc = services["investigation_svc"]
+    u1 = _stable_uuid("u1")
+    inv = await svc.create(u1, "I")
+    with pytest.raises(NotFound):
+        await svc.set_member(u1, inv.id, target_email="nobody@x.io")

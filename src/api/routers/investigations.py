@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
+from src.repositories.user_repository import UserRepository
 from src.services.investigation_service import InvestigationService
 
 router = APIRouter(
@@ -37,7 +38,10 @@ class UpdateInvestigationRequest(BaseModel):
 
 
 class AddMemberRequest(BaseModel):
-    user_id: str
+    # Identify the invitee by id OR email (email resolved server-side,
+    # mirroring the report ShareModal's invite-by-email UX).
+    user_id: str | None = None
+    email: str | None = None
     can_write_stories: bool = False
     can_add_viz: bool = False
     can_administer: bool = False
@@ -127,10 +131,22 @@ async def list_members(
     investigation_id: UuidPath,
     *,
     svc: FromDishka[InvestigationService],
+    users: FromDishka[UserRepository],
     user: Annotated[User, Depends(get_current_user)],
 ) -> list[dict]:
+    """Members + their capability flags, enriched with email/name so the UI
+    can render a real member list (the membership row itself only stores
+    user_ids)."""
     members = await svc.list_members(user.id, investigation_id)
-    return [asdict(m) for m in members]
+    out: list[dict] = []
+    for m in members:
+        u = await users.get_by_id(m.user_id)
+        out.append({
+            **asdict(m),
+            "email": u.email if u is not None else None,
+            "name": u.name if u is not None else None,
+        })
+    return out
 
 
 @router.post("/{investigation_id}/members", status_code=201)
@@ -143,7 +159,7 @@ async def add_member(
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     await svc.set_member(
-        user.id, investigation_id, body.user_id,
+        user.id, investigation_id, body.user_id, target_email=body.email,
         can_write_stories=body.can_write_stories, can_add_viz=body.can_add_viz,
         can_administer=body.can_administer, is_owner=body.is_owner,
     )

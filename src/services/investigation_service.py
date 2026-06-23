@@ -119,12 +119,13 @@ class InvestigationService:
         return await self._inv.list_members(investigation_id)
 
     async def set_member(  # pylint: disable=too-many-arguments
-        self, user_id: str, investigation_id: str, target_user_id: str, *,
+        self, user_id: str, investigation_id: str,
+        target_user_id: str | None = None, *, target_email: str | None = None,
         can_write_stories: bool = False, can_add_viz: bool = False,
         can_administer: bool = False, is_owner: bool = False,
     ) -> None:
-        """Add or update a member with the given capabilities, enforcing the
-        owner invariants."""
+        """Add or update a member (identified by id or email) with the given
+        capabilities, enforcing the owner invariants."""
         inv = await self._load(investigation_id)
         actor = await self._inv.get_member(investigation_id, user_id)
         principal = await self._authz.principal(user_id)
@@ -133,9 +134,15 @@ class InvestigationService:
             ResourceRef.for_investigation(inv, actor),
         )
         is_platform_admin = principal is not None and "admin" in principal.roles
-        target = await self._users.get_by_id(target_user_id)
+        if target_user_id:
+            target = await self._users.get_by_id(target_user_id)
+        elif target_email:
+            target = await self._users.get_by_email(target_email.strip().lower())
+        else:
+            raise InvalidInput("must supply target user_id or email")
         if target is None:
-            raise NotFound(f"User {target_user_id} not found")
+            raise NotFound("Target user not found")
+        target_user_id = target.id
         current = await self._inv.get_member(investigation_id, target_user_id)
         actor_is_owner = (
             is_platform_admin
