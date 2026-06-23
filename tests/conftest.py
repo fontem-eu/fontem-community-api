@@ -26,6 +26,7 @@ from src.api.rate_limit import limiter
 from src.domain.user import User
 from src.infra.memory.mem_group_repo import InMemoryGroupRepository
 from src.infra.memory.mem_investigation_repo import InMemoryInvestigationRepository
+from src.infra.memory.mem_dossier_repo import InMemoryDossierRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
 from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
 from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
@@ -43,6 +44,7 @@ from src.services.authz import AuthorizationService
 from src.services.authz.audit import AuditLogger
 from src.services.group_service import GroupService
 from src.services.investigation_service import InvestigationService
+from src.services.dossier_service import DossierService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
@@ -102,6 +104,8 @@ def services():
     group_svc = GroupService(group_repo, user_repo, authz_svc)
     investigation_repo = InMemoryInvestigationRepository()
     investigation_svc = InvestigationService(investigation_repo, user_repo, authz_svc)
+    dossier_repo = InMemoryDossierRepository()
+    dossier_svc = DossierService(dossier_repo, report_repo, authz_svc)
     report_svc = ReportService(report_repo, perm_svc, authz_svc)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc)
     mod_svc = ModerationService(mod_repo, user_repo, authz_svc)
@@ -118,6 +122,8 @@ def services():
         "group_repo": group_repo,
         "investigation_repo": investigation_repo,
         "investigation_svc": investigation_svc,
+        "dossier_repo": dossier_repo,
+        "dossier_svc": dossier_svc,
         "report_repo": report_repo,
         "permission_repo": permission_repo,
         "issue_repo": issue_repo,

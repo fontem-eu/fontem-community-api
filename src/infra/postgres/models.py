@@ -113,6 +113,9 @@ class ReportModel(Base):
     abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
     visibility: Mapped[str] = mapped_column(Text, nullable=False, default="private")
     parent_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    dossier_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("dossiers.id", ondelete="SET NULL"), nullable=True
+    )
     created_by: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
     )
@@ -574,4 +577,27 @@ class InvestigationMemberModel(Base):
 
     investigation: Mapped[InvestigationModel] = relationship(
         "InvestigationModel", back_populates="members"
+    )
+
+
+# ── Dossiers ─────────────────────────────────────────────────
+# Thin tree-of-articles structuring construct (M3). Articles point at a
+# dossier via reports.dossier_id and arrange into a tree via reports.parent_id.
+# Ships via create_all (this repo's prod path).
+
+class DossierModel(Base):
+    __tablename__ = "dossiers"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    investigation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("investigations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_by: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
     )

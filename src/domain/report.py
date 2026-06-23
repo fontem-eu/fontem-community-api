@@ -11,7 +11,8 @@ class Report:  # pylint: disable=too-many-instance-attributes
     title: str = ""
     abstract: str | None = None
     visibility: str = "private"  # private, group, public_auth, public_open
-    parent_id: str | None = None  # for dossier tree structure (None = root)
+    parent_id: str | None = None  # tree position within a dossier (None = root)
+    dossier_id: str | None = None  # which dossier this article belongs to
     created_by: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None

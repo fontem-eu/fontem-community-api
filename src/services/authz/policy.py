@@ -170,6 +170,14 @@ class ResourceRef:
             member_is_owner=is_owner,
         )
 
+    @classmethod
+    def for_dossier(cls, dossier) -> "ResourceRef":
+        return cls(
+            kind="dossier",
+            id=dossier.id,
+            owner_id=getattr(dossier, "created_by", None),
+        )
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -241,6 +249,11 @@ _VERIFIED_REQUIRED: frozenset[str] = frozenset({
     Action.INVESTIGATIONS_REMOVE_STORY,
     Action.INVESTIGATIONS_ADD_VIZ,
     Action.INVESTIGATIONS_REMOVE_VIZ,
+    Action.DOSSIERS_CREATE,
+    Action.DOSSIERS_EDIT,
+    Action.DOSSIERS_DELETE,
+    Action.DOSSIERS_ADD_ARTICLE,
+    Action.DOSSIERS_REMOVE_ARTICLE,
 })
 
 
@@ -492,6 +505,14 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     Action.INVESTIGATIONS_ADD_VIZ: _inv_cap_factory("add_viz"),
     Action.INVESTIGATIONS_REMOVE_VIZ: _inv_cap_factory("add_viz"),
     Action.INVESTIGATIONS_DELETE: _inv_owner,
+
+    # Dossiers — owner-gated (creator); create gated by trust.
+    Action.DOSSIERS_CREATE: _trust_at_least_factory("new_user"),
+    Action.DOSSIERS_READ: _owner_only,
+    Action.DOSSIERS_EDIT: _owner_only,
+    Action.DOSSIERS_DELETE: _owner_only,
+    Action.DOSSIERS_ADD_ARTICLE: _owner_only,
+    Action.DOSSIERS_REMOVE_ARTICLE: _owner_only,
 
     # Issues
     Action.ISSUES_CREATE: _trust_at_least_factory("contributor"),

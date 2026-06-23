@@ -161,6 +161,19 @@ class InMemoryReportRepository(ReportRepository):
         sorted_v = sorted(versions, key=lambda v: v.saved_at or datetime.min, reverse=True)
         return [deepcopy(v) for v in sorted_v[:limit]]
 
+    async def set_dossier(
+        self, report_id: str, dossier_id: str | None, parent_id: str | None,
+    ) -> None:
+        r = self._reports.get(report_id)
+        if r is not None:
+            r.dossier_id = dossier_id
+            r.parent_id = parent_id
+
+    async def list_by_dossier(self, dossier_id: str) -> list[Report]:
+        results = [deepcopy(r) for r in self._reports.values() if r.dossier_id == dossier_id]
+        results.sort(key=lambda r: r.created_at or datetime.min)
+        return results
+
     async def list_children(self, parent_id: str) -> list[Report]:
         results = [deepcopy(r) for r in self._reports.values() if r.parent_id == parent_id]
         results.sort(key=lambda r: r.created_at or datetime.min)

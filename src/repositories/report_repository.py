@@ -81,3 +81,11 @@ class ReportRepository(ABC):
 
     @abstractmethod
     async def list_children(self, parent_id: str) -> list[Report]: ...
+
+    @abstractmethod
+    async def set_dossier(
+        self, report_id: str, dossier_id: str | None, parent_id: str | None,
+    ) -> None: ...
+
+    @abstractmethod
+    async def list_by_dossier(self, dossier_id: str) -> list[Report]: ...

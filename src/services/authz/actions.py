@@ -60,6 +60,17 @@ class Action(StrEnum):
     INVESTIGATIONS_ADD_VIZ = "investigations:add_viz"
     INVESTIGATIONS_REMOVE_VIZ = "investigations:remove_viz"
 
+    # ── Dossiers ──────────────────────────────────────────────
+    # Thin tree-of-articles. Owned by the creator; all mutations are
+    # owner-gated (M3 = personal dossiers). Adding/removing an article
+    # structures it — the article keeps its own report_access permissions.
+    DOSSIERS_CREATE = "dossiers:create"
+    DOSSIERS_READ = "dossiers:read"
+    DOSSIERS_EDIT = "dossiers:edit"
+    DOSSIERS_DELETE = "dossiers:delete"
+    DOSSIERS_ADD_ARTICLE = "dossiers:add_article"
+    DOSSIERS_REMOVE_ARTICLE = "dossiers:remove_article"
+
     # ── Issues + comments ─────────────────────────────────────
     ISSUES_CREATE = "issues:create"
     ISSUES_READ = "issues:read"

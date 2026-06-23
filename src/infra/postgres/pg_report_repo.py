@@ -37,6 +37,7 @@ class PgReportRepository(ReportRepository):
             abstract=row.abstract,
             visibility=row.visibility,
             parent_id=row.parent_id,
+            dossier_id=row.dossier_id,
             created_by=row.created_by,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -74,6 +75,7 @@ class PgReportRepository(ReportRepository):
             abstract=report.abstract,
             visibility=report.visibility,
             parent_id=report.parent_id,
+            dossier_id=report.dossier_id,
             created_by=report.created_by,
             created_at=report.created_at or now,
             updated_at=report.updated_at or now,
@@ -328,6 +330,22 @@ class PgReportRepository(ReportRepository):
             .limit(limit)
         )
         return [self._version_to_domain(r) for r in result.scalars().all()]
+
+    async def set_dossier(
+        self, report_id: str, dossier_id: str | None, parent_id: str | None,
+    ) -> None:
+        await self._session.execute(
+            ReportModel.__table__.update()
+            .where(ReportModel.id == report_id)
+            .values(dossier_id=dossier_id, parent_id=parent_id)
+        )
+        await self._session.commit()
+
+    async def list_by_dossier(self, dossier_id: str) -> list[Report]:
+        result = await self._session.execute(
+            select(ReportModel).where(ReportModel.dossier_id == dossier_id)
+        )
+        return [self._report_to_domain(r) for r in result.scalars().all()]
 
     async def list_children(self, parent_id: str) -> list[Report]:
         result = await self._session.execute(

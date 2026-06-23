@@ -19,6 +19,7 @@ from src.assistant.service import AssistantService
 from src.assistant.context import TurnLimits
 from src.repositories.group_repository import GroupRepository
 from src.repositories.investigation_repository import InvestigationRepository
+from src.repositories.dossier_repository import DossierRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
@@ -35,6 +36,7 @@ from src.services.permission_service import PermissionService
 from src.services.authz import AuthorizationService
 from src.services.group_service import GroupService
 from src.services.investigation_service import InvestigationService
+from src.services.dossier_service import DossierService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
@@ -126,6 +128,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def investigation_service(self) -> InvestigationService:
         return self._svc["investigation_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def dossier_repo(self) -> DossierRepository:
+        return self._svc["dossier_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def dossier_service(self) -> DossierService:
+        return self._svc["dossier_svc"]
 
     @provide(scope=Scope.REQUEST)
     def report_service(self) -> ReportService:
