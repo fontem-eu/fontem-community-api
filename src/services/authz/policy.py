@@ -178,6 +178,14 @@ class ResourceRef:
             owner_id=getattr(dossier, "created_by", None),
         )
 
+    @classmethod
+    def for_visualization(cls, viz) -> "ResourceRef":
+        return cls(
+            kind="visualization",
+            id=viz.id,
+            owner_id=getattr(viz, "created_by", None),
+        )
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -254,6 +262,9 @@ _VERIFIED_REQUIRED: frozenset[str] = frozenset({
     Action.DOSSIERS_DELETE,
     Action.DOSSIERS_ADD_ARTICLE,
     Action.DOSSIERS_REMOVE_ARTICLE,
+    Action.VISUALIZATIONS_CREATE,
+    Action.VISUALIZATIONS_EDIT,
+    Action.VISUALIZATIONS_DELETE,
 })
 
 
@@ -511,6 +522,12 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     Action.DOSSIERS_READ: _owner_only,
     Action.DOSSIERS_EDIT: _owner_only,
     Action.DOSSIERS_DELETE: _owner_only,
+
+    # Visualizations — owner-gated; create gated by trust.
+    Action.VISUALIZATIONS_CREATE: _trust_at_least_factory("new_user"),
+    Action.VISUALIZATIONS_READ: _owner_only,
+    Action.VISUALIZATIONS_EDIT: _owner_only,
+    Action.VISUALIZATIONS_DELETE: _owner_only,
     Action.DOSSIERS_ADD_ARTICLE: _owner_only,
     Action.DOSSIERS_REMOVE_ARTICLE: _owner_only,
 

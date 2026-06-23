@@ -32,6 +32,7 @@ from src.infra.postgres.pg_authz_audit_repo import PgAuthzAuditRepository
 from src.infra.postgres.pg_group_repo import PgGroupRepository
 from src.infra.postgres.pg_investigation_repo import PgInvestigationRepository
 from src.infra.postgres.pg_dossier_repo import PgDossierRepository
+from src.infra.postgres.pg_visualization_repo import PgVisualizationRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
 from src.infra.postgres.pg_moderation_repo import PgModerationRepository
 from src.infra.postgres.pg_permission_repo import PgPermissionRepository
@@ -44,6 +45,7 @@ from src.infra.postgres.pg_user_repo import PgUserRepository
 from src.repositories.group_repository import GroupRepository
 from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.dossier_repository import DossierRepository
+from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
@@ -57,6 +59,7 @@ from src.services.authz import AuthorizationService
 from src.services.authz.audit import AuditLogger, AuthzAuditRepository
 from src.services.group_service import GroupService
 from src.services.investigation_service import InvestigationService
+from src.services.visualization_service import VisualizationService
 from src.services.dossier_service import DossierService
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
@@ -147,6 +150,10 @@ class RepositoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def dossier_repo(self, session: AsyncSession) -> DossierRepository:
         return PgDossierRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def visualization_repo(self, session: AsyncSession) -> VisualizationRepository:
+        return PgVisualizationRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def report_repo(self, session: AsyncSession) -> ReportRepository:
@@ -241,17 +248,29 @@ class ServiceProvider(Provider):
         return AuthorizationService(users=users, audit=AuditLogger(audit_repo))
 
     @provide(scope=Scope.REQUEST)
-    def investigation_service(  # pylint: disable=too-many-positional-arguments
+    def investigation_service(  # pylint: disable=too-many-positional-arguments,too-many-arguments
         self,
         investigations: InvestigationRepository,
         users: UserRepository,
         authz: AuthorizationService,
         reports: ReportRepository,
         dossiers: DossierRepository,
+        visualizations: VisualizationRepository,
     ) -> InvestigationService:
         return InvestigationService(
             investigations=investigations, users=users, authz=authz,
-            reports=reports, dossiers=dossiers,
+            reports=reports, dossiers=dossiers, visualizations=visualizations,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def visualization_service(
+        self,
+        visualizations: VisualizationRepository,
+        investigations: InvestigationRepository,
+        authz: AuthorizationService,
+    ) -> VisualizationService:
+        return VisualizationService(
+            visualizations=visualizations, investigations=investigations, authz=authz,
         )
 
     @provide(scope=Scope.REQUEST)

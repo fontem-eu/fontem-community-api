@@ -71,6 +71,15 @@ class Action(StrEnum):
     DOSSIERS_ADD_ARTICLE = "dossiers:add_article"
     DOSSIERS_REMOVE_ARTICLE = "dossiers:remove_article"
 
+    # ── Visualizations ────────────────────────────────────────
+    # Server-side saved viz (the pocket's successor). Owned by the creator;
+    # attaching/detaching to an investigation reuses INVESTIGATIONS_ADD_VIZ /
+    # REMOVE_VIZ (the can_add_viz capability).
+    VISUALIZATIONS_CREATE = "visualizations:create"
+    VISUALIZATIONS_READ = "visualizations:read"
+    VISUALIZATIONS_EDIT = "visualizations:edit"
+    VISUALIZATIONS_DELETE = "visualizations:delete"
+
     # ── Issues + comments ─────────────────────────────────────
     ISSUES_CREATE = "issues:create"
     ISSUES_READ = "issues:read"

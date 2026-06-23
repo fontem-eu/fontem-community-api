@@ -27,6 +27,7 @@ from src.domain.user import User
 from src.infra.memory.mem_group_repo import InMemoryGroupRepository
 from src.infra.memory.mem_investigation_repo import InMemoryInvestigationRepository
 from src.infra.memory.mem_dossier_repo import InMemoryDossierRepository
+from src.infra.memory.mem_visualization_repo import InMemoryVisualizationRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
 from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
 from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
@@ -45,6 +46,7 @@ from src.services.authz.audit import AuditLogger
 from src.services.group_service import GroupService
 from src.services.investigation_service import InvestigationService
 from src.services.dossier_service import DossierService
+from src.services.visualization_service import VisualizationService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
@@ -104,9 +106,11 @@ def services():
     group_svc = GroupService(group_repo, user_repo, authz_svc)
     investigation_repo = InMemoryInvestigationRepository()
     dossier_repo = InMemoryDossierRepository()
+    visualization_repo = InMemoryVisualizationRepository()
     investigation_svc = InvestigationService(
-        investigation_repo, user_repo, authz_svc, report_repo, dossier_repo)
+        investigation_repo, user_repo, authz_svc, report_repo, dossier_repo, visualization_repo)
     dossier_svc = DossierService(dossier_repo, report_repo, authz_svc)
+    visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc)
     report_svc = ReportService(report_repo, perm_svc, authz_svc)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc)
     mod_svc = ModerationService(mod_repo, user_repo, authz_svc)
@@ -125,6 +129,8 @@ def services():
         "investigation_svc": investigation_svc,
         "dossier_repo": dossier_repo,
         "dossier_svc": dossier_svc,
+        "visualization_repo": visualization_repo,
+        "visualization_svc": visualization_svc,
         "report_repo": report_repo,
         "permission_repo": permission_repo,
         "issue_repo": issue_repo,

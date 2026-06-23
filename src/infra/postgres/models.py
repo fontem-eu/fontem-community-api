@@ -606,3 +606,24 @@ class DossierModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow
     )
+
+
+class VisualizationModel(Base):
+    # Server-side saved visualization (the pocket's successor). `config` is the
+    # client-side widget recipe (JSONB). New table -> create_all provisions it,
+    # so no manual ALTER needed (unlike columns added to existing tables).
+    __tablename__ = "visualizations"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    widget_type: Mapped[str] = mapped_column(Text, nullable=False)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_by: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    investigation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("investigations.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )

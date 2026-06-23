@@ -12,25 +12,28 @@ from src.domain.investigation import Investigation, InvestigationMember
 from src.repositories.dossier_repository import DossierRepository
 from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.report_repository import ReportRepository
+from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
 
 
 class InvestigationService:
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         investigations: InvestigationRepository,
         users: UserRepository,
         authz: AuthorizationService,
         reports: ReportRepository,
         dossiers: DossierRepository,
+        visualizations: VisualizationRepository,
     ) -> None:
         self._inv = investigations
         self._users = users
         self._authz = authz
         self._reports = reports
         self._dossiers = dossiers
+        self._viz = visualizations
 
     async def _load(self, investigation_id: str) -> Investigation:
         inv = await self._inv.get_by_id(investigation_id)
@@ -119,25 +122,34 @@ class InvestigationService:
             principal, Action.INVESTIGATIONS_DELETE,
             ResourceRef.for_investigation(inv, membership),
         )
-        # `content` governs the articles + dossiers this investigation aggregates.
-        # (Server-side viz arrive in M5 — nothing to clean up here yet.)
-        articles = await self._reports.list_by_investigation(investigation_id)
-        dossiers = await self._dossiers.list_by_investigation(investigation_id)
+        # `content` governs the articles + dossiers + viz this investigation
+        # aggregates: cascade removes them, orphan just detaches them.
         if content == "cascade":
-            # Delete contained dossiers along with their articles, then the
-            # loose articles linked straight to the investigation.
-            for d in dossiers:
-                for art in await self._reports.list_by_dossier(d.id):  # type: ignore[arg-type]
-                    await self._reports.delete(art.id)  # type: ignore[arg-type]
-                await self._dossiers.delete(d.id)  # type: ignore[arg-type]
-            for art in articles:
-                await self._reports.delete(art.id)  # type: ignore[arg-type]
-        else:  # orphan — detach, keep the content
-            for art in articles:
-                await self._reports.set_investigation(art.id, None)  # type: ignore[arg-type]
-            for d in dossiers:
-                await self._dossiers.set_investigation(d.id, None)  # type: ignore[arg-type]
+            await self._cascade_content(investigation_id)
+        else:
+            await self._orphan_content(investigation_id)
         await self._inv.delete(investigation_id)
+
+    async def _cascade_content(self, investigation_id: str) -> None:
+        """Delete contained dossiers (with their articles), loose articles, and
+        viz linked to the investigation."""
+        for d in await self._dossiers.list_by_investigation(investigation_id):
+            for art in await self._reports.list_by_dossier(d.id):  # type: ignore[arg-type]
+                await self._reports.delete(art.id)  # type: ignore[arg-type]
+            await self._dossiers.delete(d.id)  # type: ignore[arg-type]
+        for art in await self._reports.list_by_investigation(investigation_id):
+            await self._reports.delete(art.id)  # type: ignore[arg-type]
+        for v in await self._viz.list_by_investigation(investigation_id):
+            await self._viz.delete(v.id)  # type: ignore[arg-type]
+
+    async def _orphan_content(self, investigation_id: str) -> None:
+        """Detach the investigation's articles, dossiers, and viz (kept)."""
+        for art in await self._reports.list_by_investigation(investigation_id):
+            await self._reports.set_investigation(art.id, None)  # type: ignore[arg-type]
+        for d in await self._dossiers.list_by_investigation(investigation_id):
+            await self._dossiers.set_investigation(d.id, None)  # type: ignore[arg-type]
+        for v in await self._viz.list_by_investigation(investigation_id):
+            await self._viz.set_investigation(v.id, None)  # type: ignore[arg-type]
 
     # ── articles (stories) ──
     async def add_story(self, user_id: str, investigation_id: str, report_id: str) -> None:
