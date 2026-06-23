@@ -63,6 +63,7 @@ from src.services.visualization_service import VisualizationService
 from src.services.dossier_service import DossierService
 from src.services.issue_service import IssueService
 from src.services.moderation_service import ModerationService
+from src.services.access_inheritance import AccessInheritance
 from src.services.permission_service import PermissionService
 from src.services.refresh_token_service import RefreshTokenService
 from src.services.mail_service import MailService
@@ -279,8 +280,11 @@ class ServiceProvider(Provider):
         dossiers: DossierRepository,
         reports: ReportRepository,
         authz: AuthorizationService,
+        investigations: InvestigationRepository,
     ) -> DossierService:
-        return DossierService(dossiers=dossiers, reports=reports, authz=authz)
+        return DossierService(
+            dossiers=dossiers, reports=reports, authz=authz, investigations=investigations,
+        )
 
     @provide(scope=Scope.REQUEST)
     def group_service(
@@ -292,13 +296,24 @@ class ServiceProvider(Provider):
         return GroupService(groups=groups, users=users, authz=authz)
 
     @provide(scope=Scope.REQUEST)
+    def access_inheritance(
+        self,
+        investigations: InvestigationRepository,
+        dossiers: DossierRepository,
+    ) -> AccessInheritance:
+        return AccessInheritance(investigations=investigations, dossiers=dossiers)
+
+    @provide(scope=Scope.REQUEST)
     def report_service(
         self,
         reports: ReportRepository,
         perms: PermissionService,
         authz: AuthorizationService,
+        inheritance: AccessInheritance,
     ) -> ReportService:
-        return ReportService(reports=reports, perms=perms, authz=authz)
+        return ReportService(
+            reports=reports, perms=perms, authz=authz, inheritance=inheritance,
+        )
 
     @provide(scope=Scope.REQUEST)
     def issue_service(

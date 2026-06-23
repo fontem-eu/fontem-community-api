@@ -31,8 +31,14 @@ class VisualizationService:
         return v
 
     async def _require_viz(self, user_id: str, viz: Visualization, action: Action) -> None:
+        member_role = None
+        if viz.investigation_id:
+            m = await self._inv.get_member(viz.investigation_id, user_id)
+            member_role = m.role if m is not None else None
         principal = await self._authz.principal(user_id)
-        await self._authz.require(principal, action, ResourceRef.for_visualization(viz))
+        await self._authz.require(
+            principal, action, ResourceRef.for_visualization(viz, member_role=member_role),
+        )
 
     async def _require_inv(self, user_id: str, investigation_id: str, action: Action) -> None:
         inv = await self._inv.get_by_id(investigation_id)

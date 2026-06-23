@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from src.domain.dossier import Dossier
 from src.repositories.dossier_repository import DossierRepository
+from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.report_repository import ReportRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.exceptions import InvalidInput, NotFound
@@ -20,10 +21,12 @@ class DossierService:
         dossiers: DossierRepository,
         reports: ReportRepository,
         authz: AuthorizationService,
+        investigations: InvestigationRepository,
     ) -> None:
         self._dossiers = dossiers
         self._reports = reports
         self._authz = authz
+        self._inv = investigations
 
     async def _load(self, dossier_id: str) -> Dossier:
         d = await self._dossiers.get_by_id(dossier_id)
@@ -32,8 +35,14 @@ class DossierService:
         return d
 
     async def _require(self, user_id: str, dossier: Dossier, action: Action) -> None:
+        member_role = None
+        if dossier.investigation_id:
+            m = await self._inv.get_member(dossier.investigation_id, user_id)
+            member_role = m.role if m is not None else None
         principal = await self._authz.principal(user_id)
-        await self._authz.require(principal, action, ResourceRef.for_dossier(dossier))
+        await self._authz.require(
+            principal, action, ResourceRef.for_dossier(dossier, member_role=member_role),
+        )
 
     async def create(
         self, user_id: str, name: str, investigation_id: str | None = None,

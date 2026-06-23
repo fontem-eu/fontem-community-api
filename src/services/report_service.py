@@ -22,6 +22,7 @@ from src.services.authz import (
 )
 from src.services.authz.policy import Principal
 from src.services.exceptions import Conflict, NotFound
+from src.services.access_inheritance import AccessInheritance, max_level
 from src.services.permission_service import PermissionService
 from src.services.sanitize import sanitize_html, sanitize_text
 
@@ -34,10 +35,12 @@ class ReportService:
         reports: ReportRepository,
         perms: PermissionService,
         authz: AuthorizationService,
+        inheritance: AccessInheritance,
     ) -> None:
         self._reports = reports
         self._perms = perms
         self._authz = authz
+        self._inheritance = inheritance
 
     async def _load_for(
         self, user_id: str | None, report_id: str, action: Action,
@@ -60,6 +63,9 @@ class ReportService:
             raise NotFound(f"Report {report_id} not found")
         principal = await self._authz.principal(user_id)
         grant = await self._perms.effective_grant(user_id, report_id) if user_id else None
+        if user_id:
+            # An investigation the article belongs to confers access by role.
+            grant = max_level(grant, await self._inheritance.inherited_report_level(user_id, report))
         await self._authz.require(
             principal, action,
             ResourceRef.for_story(report, effective_grant=grant),
@@ -118,6 +124,7 @@ class ReportService:
             return report
         principal = await self._authz.principal(user_id)
         grant = await self._perms.effective_grant(user_id, report_id)
+        grant = max_level(grant, await self._inheritance.inherited_report_level(user_id, report))
         await self._authz.require(
             principal, Action.STORIES_READ,
             ResourceRef.for_story(report, effective_grant=grant),
