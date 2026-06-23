@@ -575,10 +575,7 @@ class InvestigationMemberModel(Base):
     user_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    can_write_stories: Mapped[bool] = mapped_column(nullable=False, default=False)
-    can_add_viz: Mapped[bool] = mapped_column(nullable=False, default=False)
-    can_administer: Mapped[bool] = mapped_column(nullable=False, default=False)
-    is_owner: Mapped[bool] = mapped_column(nullable=False, default=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="viewer")
 
     investigation: Mapped[InvestigationModel] = relationship(
         "InvestigationModel", back_populates="members"

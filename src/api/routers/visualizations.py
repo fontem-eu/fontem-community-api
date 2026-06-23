@@ -2,7 +2,7 @@
 
 Thin handlers delegating to :class:`VisualizationService` (the single mutation
 point; every change runs through the AuthorizationService). Viz are owner-gated;
-attach/detach to an investigation needs the can_add_viz capability there.
+attach/detach to an investigation needs the contributor roleability there.
 """
 from __future__ import annotations
 

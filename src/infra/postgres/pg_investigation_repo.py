@@ -35,10 +35,7 @@ class PgInvestigationRepository(InvestigationRepository):
         return InvestigationMember(
             investigation_id=row.investigation_id,
             user_id=row.user_id,
-            can_write_stories=row.can_write_stories,
-            can_add_viz=row.can_add_viz,
-            can_administer=row.can_administer,
-            is_owner=row.is_owner,
+            role=row.role,
         )
 
     async def create(self, investigation: Investigation) -> Investigation:
@@ -101,10 +98,7 @@ class PgInvestigationRepository(InvestigationRepository):
                 InvestigationMemberModel(
                     investigation_id=member.investigation_id,
                     user_id=member.user_id,
-                    can_write_stories=member.can_write_stories,
-                    can_add_viz=member.can_add_viz,
-                    can_administer=member.can_administer,
-                    is_owner=member.is_owner,
+                    role=member.role,
                 )
             )
         else:
@@ -112,12 +106,7 @@ class PgInvestigationRepository(InvestigationRepository):
                 InvestigationMemberModel.__table__.update()
                 .where(InvestigationMemberModel.investigation_id == member.investigation_id)
                 .where(InvestigationMemberModel.user_id == member.user_id)
-                .values(
-                    can_write_stories=member.can_write_stories,
-                    can_add_viz=member.can_add_viz,
-                    can_administer=member.can_administer,
-                    is_owner=member.is_owner,
-                )
+                .values(role=member.role)
             )
         await self._session.commit()
 
@@ -153,6 +142,6 @@ class PgInvestigationRepository(InvestigationRepository):
             select(func.count())
             .select_from(InvestigationMemberModel)
             .where(InvestigationMemberModel.investigation_id == investigation_id)
-            .where(InvestigationMemberModel.is_owner.is_(True))
+            .where(InvestigationMemberModel.role == "owner")
         )
         return int(result.scalar_one())

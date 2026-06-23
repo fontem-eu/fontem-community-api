@@ -2,7 +2,7 @@
 
 A viz is owned by its creator (CRUD is owner-gated). Attaching/detaching to an
 investigation reuses the investigation capability gate (INVESTIGATIONS_ADD_VIZ =
-``can_add_viz``); listing an investigation's viz needs INVESTIGATIONS_READ.
+contributor role); listing an investigation's viz needs INVESTIGATIONS_READ.
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ class VisualizationService:
         if not widget_type.strip():
             raise InvalidInput("widget_type is required")
         if investigation_id is not None:
-            # Saving straight onto an investigation needs the can_add_viz cap.
+            # Saving straight onto an investigation needs the contributor role.
             await self._require_inv(user_id, investigation_id, Action.INVESTIGATIONS_ADD_VIZ)
         return await self._viz.create(Visualization(
             name=(name or "").strip() or widget_type,

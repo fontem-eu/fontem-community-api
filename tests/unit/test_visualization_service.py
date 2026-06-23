@@ -1,4 +1,4 @@
-"""VisualizationService — ownership, investigation attach via can_add_viz (M5)."""
+"""VisualizationService — ownership, investigation attach via the contributor role (M5)."""
 from __future__ import annotations
 
 import pytest
@@ -38,7 +38,7 @@ async def test_create_on_investigation_requires_add_viz(services):
     u1, u2, u3 = await _users(services, "u1", "u2", "u3")
     isvc, vsvc = services["investigation_svc"], services["visualization_svc"]
     inv = await isvc.create(u1, "Inv")
-    await isvc.set_member(u1, inv.id, u2, can_add_viz=True)
+    await isvc.set_member(u1, inv.id, u2, role="contributor")
     await isvc.set_member(u1, inv.id, u3)  # no caps
     # owner + add-viz member can save straight onto the investigation
     await vsvc.create(u1, "by owner", "map", {}, investigation_id=inv.id)

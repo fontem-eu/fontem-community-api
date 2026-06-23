@@ -25,14 +25,13 @@ class Investigation:
 
 @dataclass
 class InvestigationMember:
-    """A user's membership of an investigation, as independent capability
-    flags (not a linear role). ``is_owner`` is the special tier: owners can
-    delete the investigation and promote/own; an owner cannot change or
-    remove another owner, and there is always >= 1 owner."""
+    """A user's membership of an investigation, as a single linear ``role``:
+    viewer < contributor < admin < owner. Owners are the special tier: they can
+    delete the investigation and grant/revoke owner; an owner cannot change or
+    remove another owner, and there is always >= 1 owner. The role also confers
+    access to the investigation's contained articles/dossiers/viz (inheritance).
+    """
 
     investigation_id: str
     user_id: str
-    can_write_stories: bool = False
-    can_add_viz: bool = False
-    can_administer: bool = False
-    is_owner: bool = False
+    role: str = "viewer"

@@ -35,14 +35,14 @@ async def test_update_meta():
 async def test_members_upsert_list_count_remove():
     repo = _repo()
     inv = await repo.create(Investigation(name="X", created_by="u1"))
-    await repo.upsert_member(InvestigationMember(inv.id, "u1", is_owner=True))
-    await repo.upsert_member(InvestigationMember(inv.id, "u2", can_write_stories=True))
+    await repo.upsert_member(InvestigationMember(inv.id, "u1", role="owner"))
+    await repo.upsert_member(InvestigationMember(inv.id, "u2", role="contributor"))
     assert await repo.count_owners(inv.id) == 1
     assert len(await repo.list_members(inv.id)) == 2
     m2 = await repo.get_member(inv.id, "u2")
-    assert m2 is not None and m2.can_write_stories and not m2.is_owner
+    assert m2 is not None and m2.role == "contributor"
     # upsert updates in place
-    await repo.upsert_member(InvestigationMember(inv.id, "u2", is_owner=True))
+    await repo.upsert_member(InvestigationMember(inv.id, "u2", role="owner"))
     assert await repo.count_owners(inv.id) == 2
     await repo.remove_member(inv.id, "u2")
     assert await repo.get_member(inv.id, "u2") is None
@@ -53,7 +53,7 @@ async def test_members_upsert_list_count_remove():
 async def test_list_for_user_and_delete():
     repo = _repo()
     inv = await repo.create(Investigation(name="A", created_by="u1"))
-    await repo.upsert_member(InvestigationMember(inv.id, "u1", is_owner=True))
+    await repo.upsert_member(InvestigationMember(inv.id, "u1", role="owner"))
     assert len(await repo.list_for_user("u1")) == 1
     assert await repo.list_for_user("nobody") == []
     await repo.delete(inv.id)

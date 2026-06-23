@@ -42,17 +42,11 @@ class AddMemberRequest(BaseModel):
     # mirroring the report ShareModal's invite-by-email UX).
     user_id: str | None = None
     email: str | None = None
-    can_write_stories: bool = False
-    can_add_viz: bool = False
-    can_administer: bool = False
-    is_owner: bool = False
+    role: str = "viewer"
 
 
 class UpdateMemberRequest(BaseModel):
-    can_write_stories: bool = False
-    can_add_viz: bool = False
-    can_administer: bool = False
-    is_owner: bool = False
+    role: str = "viewer"
 
 
 class AddStoryRequest(BaseModel):
@@ -163,9 +157,7 @@ async def add_member(
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     await svc.set_member(
-        user.id, investigation_id, body.user_id, target_email=body.email,
-        can_write_stories=body.can_write_stories, can_add_viz=body.can_add_viz,
-        can_administer=body.can_administer, is_owner=body.is_owner,
+        user.id, investigation_id, body.user_id, target_email=body.email, role=body.role,
     )
     return {"status": "ok"}
 
@@ -180,11 +172,7 @@ async def update_member(
     svc: FromDishka[InvestigationService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    await svc.set_member(
-        user.id, investigation_id, uid,
-        can_write_stories=body.can_write_stories, can_add_viz=body.can_add_viz,
-        can_administer=body.can_administer, is_owner=body.is_owner,
-    )
+    await svc.set_member(user.id, investigation_id, uid, role=body.role)
     return {"status": "ok"}
 
 

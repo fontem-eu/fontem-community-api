@@ -62,5 +62,5 @@ class InMemoryInvestigationRepository(InvestigationRepository):
 
     async def count_owners(self, investigation_id: str) -> int:
         return sum(
-            1 for m in self._members.get(investigation_id, {}).values() if m.is_owner
+            1 for m in self._members.get(investigation_id, {}).values() if m.role == "owner"
         )

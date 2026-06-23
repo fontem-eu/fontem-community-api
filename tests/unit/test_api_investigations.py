@@ -23,10 +23,10 @@ class TestInvestigationsAPI:
         assert inv["name"] == "Panama"
         lst = client.get("/investigations", headers=h).json()
         assert len(lst) == 1
-        assert lst[0]["membership"]["is_owner"] is True
+        assert lst[0]["membership"]["role"] == "owner"
         got = client.get(f"/investigations/{inv['id']}", headers=h)
         assert got.status_code == 200
-        assert got.json()["membership"]["can_write_stories"] is True
+        assert got.json()["membership"]["role"] == "owner"
 
     def test_nonmember_get_forbidden(self, client, services):
         asyncio.get_event_loop().run_until_complete(self._setup(services, "user-1", "user-2"))
@@ -41,7 +41,7 @@ class TestInvestigationsAPI:
         u2 = _stable_uuid("user-2")
         add = client.post(
             f"/investigations/{inv['id']}/members",
-            json={"user_id": u2, "can_write_stories": True},
+            json={"user_id": u2, "role": "contributor"},
             headers=h,
         )
         assert add.status_code == 201
@@ -60,12 +60,12 @@ class TestInvestigationsAPI:
         # make u2 an owner
         client.post(
             f"/investigations/{inv['id']}/members",
-            json={"user_id": u2, "is_owner": True}, headers=h,
+            json={"user_id": u2, "role": "owner"}, headers=h,
         )
         # u1 cannot change another owner -> 409
         resp = client.put(
             f"/investigations/{inv['id']}/members/{u2}",
-            json={"can_write_stories": True}, headers=h,
+            json={"role": "contributor"}, headers=h,
         )
         assert resp.status_code == 409
 

@@ -21,7 +21,7 @@ async def test_create_makes_creator_owner(services):
     assert inv.id and inv.created_by == u1
     m = await svc.my_membership(u1, inv.id)
     assert m is not None
-    assert m.is_owner and m.can_administer and m.can_write_stories and m.can_add_viz
+    assert m.role == "owner"
 
 
 @pytest.mark.asyncio
@@ -38,7 +38,7 @@ async def test_member_can_read_after_added(services):
     u1, u2 = await _users(services, "u1", "u2")
     svc = services["investigation_svc"]
     inv = await svc.create(u1, "I")
-    await svc.set_member(u1, inv.id, u2, can_write_stories=True)
+    await svc.set_member(u1, inv.id, u2, role="contributor")
     got = await svc.get(u2, inv.id)
     assert got.id == inv.id
 
@@ -56,8 +56,8 @@ async def test_administer_can_edit_meta_noncap_cannot(services):
     u1, u2, u3 = await _users(services, "u1", "u2", "u3")
     svc = services["investigation_svc"]
     inv = await svc.create(u1, "I")
-    await svc.set_member(u1, inv.id, u2, can_administer=True)
-    await svc.set_member(u1, inv.id, u3, can_write_stories=True)  # no administer
+    await svc.set_member(u1, inv.id, u2, role="admin")
+    await svc.set_member(u1, inv.id, u3, role="contributor")  # no administer
     upd = await svc.update_meta(u2, inv.id, name="Renamed")
     assert upd.name == "Renamed"
     with pytest.raises(PermissionDenied):
@@ -69,9 +69,9 @@ async def test_only_owner_can_grant_owner(services):
     u1, u2, u3 = await _users(services, "u1", "u2", "u3")
     svc = services["investigation_svc"]
     inv = await svc.create(u1, "I")
-    await svc.set_member(u1, inv.id, u2, can_administer=True)  # admin, not owner
+    await svc.set_member(u1, inv.id, u2, role="admin")  # admin, not owner
     with pytest.raises(PermissionDenied):
-        await svc.set_member(u2, inv.id, u3, is_owner=True)
+        await svc.set_member(u2, inv.id, u3, role="owner")
 
 
 @pytest.mark.asyncio
@@ -79,9 +79,9 @@ async def test_owner_can_promote_to_owner(services):
     u1, u2 = await _users(services, "u1", "u2")
     svc = services["investigation_svc"]
     inv = await svc.create(u1, "I")
-    await svc.set_member(u1, inv.id, u2, can_administer=True, is_owner=True)
+    await svc.set_member(u1, inv.id, u2, role="owner")
     m2 = await svc.my_membership(u2, inv.id)
-    assert m2.is_owner
+    assert m2.role == "owner"
 
 
 @pytest.mark.asyncio
@@ -89,9 +89,9 @@ async def test_cannot_change_another_owner(services):
     u1, u2 = await _users(services, "u1", "u2")
     svc = services["investigation_svc"]
     inv = await svc.create(u1, "I")
-    await svc.set_member(u1, inv.id, u2, is_owner=True, can_administer=True)
+    await svc.set_member(u1, inv.id, u2, role="owner")
     with pytest.raises(Conflict):
-        await svc.set_member(u1, inv.id, u2, can_write_stories=True)  # u2 is another owner
+        await svc.set_member(u1, inv.id, u2, role="contributor")  # u2 is another owner
 
 
 @pytest.mark.asyncio
@@ -99,7 +99,7 @@ async def test_cannot_remove_another_owner(services):
     u1, u2 = await _users(services, "u1", "u2")
     svc = services["investigation_svc"]
     inv = await svc.create(u1, "I")
-    await svc.set_member(u1, inv.id, u2, is_owner=True)
+    await svc.set_member(u1, inv.id, u2, role="owner")
     with pytest.raises(Conflict):
         await svc.remove_member(u1, inv.id, u2)
 
@@ -110,7 +110,7 @@ async def test_cannot_demote_last_owner(services):
     svc = services["investigation_svc"]
     inv = await svc.create(u1, "I")
     with pytest.raises(Conflict):
-        await svc.set_member(u1, inv.id, u1, is_owner=False, can_administer=True)
+        await svc.set_member(u1, inv.id, u1, role="admin")
 
 
 @pytest.mark.asyncio
@@ -127,7 +127,7 @@ async def test_delete_requires_owner(services):
     u1, u2 = await _users(services, "u1", "u2")
     svc = services["investigation_svc"]
     inv = await svc.create(u1, "I")
-    await svc.set_member(u1, inv.id, u2, can_administer=True)  # admin, not owner
+    await svc.set_member(u1, inv.id, u2, role="admin")  # admin, not owner
     with pytest.raises(PermissionDenied):
         await svc.delete(u2, inv.id)
     await svc.delete(u1, inv.id)  # owner can
@@ -142,9 +142,9 @@ async def test_invite_member_by_email(services):
     svc = services["investigation_svc"]
     u1 = _stable_uuid("u1")
     inv = await svc.create(u1, "I")
-    await svc.set_member(u1, inv.id, target_email="u2@test.com", can_write_stories=True)
+    await svc.set_member(u1, inv.id, target_email="u2@test.com", role="contributor")
     member = await svc.my_membership(_stable_uuid("u2"), inv.id)
-    assert member is not None and member.can_write_stories
+    assert member is not None and member.role == "contributor"
 
 
 @pytest.mark.asyncio

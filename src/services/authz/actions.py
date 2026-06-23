@@ -74,7 +74,7 @@ class Action(StrEnum):
     # ── Visualizations ────────────────────────────────────────
     # Server-side saved viz (the pocket's successor). Owned by the creator;
     # attaching/detaching to an investigation reuses INVESTIGATIONS_ADD_VIZ /
-    # REMOVE_VIZ (the can_add_viz capability).
+    # REMOVE_VIZ (the contributor roleability).
     VISUALIZATIONS_CREATE = "visualizations:create"
     VISUALIZATIONS_READ = "visualizations:read"
     VISUALIZATIONS_EDIT = "visualizations:edit"

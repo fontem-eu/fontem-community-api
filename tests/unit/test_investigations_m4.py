@@ -30,7 +30,7 @@ async def test_add_story_requires_write_cap(services):
     u1, u2, u3 = await _users(services, "u1", "u2", "u3")
     isvc, rsvc = services["investigation_svc"], services["report_svc"]
     inv = await isvc.create(u1, "Inv")
-    await isvc.set_member(u1, inv.id, u2, can_write_stories=True)
+    await isvc.set_member(u1, inv.id, u2, role="contributor")
     await isvc.set_member(u1, inv.id, u3)  # viewer, no caps
     ra = await rsvc.create(u2, "by u2")
     await isvc.add_story(u2, inv.id, ra.id)  # write-cap member: ok

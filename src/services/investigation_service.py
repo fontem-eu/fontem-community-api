@@ -9,6 +9,7 @@ the pure policy can't see), each with its own test.
 from __future__ import annotations
 
 from src.domain.investigation import Investigation, InvestigationMember
+from src.domain.investigation_roles import is_role
 from src.repositories.dossier_repository import DossierRepository
 from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.report_repository import ReportRepository
@@ -63,11 +64,11 @@ class InvestigationService:
         inv = await self._inv.create(
             Investigation(name=name.strip(), description=description, created_by=user_id)
         )
-        # The creator is the founding owner, holding every capability.
+        # The creator is the founding owner.
         await self._inv.upsert_member(InvestigationMember(
             investigation_id=inv.id,  # type: ignore[arg-type]
             user_id=user_id,
-            can_write_stories=True, can_add_viz=True, can_administer=True, is_owner=True,
+            role="owner",
         ))
         return inv
 
@@ -153,7 +154,7 @@ class InvestigationService:
 
     # ── articles (stories) ──
     async def add_story(self, user_id: str, investigation_id: str, report_id: str) -> None:
-        """Link an article to the investigation. Gated by `can_write_stories`."""
+        """Link an article to the investigation. Gated by the contributor role."""
         await self._require(user_id, investigation_id, Action.INVESTIGATIONS_ADD_STORY)
         report = await self._reports.get_by_id(report_id)
         if report is None:
@@ -183,14 +184,15 @@ class InvestigationService:
         )
         return await self._inv.list_members(investigation_id)
 
-    async def set_member(  # pylint: disable=too-many-arguments
+    async def set_member(
         self, user_id: str, investigation_id: str,
         target_user_id: str | None = None, *, target_email: str | None = None,
-        can_write_stories: bool = False, can_add_viz: bool = False,
-        can_administer: bool = False, is_owner: bool = False,
+        role: str = "viewer",
     ) -> None:
         """Add or update a member (identified by id or email) with the given
-        capabilities, enforcing the owner invariants."""
+        role, enforcing the owner invariants."""
+        if not is_role(role):
+            raise InvalidInput(f"invalid role '{role}'")
         inv = await self._load(investigation_id)
         actor = await self._inv.get_member(investigation_id, user_id)
         principal = await self._authz.principal(user_id)
@@ -212,21 +214,20 @@ class InvestigationService:
         actor_is_owner = (
             is_platform_admin
             or inv.created_by == user_id
-            or (actor is not None and actor.is_owner)
+            or (actor is not None and actor.role == "owner")
         )
-        if current is not None and current.is_owner and target_user_id != user_id and not is_platform_admin:
+        target_is_owner = current is not None and current.role == "owner"
+        if target_is_owner and target_user_id != user_id and not is_platform_admin:
             raise Conflict("an owner cannot change another owner's role")
-        if is_owner and not actor_is_owner:
+        if role == "owner" and not actor_is_owner:
             raise PermissionDenied("only an owner can grant the owner role")
         if (
-            current is not None and current.is_owner and not is_owner
+            target_is_owner and role != "owner"
             and await self._inv.count_owners(investigation_id) <= 1
         ):
             raise Conflict("an investigation must keep at least one owner")
         await self._inv.upsert_member(InvestigationMember(
-            investigation_id=investigation_id, user_id=target_user_id,
-            can_write_stories=can_write_stories, can_add_viz=can_add_viz,
-            can_administer=can_administer, is_owner=is_owner,
+            investigation_id=investigation_id, user_id=target_user_id, role=role,
         ))
 
     async def remove_member(
@@ -243,8 +244,8 @@ class InvestigationService:
         current = await self._inv.get_member(investigation_id, target_user_id)
         if current is None:
             return
-        if current.is_owner and target_user_id != user_id and not is_platform_admin:
+        if current.role == "owner" and target_user_id != user_id and not is_platform_admin:
             raise Conflict("an owner cannot remove another owner")
-        if current.is_owner and await self._inv.count_owners(investigation_id) <= 1:
+        if current.role == "owner" and await self._inv.count_owners(investigation_id) <= 1:
             raise Conflict("an investigation must keep at least one owner")
         await self._inv.remove_member(investigation_id, target_user_id)

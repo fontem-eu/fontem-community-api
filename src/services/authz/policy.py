@@ -30,6 +30,8 @@ keeps each decision O(1) and makes testing dead simple.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from src.domain.investigation_roles import role_at_least
 from typing import Callable
 
 from src.services.authz.actions import Action
@@ -115,9 +117,7 @@ class ResourceRef:
     effective_grant: str | None = None  # 'viewer' | 'commenter' | 'editor' | 'owner' | None
     # Investigation membership snapshot (for investigations:* actions):
     # whether the caller is a member, their capability flags, owner tier.
-    is_member: bool = False
-    member_caps: frozenset[str] = field(default_factory=frozenset)
-    member_is_owner: bool = False
+    member_role: str | None = None  # caller's investigation role (None = not a member)
 
     @classmethod
     def for_group(cls, group) -> "ResourceRef":
@@ -150,24 +150,12 @@ class ResourceRef:
     def for_investigation(cls, investigation, membership=None) -> "ResourceRef":
         """Snapshot an investigation + the caller's membership. ``membership``
         is the caller's InvestigationMember (or None if not a member); its
-        boolean flags become the ``member_caps`` set the policy reasons over."""
-        caps: set[str] = set()
-        is_owner = False
-        if membership is not None:
-            if getattr(membership, "can_write_stories", False):
-                caps.add("write_stories")
-            if getattr(membership, "can_add_viz", False):
-                caps.add("add_viz")
-            if getattr(membership, "can_administer", False):
-                caps.add("administer")
-            is_owner = getattr(membership, "is_owner", False)
+        linear ``role`` is what the policy reasons over."""
         return cls(
             kind="investigation",
             id=investigation.id,
             owner_id=getattr(investigation, "created_by", None),
-            is_member=membership is not None,
-            member_caps=frozenset(caps),
-            member_is_owner=is_owner,
+            member_role=getattr(membership, "role", None) if membership is not None else None,
         )
 
     @classmethod
@@ -444,26 +432,26 @@ def _inv_read(p: Principal, r: ResourceRef | None) -> Decision:
         return Decision.deny("investigation read requires a resource")
     if _is_admin(p):
         return Decision.allow(_ADMIN_OVERRIDE_REASON)
-    if r.member_is_owner or r.owner_id == p.user_id:
+    if r.member_role == "owner" or r.owner_id == p.user_id:
         return Decision.allow("owner")
-    if r.is_member:
-        return Decision.allow("member")
+    if r.member_role is not None:
+        return Decision.allow(f"member:{r.member_role}")
     return Decision.deny(f"not a member of investigation {r.id}")
 
 
-def _inv_cap_factory(cap: str) -> Callable[[Principal, ResourceRef | None], Decision]:
-    """Allow iff admin, an owner (owners hold every capability), the founding
-    creator, or the caller's membership carries ``cap``."""
+def _inv_role_at_least(minimum: str) -> Callable[[Principal, ResourceRef | None], Decision]:
+    """Allow iff admin, the founding creator, an owner, or the caller's
+    investigation role is at least ``minimum`` (viewer<contributor<admin<owner)."""
     def _check(p: Principal, r: ResourceRef | None) -> Decision:
         if r is None:
             return Decision.deny("investigation action requires a resource")
         if _is_admin(p):
             return Decision.allow(_ADMIN_OVERRIDE_REASON)
-        if r.member_is_owner or r.owner_id == p.user_id:
+        if r.owner_id == p.user_id:
             return Decision.allow("owner")
-        if cap in r.member_caps:
-            return Decision.allow(f"cap:{cap}")
-        return Decision.deny(f"missing investigation capability '{cap}'")
+        if role_at_least(r.member_role, minimum):
+            return Decision.allow(f"role:{r.member_role}>={minimum}")
+        return Decision.deny(f"investigation role '{r.member_role}' below '{minimum}'")
     return _check
 
 
@@ -473,7 +461,7 @@ def _inv_owner(p: Principal, r: ResourceRef | None) -> Decision:
         return Decision.deny("investigation action requires a resource")
     if _is_admin(p):
         return Decision.allow(_ADMIN_OVERRIDE_REASON)
-    if r.member_is_owner or r.owner_id == p.user_id:
+    if r.member_role == "owner" or r.owner_id == p.user_id:
         return Decision.allow("owner")
     return Decision.deny(f"not an owner of investigation {r.id}")
 # ── Registry ─────────────────────────────────────────────────
@@ -509,12 +497,12 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     # membership capability flags; DELETE is owner-only.
     Action.INVESTIGATIONS_CREATE: _trust_at_least_factory("new_user"),
     Action.INVESTIGATIONS_READ: _inv_read,
-    Action.INVESTIGATIONS_EDIT_META: _inv_cap_factory("administer"),
-    Action.INVESTIGATIONS_MANAGE_MEMBERS: _inv_cap_factory("administer"),
-    Action.INVESTIGATIONS_ADD_STORY: _inv_cap_factory("write_stories"),
-    Action.INVESTIGATIONS_REMOVE_STORY: _inv_cap_factory("write_stories"),
-    Action.INVESTIGATIONS_ADD_VIZ: _inv_cap_factory("add_viz"),
-    Action.INVESTIGATIONS_REMOVE_VIZ: _inv_cap_factory("add_viz"),
+    Action.INVESTIGATIONS_EDIT_META: _inv_role_at_least("admin"),
+    Action.INVESTIGATIONS_MANAGE_MEMBERS: _inv_role_at_least("admin"),
+    Action.INVESTIGATIONS_ADD_STORY: _inv_role_at_least("contributor"),
+    Action.INVESTIGATIONS_REMOVE_STORY: _inv_role_at_least("contributor"),
+    Action.INVESTIGATIONS_ADD_VIZ: _inv_role_at_least("contributor"),
+    Action.INVESTIGATIONS_REMOVE_VIZ: _inv_role_at_least("contributor"),
     Action.INVESTIGATIONS_DELETE: _inv_owner,
 
     # Dossiers — owner-gated (creator); create gated by trust.
