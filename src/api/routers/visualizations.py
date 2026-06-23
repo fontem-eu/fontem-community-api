@@ -37,6 +37,12 @@ class AttachRequest(BaseModel):
     investigation_id: str
 
 
+class ShareRequest(BaseModel):
+    user_id: str | None = None
+    email: str | None = None
+    level: str = "viewer"
+
+
 @router.post("", status_code=201)
 @inject
 async def create_visualization(
@@ -124,3 +130,39 @@ async def detach_visualization(
 ) -> dict:
     await svc.detach(user.id, viz_id)
     return {"status": "ok"}
+
+
+@router.get("/{viz_id}/access")
+@inject
+async def list_visualization_access(
+    viz_id: UuidPath,
+    *,
+    svc: FromDishka[VisualizationService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    return await svc.list_grants(user.id, viz_id)
+
+
+@router.post("/{viz_id}/access", status_code=201)
+@inject
+async def share_visualization(
+    viz_id: UuidPath,
+    body: ShareRequest,
+    *,
+    svc: FromDishka[VisualizationService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    await svc.share(user.id, viz_id, body.user_id, target_email=body.email, level=body.level)
+    return {"status": "ok"}
+
+
+@router.delete("/{viz_id}/access/{target_uid}", status_code=204)
+@inject
+async def revoke_visualization(
+    viz_id: UuidPath,
+    target_uid: UuidPath,
+    *,
+    svc: FromDishka[VisualizationService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    await svc.revoke(user.id, viz_id, target_uid)

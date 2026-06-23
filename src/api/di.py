@@ -33,6 +33,7 @@ from src.infra.postgres.pg_group_repo import PgGroupRepository
 from src.infra.postgres.pg_investigation_repo import PgInvestigationRepository
 from src.infra.postgres.pg_dossier_repo import PgDossierRepository
 from src.infra.postgres.pg_visualization_repo import PgVisualizationRepository
+from src.infra.postgres.pg_resource_grant_repo import PgResourceGrantRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
 from src.infra.postgres.pg_moderation_repo import PgModerationRepository
 from src.infra.postgres.pg_permission_repo import PgPermissionRepository
@@ -46,6 +47,7 @@ from src.repositories.group_repository import GroupRepository
 from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.dossier_repository import DossierRepository
 from src.repositories.visualization_repository import VisualizationRepository
+from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
@@ -157,6 +159,10 @@ class RepositoryProvider(Provider):
         return PgVisualizationRepository(session)
 
     @provide(scope=Scope.REQUEST)
+    def resource_grant_repo(self, session: AsyncSession) -> ResourceGrantRepository:
+        return PgResourceGrantRepository(session)
+
+    @provide(scope=Scope.REQUEST)
     def report_repo(self, session: AsyncSession) -> ReportRepository:
         return PgReportRepository(session)
 
@@ -264,26 +270,32 @@ class ServiceProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
-    def visualization_service(
+    def visualization_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         visualizations: VisualizationRepository,
         investigations: InvestigationRepository,
         authz: AuthorizationService,
+        grants: ResourceGrantRepository,
+        users: UserRepository,
     ) -> VisualizationService:
         return VisualizationService(
             visualizations=visualizations, investigations=investigations, authz=authz,
+            grants=grants, users=users,
         )
 
     @provide(scope=Scope.REQUEST)
-    def dossier_service(
+    def dossier_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         dossiers: DossierRepository,
         reports: ReportRepository,
         authz: AuthorizationService,
         investigations: InvestigationRepository,
+        grants: ResourceGrantRepository,
+        users: UserRepository,
     ) -> DossierService:
         return DossierService(
             dossiers=dossiers, reports=reports, authz=authz, investigations=investigations,
+            grants=grants, users=users,
         )
 
     @provide(scope=Scope.REQUEST)

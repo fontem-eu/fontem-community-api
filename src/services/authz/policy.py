@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-from src.domain.investigation_roles import role_at_least
+from src.domain.investigation_roles import ROLE_TO_LEVEL, role_at_least
 from src.services.authz.actions import Action
 
 
@@ -158,21 +158,27 @@ class ResourceRef:
         )
 
     @classmethod
-    def for_dossier(cls, dossier, member_role: str | None = None) -> "ResourceRef":
+    def for_dossier(
+        cls, dossier, member_role: str | None = None, effective_grant: str | None = None,
+    ) -> "ResourceRef":
         return cls(
             kind="dossier",
             id=dossier.id,
             owner_id=getattr(dossier, "created_by", None),
             member_role=member_role,
+            effective_grant=effective_grant,
         )
 
     @classmethod
-    def for_visualization(cls, viz, member_role: str | None = None) -> "ResourceRef":
+    def for_visualization(
+        cls, viz, member_role: str | None = None, effective_grant: str | None = None,
+    ) -> "ResourceRef":
         return cls(
             kind="visualization",
             id=viz.id,
             owner_id=getattr(viz, "created_by", None),
             member_role=member_role,
+            effective_grant=effective_grant,
         )
 
 
@@ -254,6 +260,8 @@ _VERIFIED_REQUIRED: frozenset[str] = frozenset({
     Action.VISUALIZATIONS_CREATE,
     Action.VISUALIZATIONS_EDIT,
     Action.VISUALIZATIONS_DELETE,
+    Action.DOSSIERS_SHARE,
+    Action.VISUALIZATIONS_SHARE,
 })
 
 
@@ -357,6 +365,26 @@ def _owner_or_role(min_role: str) -> Callable[[Principal, ResourceRef | None], D
         if role_at_least(r.member_role, min_role):
             return Decision.allow(f"inherited:{r.member_role}>={min_role}")
         return Decision.deny(f"needs ownership or investigation role >= '{min_role}'")
+    return _check
+
+
+def _owner_role_or_grant(min_role: str) -> Callable[[Principal, ResourceRef | None], Decision]:
+    """Allow iff admin, creator, inherited investigation role >= ``min_role``,
+    or a DIRECT grant (the additive per-item override) at the equivalent level.
+    """
+    min_level = ROLE_TO_LEVEL[min_role]
+    def _check(p: Principal, r: ResourceRef | None) -> Decision:
+        if r is None:
+            return Decision.deny("action requires a resource")
+        if _is_admin(p):
+            return Decision.allow(_ADMIN_OVERRIDE_REASON)
+        if r.owner_id == p.user_id:
+            return Decision.allow("owner")
+        if role_at_least(r.member_role, min_role):
+            return Decision.allow(f"inherited:{r.member_role}")
+        if _grant_at_least(r.effective_grant, min_level):
+            return Decision.allow(f"granted:{r.effective_grant}")
+        return Decision.deny(f"needs ownership, role>='{min_role}', or grant>='{min_level}'")
     return _check
 
 
@@ -526,17 +554,19 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
 
     # Dossiers — owner-gated (creator); create gated by trust.
     Action.DOSSIERS_CREATE: _trust_at_least_factory("new_user"),
-    Action.DOSSIERS_READ: _owner_or_role("viewer"),
-    Action.DOSSIERS_EDIT: _owner_or_role("contributor"),
-    Action.DOSSIERS_DELETE: _owner_or_role("owner"),
+    Action.DOSSIERS_READ: _owner_role_or_grant("viewer"),
+    Action.DOSSIERS_EDIT: _owner_role_or_grant("contributor"),
+    Action.DOSSIERS_DELETE: _owner_role_or_grant("owner"),
 
     # Visualizations — owner-gated; create gated by trust.
     Action.VISUALIZATIONS_CREATE: _trust_at_least_factory("new_user"),
-    Action.VISUALIZATIONS_READ: _owner_or_role("viewer"),
-    Action.VISUALIZATIONS_EDIT: _owner_or_role("contributor"),
-    Action.VISUALIZATIONS_DELETE: _owner_or_role("owner"),
-    Action.DOSSIERS_ADD_ARTICLE: _owner_or_role("contributor"),
-    Action.DOSSIERS_REMOVE_ARTICLE: _owner_or_role("contributor"),
+    Action.VISUALIZATIONS_READ: _owner_role_or_grant("viewer"),
+    Action.VISUALIZATIONS_EDIT: _owner_role_or_grant("contributor"),
+    Action.VISUALIZATIONS_DELETE: _owner_role_or_grant("owner"),
+    Action.VISUALIZATIONS_SHARE: _owner_or_role("admin"),
+    Action.DOSSIERS_ADD_ARTICLE: _owner_role_or_grant("contributor"),
+    Action.DOSSIERS_REMOVE_ARTICLE: _owner_role_or_grant("contributor"),
+    Action.DOSSIERS_SHARE: _owner_or_role("admin"),
 
     # Issues
     Action.ISSUES_CREATE: _trust_at_least_factory("contributor"),

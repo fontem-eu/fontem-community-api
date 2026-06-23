@@ -8,21 +8,27 @@ from __future__ import annotations
 
 from src.domain.visualization import Visualization
 from src.repositories.investigation_repository import InvestigationRepository
+from src.repositories.resource_grant_repository import ResourceGrantRepository
+from src.repositories.user_repository import UserRepository
 from src.repositories.visualization_repository import VisualizationRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.exceptions import InvalidInput, NotFound
 
 
 class VisualizationService:
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         visualizations: VisualizationRepository,
         investigations: InvestigationRepository,
         authz: AuthorizationService,
+        grants: ResourceGrantRepository,
+        users: UserRepository,
     ) -> None:
         self._viz = visualizations
         self._inv = investigations
         self._authz = authz
+        self._grants = grants
+        self._users = users
 
     async def _load(self, viz_id: str) -> Visualization:
         v = await self._viz.get_by_id(viz_id)
@@ -35,10 +41,50 @@ class VisualizationService:
         if viz.investigation_id:
             m = await self._inv.get_member(viz.investigation_id, user_id)
             member_role = m.role if m is not None else None
+        grant = await self._grants.get_level("visualization", viz.id, user_id)  # type: ignore[arg-type]
         principal = await self._authz.principal(user_id)
         await self._authz.require(
-            principal, action, ResourceRef.for_visualization(viz, member_role=member_role),
+            principal, action,
+            ResourceRef.for_visualization(viz, member_role=member_role, effective_grant=grant),
         )
+
+    async def share(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, user_id: str, viz_id: str,
+        target_user_id: str | None = None, *, target_email: str | None = None,
+        level: str = "viewer",
+    ) -> None:
+        v = await self._load(viz_id)
+        await self._require_viz(user_id, v, Action.VISUALIZATIONS_SHARE)
+        target = await self._resolve_user(target_user_id, target_email)
+        await self._grants.set_grant("visualization", viz_id, target, level)
+
+    async def revoke(self, user_id: str, viz_id: str, target_user_id: str) -> None:
+        v = await self._load(viz_id)
+        await self._require_viz(user_id, v, Action.VISUALIZATIONS_SHARE)
+        await self._grants.remove_grant("visualization", viz_id, target_user_id)
+
+    async def list_grants(self, user_id: str, viz_id: str) -> list[dict]:
+        v = await self._load(viz_id)
+        await self._require_viz(user_id, v, Action.VISUALIZATIONS_READ)
+        out = []
+        for g in await self._grants.list_grants("visualization", viz_id):
+            u = await self._users.get_by_id(g.user_id)
+            out.append({
+                "user_id": g.user_id, "level": g.level,
+                "email": u.email if u else None, "name": u.name if u else None,
+            })
+        return out
+
+    async def _resolve_user(self, target_user_id: str | None, target_email: str | None) -> str:
+        if target_user_id:
+            u = await self._users.get_by_id(target_user_id)
+        elif target_email:
+            u = await self._users.get_by_email(target_email.strip().lower())
+        else:
+            raise InvalidInput("must supply target user_id or email")
+        if u is None:
+            raise NotFound("Target user not found")
+        return u.id
 
     async def _require_inv(self, user_id: str, investigation_id: str, action: Action) -> None:
         inv = await self._inv.get_by_id(investigation_id)

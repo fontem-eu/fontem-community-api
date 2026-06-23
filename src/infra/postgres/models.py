@@ -624,3 +624,23 @@ class VisualizationModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+class ResourceGrantModel(Base):
+    # Generic per-item access grant (Phase C) for dossiers + viz — the additive
+    # override. New table -> create_all provisions it, no manual ALTER.
+    __tablename__ = "resource_grants"
+    __table_args__ = (
+        Index("ix_resource_grants_lookup", "resource_type", "resource_id"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    resource_type: Mapped[str] = mapped_column(Text, nullable=False)
+    resource_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    level: Mapped[str] = mapped_column(Text, nullable=False, default="viewer")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )

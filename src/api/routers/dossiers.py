@@ -35,6 +35,12 @@ class AddArticleRequest(BaseModel):
     parent_id: str | None = None
 
 
+class ShareRequest(BaseModel):
+    user_id: str | None = None
+    email: str | None = None
+    level: str = "viewer"
+
+
 @router.post("", status_code=201)
 @inject
 async def create_dossier(
@@ -117,3 +123,39 @@ async def remove_article(
     user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await svc.remove_article(user.id, dossier_id, report_id)
+
+
+@router.get("/{dossier_id}/access")
+@inject
+async def list_dossier_access(
+    dossier_id: UuidPath,
+    *,
+    svc: FromDishka[DossierService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    return await svc.list_grants(user.id, dossier_id)
+
+
+@router.post("/{dossier_id}/access", status_code=201)
+@inject
+async def share_dossier(
+    dossier_id: UuidPath,
+    body: ShareRequest,
+    *,
+    svc: FromDishka[DossierService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    await svc.share(user.id, dossier_id, body.user_id, target_email=body.email, level=body.level)
+    return {"status": "ok"}
+
+
+@router.delete("/{dossier_id}/access/{target_uid}", status_code=204)
+@inject
+async def revoke_dossier(
+    dossier_id: UuidPath,
+    target_uid: UuidPath,
+    *,
+    svc: FromDishka[DossierService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    await svc.revoke(user.id, dossier_id, target_uid)

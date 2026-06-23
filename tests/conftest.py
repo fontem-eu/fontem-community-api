@@ -28,6 +28,7 @@ from src.infra.memory.mem_group_repo import InMemoryGroupRepository
 from src.infra.memory.mem_investigation_repo import InMemoryInvestigationRepository
 from src.infra.memory.mem_dossier_repo import InMemoryDossierRepository
 from src.infra.memory.mem_visualization_repo import InMemoryVisualizationRepository
+from src.infra.memory.mem_resource_grant_repo import InMemoryResourceGrantRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
 from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
 from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
@@ -108,10 +109,11 @@ def services():
     investigation_repo = InMemoryInvestigationRepository()
     dossier_repo = InMemoryDossierRepository()
     visualization_repo = InMemoryVisualizationRepository()
+    resource_grant_repo = InMemoryResourceGrantRepository()
     investigation_svc = InvestigationService(
         investigation_repo, user_repo, authz_svc, report_repo, dossier_repo, visualization_repo)
-    dossier_svc = DossierService(dossier_repo, report_repo, authz_svc, investigation_repo)
-    visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc)
+    dossier_svc = DossierService(dossier_repo, report_repo, authz_svc, investigation_repo, resource_grant_repo, user_repo)
+    visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
     inheritance = AccessInheritance(investigation_repo, dossier_repo)
     report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc)
@@ -132,6 +134,7 @@ def services():
         "dossier_repo": dossier_repo,
         "dossier_svc": dossier_svc,
         "visualization_repo": visualization_repo,
+        "resource_grant_repo": resource_grant_repo,
         "visualization_svc": visualization_svc,
         "report_repo": report_repo,
         "permission_repo": permission_repo,

@@ -70,6 +70,7 @@ class Action(StrEnum):
     DOSSIERS_DELETE = "dossiers:delete"
     DOSSIERS_ADD_ARTICLE = "dossiers:add_article"
     DOSSIERS_REMOVE_ARTICLE = "dossiers:remove_article"
+    DOSSIERS_SHARE = "dossiers:share"
 
     # ── Visualizations ────────────────────────────────────────
     # Server-side saved viz (the pocket's successor). Owned by the creator;
@@ -79,6 +80,7 @@ class Action(StrEnum):
     VISUALIZATIONS_READ = "visualizations:read"
     VISUALIZATIONS_EDIT = "visualizations:edit"
     VISUALIZATIONS_DELETE = "visualizations:delete"
+    VISUALIZATIONS_SHARE = "visualizations:share"
 
     # ── Issues + comments ─────────────────────────────────────
     ISSUES_CREATE = "issues:create"
