@@ -316,15 +316,18 @@ class ServiceProvider(Provider):
         return AccessInheritance(investigations=investigations, dossiers=dossiers)
 
     @provide(scope=Scope.REQUEST)
-    def report_service(
+    def report_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         reports: ReportRepository,
         perms: PermissionService,
         authz: AuthorizationService,
         inheritance: AccessInheritance,
+        users: UserRepository,
+        groups: GroupRepository,
     ) -> ReportService:
         return ReportService(
             reports=reports, perms=perms, authz=authz, inheritance=inheritance,
+            users=users, groups=groups,
         )
 
     @provide(scope=Scope.REQUEST)

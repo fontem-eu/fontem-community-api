@@ -79,3 +79,7 @@ class PermissionService:
         if user_id is None:
             return None
         return await self._perms.get_report_access(user_id, report_id)
+
+    async def list_collaborators(self, report_id: str):
+        """Direct report_access grants (user or group) on a report."""
+        return await self._perms.list_collaborators(report_id)

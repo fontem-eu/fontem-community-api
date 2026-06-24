@@ -115,7 +115,7 @@ def services():
     dossier_svc = DossierService(dossier_repo, report_repo, authz_svc, investigation_repo, resource_grant_repo, user_repo)
     visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
     inheritance = AccessInheritance(investigation_repo, dossier_repo)
-    report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance)
+    report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance, user_repo, group_repo)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc)
     mod_svc = ModerationService(mod_repo, user_repo, authz_svc)
     tag_svc = TagService(report_repo, tag_follow_repo, perm_svc, authz_svc)

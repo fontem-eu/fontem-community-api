@@ -50,3 +50,13 @@ class AccessInheritance:
     async def inherited_report_level(self, user_id: str | None, report) -> str | None:
         inv_id = await self.investigation_of_report(report)
         return await self.inherited_level(user_id, inv_id)
+
+    async def inherited_members_for_report(self, report) -> list[tuple[str, str, str]]:
+        """(user_id, role, level) for every member of the report's investigation."""
+        inv_id = await self.investigation_of_report(report)
+        if not inv_id:
+            return []
+        return [
+            (m.user_id, m.role, ROLE_TO_LEVEL.get(m.role, "viewer"))
+            for m in await self._inv.list_members(inv_id)
+        ]

@@ -23,6 +23,9 @@ from src.services.authz import (
 from src.services.authz.policy import Principal
 from src.services.exceptions import Conflict, NotFound
 from src.services.access_inheritance import AccessInheritance, max_level
+from src.repositories.group_repository import GroupRepository
+from src.repositories.user_repository import UserRepository
+from src.services.permission_service import LEVEL_HIERARCHY
 from src.services.permission_service import PermissionService
 from src.services.sanitize import sanitize_html, sanitize_text
 
@@ -36,11 +39,15 @@ class ReportService:
         perms: PermissionService,
         authz: AuthorizationService,
         inheritance: AccessInheritance,
+        users: UserRepository,
+        groups: GroupRepository,
     ) -> None:
         self._reports = reports
         self._perms = perms
         self._authz = authz
         self._inheritance = inheritance
+        self._users = users
+        self._groups = groups
 
     async def _load_for(
         self, user_id: str | None, report_id: str, action: Action,
@@ -252,6 +259,44 @@ class ReportService:
         into PermissionService directly.
         """
         await self._load_for(user_id, report_id, Action.STORIES_UPLOAD)
+
+
+    async def effective_access(self, user_id: str, report_id: str) -> list[dict]:
+        """Who has access to the article and why: each principal's highest level
+        + source (owner / inherited:<role> / direct). READ-gated."""
+        report, _ = await self._load_for(user_id, report_id, Action.STORIES_READ)
+        rows: dict[str, dict] = {}
+        if report.created_by:
+            _add_access(rows, "user", report.created_by, "owner", "owner")
+        for uid, role, level in await self._inheritance.inherited_members_for_report(report):
+            _add_access(rows, "user", uid, level, f"inherited:{role}")
+        for g in await self._perms.list_collaborators(report_id):
+            if g.user_id:
+                _add_access(rows, "user", g.user_id, g.level, "direct")
+            elif g.group_id:
+                _add_access(rows, "group", g.group_id, g.level, "direct")
+        return [await self._enrich_access(info) for info in rows.values()]
+
+    async def _enrich_access(self, info: dict) -> dict:
+        entry = {"level": info["level"], "source": info["source"]}
+        if info["kind"] == "user":
+            u = await self._users.get_by_id(info["id"])
+            entry.update({
+                "user_id": info["id"],
+                "email": u.email if u else None, "name": u.name if u else None,
+            })
+        else:
+            grp = await self._groups.get_by_id(info["id"])
+            entry.update({"group_id": info["id"], "name": grp.name if grp else None})
+        return entry
+
+
+def _add_access(rows: dict, kind: str, pid: str, level: str, source: str) -> None:
+    """Record a principal's grant, keeping only the highest level seen."""
+    key = f"{kind}:{pid}"
+    cur = rows.get(key)
+    if cur is None or LEVEL_HIERARCHY.get(level, 0) > LEVEL_HIERARCHY.get(cur["level"], 0):
+        rows[key] = {"kind": kind, "id": pid, "level": level, "source": source}
 
 
 def _sanitize_section(content: dict) -> dict:
