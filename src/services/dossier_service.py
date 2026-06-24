@@ -14,6 +14,7 @@ from src.repositories.report_repository import ReportRepository
 from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
+from src.services.effective_access import _effective_access
 from src.services.exceptions import InvalidInput, NotFound
 
 
@@ -90,6 +91,17 @@ class DossierService:
         if u is None:
             raise NotFound("Target user not found")
         return u.id
+
+    async def effective_access(self, user_id: str, dossier_id: str) -> list[dict]:
+        """Who has access and why: each principal's highest level + its source
+        (owner / inherited:<role> / direct). Gated by READ."""
+        d = await self._load(dossier_id)
+        await self._require(user_id, d, Action.DOSSIERS_READ)
+        return await _effective_access(
+            self._inv, self._grants, self._users, "dossier", dossier_id,
+            d.created_by, d.investigation_id,
+        )
+
 
     async def create(
         self, user_id: str, name: str, investigation_id: str | None = None,

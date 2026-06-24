@@ -12,6 +12,7 @@ from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.user_repository import UserRepository
 from src.repositories.visualization_repository import VisualizationRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
+from src.services.effective_access import _effective_access
 from src.services.exceptions import InvalidInput, NotFound
 
 
@@ -85,6 +86,16 @@ class VisualizationService:
         if u is None:
             raise NotFound("Target user not found")
         return u.id
+
+    async def effective_access(self, user_id: str, viz_id: str) -> list[dict]:
+        """Who has access and why (owner / inherited:<role> / direct). READ-gated."""
+        v = await self._load(viz_id)
+        await self._require_viz(user_id, v, Action.VISUALIZATIONS_READ)
+        return await _effective_access(
+            self._inv, self._grants, self._users, "visualization", viz_id,
+            v.created_by, v.investigation_id,
+        )
+
 
     async def _require_inv(self, user_id: str, investigation_id: str, action: Action) -> None:
         inv = await self._inv.get_by_id(investigation_id)

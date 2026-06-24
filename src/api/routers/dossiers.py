@@ -159,3 +159,14 @@ async def revoke_dossier(
     user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await svc.revoke(user.id, dossier_id, target_uid)
+
+
+@router.get("/{dossier_id}/effective-access")
+@inject
+async def dossier_effective_access(
+    dossier_id: UuidPath,
+    *,
+    svc: FromDishka[DossierService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    return await svc.effective_access(user.id, dossier_id)

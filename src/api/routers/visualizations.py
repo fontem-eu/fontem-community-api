@@ -166,3 +166,14 @@ async def revoke_visualization(
     user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     await svc.revoke(user.id, viz_id, target_uid)
+
+
+@router.get("/{viz_id}/effective-access")
+@inject
+async def visualization_effective_access(
+    viz_id: UuidPath,
+    *,
+    svc: FromDishka[VisualizationService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    return await svc.effective_access(user.id, viz_id)
