@@ -371,3 +371,15 @@ async def upload_image(
     storage = _get_storage()
     key = storage.upload(report_id, cleaned.data, cleaned.content_type)
     return {"url": storage.get_url(key), "key": key}
+
+
+@router.get("/{report_id}/effective-access")
+@inject
+async def report_effective_access(
+    report_id: UuidPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    """Who has access to the article and why (owner / inherited / direct)."""
+    return await svc.effective_access(user.id, report_id)
