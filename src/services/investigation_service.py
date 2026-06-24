@@ -18,6 +18,21 @@ from src.repositories.user_repository import UserRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
 
+# User-facing owner-invariant messages (surfaced inline in the UI).
+_LAST_OWNER_MSG = (
+    "This investigation must always have at least one owner — promote another "
+    "member to owner before you leave or change your own role."
+)
+_CHANGE_OWNER_MSG = (
+    "You can't change another owner's role — owners are peers. They can change it "
+    "themselves, or a platform admin can."
+)
+_REMOVE_OWNER_MSG = (
+    "You can't remove another owner — they can leave themselves, or a platform "
+    "admin can remove them."
+)
+_GRANT_OWNER_MSG = "Only an owner can grant the owner role."
+
 
 class InvestigationService:
     def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -218,14 +233,14 @@ class InvestigationService:
         )
         target_is_owner = current is not None and current.role == "owner"
         if target_is_owner and target_user_id != user_id and not is_platform_admin:
-            raise Conflict("an owner cannot change another owner's role")
+            raise Conflict(_CHANGE_OWNER_MSG)
         if role == "owner" and not actor_is_owner:
-            raise PermissionDenied("only an owner can grant the owner role")
+            raise PermissionDenied(_GRANT_OWNER_MSG)
         if (
             target_is_owner and role != "owner"
             and await self._inv.count_owners(investigation_id) <= 1
         ):
-            raise Conflict("an investigation must keep at least one owner")
+            raise Conflict(_LAST_OWNER_MSG)
         await self._inv.upsert_member(InvestigationMember(
             investigation_id=investigation_id, user_id=target_user_id, role=role,
         ))
@@ -245,7 +260,7 @@ class InvestigationService:
         if current is None:
             return
         if current.role == "owner" and target_user_id != user_id and not is_platform_admin:
-            raise Conflict("an owner cannot remove another owner")
+            raise Conflict(_REMOVE_OWNER_MSG)
         if current.role == "owner" and await self._inv.count_owners(investigation_id) <= 1:
-            raise Conflict("an investigation must keep at least one owner")
+            raise Conflict(_LAST_OWNER_MSG)
         await self._inv.remove_member(investigation_id, target_user_id)

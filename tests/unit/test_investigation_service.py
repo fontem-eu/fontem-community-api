@@ -155,3 +155,59 @@ async def test_invite_unknown_email_404(services):
     inv = await svc.create(u1, "I")
     with pytest.raises(NotFound):
         await svc.set_member(u1, inv.id, target_email="nobody@x.io")
+
+
+# ── owner "abandon" corner cases ──
+@pytest.mark.asyncio
+async def test_last_owner_error_is_explanatory(services):
+    (u1,) = await _users(services, "u1")
+    svc = services["investigation_svc"]
+    inv = await svc.create(u1, "I")
+    with pytest.raises(Conflict) as exc:
+        await svc.remove_member(u1, inv.id, u1)  # sole owner tries to leave
+    msg = str(exc.value).lower()
+    assert "at least one owner" in msg and "promote" in msg
+
+
+@pytest.mark.asyncio
+async def test_owner_can_leave_after_transfer(services):
+    u1, u2 = await _users(services, "u1", "u2")
+    svc = services["investigation_svc"]
+    inv = await svc.create(u1, "I")
+    await svc.set_member(u1, inv.id, u2, role="owner")  # co-own / transfer
+    await svc.remove_member(u1, inv.id, u1)             # now u1 may leave
+    assert await svc.my_membership(u1, inv.id) is None
+    m2 = await svc.my_membership(u2, inv.id)
+    assert m2 is not None and m2.role == "owner"
+
+
+@pytest.mark.asyncio
+async def test_owner_can_self_demote_after_transfer(services):
+    u1, u2 = await _users(services, "u1", "u2")
+    svc = services["investigation_svc"]
+    inv = await svc.create(u1, "I")
+    await svc.set_member(u1, inv.id, u2, role="owner")
+    await svc.set_member(u1, inv.id, u1, role="contributor")  # self-demote now ok
+    assert (await svc.my_membership(u1, inv.id)).role == "contributor"
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_remove_or_change_an_owner(services):
+    u1, u2, u3 = await _users(services, "u1", "u2", "u3")
+    svc = services["investigation_svc"]
+    inv = await svc.create(u1, "I")
+    await svc.set_member(u1, inv.id, u2, role="admin")   # u2 = admin (can manage members)
+    await svc.set_member(u1, inv.id, u3, role="owner")   # u3 = a second owner
+    with pytest.raises(Conflict):
+        await svc.remove_member(u2, inv.id, u3)          # admin can't remove an owner
+    with pytest.raises(Conflict):
+        await svc.set_member(u2, inv.id, u3, role="viewer")  # nor change one
+
+
+@pytest.mark.asyncio
+async def test_invalid_role_rejected(services):
+    (u1,) = await _users(services, "u1")
+    svc = services["investigation_svc"]
+    inv = await svc.create(u1, "I")
+    with pytest.raises(Exception):  # noqa: B017  (InvalidInput)
+        await svc.set_member(u1, inv.id, u1, role="superuser")

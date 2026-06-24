@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.services.exceptions import PermissionDenied
+from src.services.exceptions import InvalidInput, PermissionDenied
 from tests.conftest import _stable_uuid, seed_user
 
 
@@ -76,3 +76,13 @@ async def test_share_by_email(services):
     d = await dsvc.create(o, "D")
     await dsvc.share(o, d.id, target_email="x@test.com", level="viewer")
     assert (await dsvc.get(x, d.id)).id == d.id
+
+
+@pytest.mark.asyncio
+async def test_invalid_share_level_rejected(services):
+    o, x = await _users(services, "o", "x")
+    dsvc = services["dossier_svc"]
+    d = await dsvc.create(o, "D")
+    with pytest.raises(InvalidInput) as exc:
+        await dsvc.share(o, d.id, x, level="superadmin")
+    assert "not a valid access level" in str(exc.value)

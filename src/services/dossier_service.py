@@ -15,6 +15,7 @@ from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.effective_access import _effective_access
+from src.services.permission_service import LEVEL_HIERARCHY
 from src.services.exceptions import InvalidInput, NotFound
 
 
@@ -61,6 +62,10 @@ class DossierService:
         """Grant a user direct access to the dossier (the additive override)."""
         d = await self._load(dossier_id)
         await self._require(user_id, d, Action.DOSSIERS_SHARE)
+        if level not in LEVEL_HIERARCHY:
+            raise InvalidInput(
+                f"'{level}' is not a valid access level (viewer, commenter, editor, owner)."
+            )
         target = await self._resolve_user(target_user_id, target_email)
         await self._grants.set_grant("dossier", dossier_id, target, level)
 
