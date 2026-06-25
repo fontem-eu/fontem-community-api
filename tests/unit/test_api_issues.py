@@ -82,3 +82,28 @@ class TestIssueAPI:
         iid = create.json()["id"]
         resp = client.post(f"/issues/{iid}/vote", json={"direction": "up"}, headers=h)
         assert resp.status_code == 200
+
+    def test_create_general_issue_without_entity(self, client, services):
+        """A general issue (no entity_type/entity_id) is accepted — they're optional."""
+        asyncio.get_event_loop().run_until_complete(self._setup(services))
+        resp = client.post(
+            "/issues",
+            json={"title": "General feedback", "body": "Something is off", "issue_type": "other"},
+            headers=make_headers("user-1"),
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["entity_type"] == ""
+        assert resp.json()["entity_id"] == ""
+
+    def test_new_user_can_create_issue(self, client, services):
+        """Any signed-in (verified) user can file an issue — not just contributors."""
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "newbie", trust_level="new_user")
+        )
+        resp = client.post(
+            "/issues",
+            json={"title": "Typo", "body": "x", "issue_type": "incorrect_data",
+                  "entity_type": "company", "entity_id": "c1"},
+            headers=make_headers("newbie"),
+        )
+        assert resp.status_code == 201, resp.text

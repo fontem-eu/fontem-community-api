@@ -569,7 +569,7 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     Action.DOSSIERS_SHARE: _owner_or_role("admin"),
 
     # Issues
-    Action.ISSUES_CREATE: _trust_at_least_factory("contributor"),
+    Action.ISSUES_CREATE: _trust_at_least_factory("new_user"),  # all signed-in (like stories)
     Action.ISSUES_READ: _public_read,
     Action.ISSUES_COMMENT: _issues_comment,
     Action.ISSUES_VOTE: _trust_at_least_factory("commenter"),

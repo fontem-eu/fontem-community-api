@@ -14,11 +14,11 @@ from tests.conftest import seed_user
 @pytest.mark.asyncio
 class TestIssueServiceMutations:
 
-    async def test_create_requires_contributor_trust(self, services):
+    async def test_create_allows_any_signed_in_user(self, services):
         s = services
-        user = await seed_user(s["user_repo"], "u1", trust_level="commenter")
-        with pytest.raises(PermissionDenied, match="contributor"):
-            await s["issue_svc"].create(user.id, "T", "body", "other", "company", "c1")
+        user = await seed_user(s["user_repo"], "u1", trust_level="new_user")
+        issue = await s["issue_svc"].create(user.id, "T", "body", "other", "company", "c1")
+        assert issue.created_by == user.id
 
     async def test_create_allows_contributor(self, services):
         s = services

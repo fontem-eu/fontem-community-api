@@ -142,8 +142,10 @@ class TestPolicyMatrix:
         p = _principal(user_id="root", trust_level="admin")
         assert evaluate(p, Action.GROUPS_MANAGE_MEMBERS, _group(owner_id="alice")).allowed
 
-    def test_issues_create_requires_contributor(self):
-        assert not evaluate(_principal(trust_level="new_user"), Action.ISSUES_CREATE, None).allowed
+    def test_issues_create_allows_any_signed_in_user(self):
+        # Filing a data-quality issue is open to any signed-in (verified) user,
+        # like story creation — not gated behind contributor trust.
+        assert evaluate(_principal(trust_level="new_user"), Action.ISSUES_CREATE, None).allowed
         assert evaluate(_principal(trust_level="contributor"), Action.ISSUES_CREATE, None).allowed
 
     def test_issues_comment_blocked_by_mute(self):

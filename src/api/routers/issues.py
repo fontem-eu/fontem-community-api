@@ -18,10 +18,13 @@ router = APIRouter(prefix="/issues", tags=["issues"], responses=RESOURCE_RESPONS
 
 class CreateIssueRequest(BaseModel):
     title: str
-    body: str
-    issue_type: str  # incorrect_data, duplicate_entity, missing_connection, missing_entity, other
-    entity_type: str
-    entity_id: str
+    body: str = ""
+    # incorrect_data, duplicate_entity, missing_connection, missing_entity, other
+    issue_type: str = "other"
+    # entity_type/entity_id are optional — a general issue (not tied to a specific
+    # entity) is allowed; "" is the model's no-entity sentinel (NOT NULL default '').
+    entity_type: str = ""
+    entity_id: str = ""
 
 
 class UpdateStatusRequest(BaseModel):

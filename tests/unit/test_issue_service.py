@@ -10,14 +10,14 @@ from src.services.exceptions import PermissionDenied, NotFound
 class TestIssueServiceExtra:
     """Cover issue creation, comments, voting, closing, resolution."""
 
-    async def test_new_user_cannot_create_issue(self, services):
-        """Users with trust_level=new_user cannot create issues."""
+    async def test_new_user_can_create_issue(self, services):
+        """trust_level=new_user can create issues (open to any signed-in user)."""
         s = services
-        await seed_user(s["user_repo"], "newbie", trust_level="new_user")
-        with pytest.raises(PermissionDenied):
-            await s["issue_svc"].create(
-                _stable_uuid("newbie"), "Bug", "incorrect_data", "company", "x", "desc"
-            )
+        user = await seed_user(s["user_repo"], "newbie", trust_level="new_user")
+        issue = await s["issue_svc"].create(
+            user.id, "Bug", "desc", "incorrect_data", "company", "x"
+        )
+        assert issue.created_by == user.id
 
     async def test_contributor_can_create_issue(self, services):
         """Contributors can create issues."""
