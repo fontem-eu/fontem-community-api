@@ -13,6 +13,7 @@ from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.report_repository import ReportRepository
 from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.user_repository import UserRepository
+from src.services.activity_service import ActivityService
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.effective_access import _effective_access
 from src.services.permission_service import LEVEL_HIERARCHY
@@ -28,8 +29,10 @@ class DossierService:
         investigations: InvestigationRepository,
         grants: ResourceGrantRepository,
         users: UserRepository,
+        activity: ActivityService,
     ) -> None:
         self._dossiers = dossiers
+        self._activity = activity
         self._reports = reports
         self._authz = authz
         self._inv = investigations
@@ -115,9 +118,11 @@ class DossierService:
         await self._authz.require(principal, Action.DOSSIERS_CREATE)
         if not name.strip():
             raise InvalidInput("Dossier name cannot be empty")
-        return await self._dossiers.create(Dossier(
+        d = await self._dossiers.create(Dossier(
             name=name.strip(), investigation_id=investigation_id, created_by=user_id,
         ))
+        await self._activity.record(user_id, "dossier", d.id or "", "created", d.name)
+        return d
 
     async def get(self, user_id: str, dossier_id: str) -> Dossier:
         d = await self._load(dossier_id)
@@ -133,7 +138,9 @@ class DossierService:
         if not name.strip():
             raise InvalidInput("Dossier name cannot be empty")
         d.name = name.strip()
-        return await self._dossiers.update(d)
+        updated = await self._dossiers.update(d)
+        await self._activity.record(user_id, "dossier", dossier_id, "updated", updated.name)
+        return updated
 
     async def delete(self, user_id: str, dossier_id: str, content: str = "orphan") -> None:
         if content not in ("cascade", "orphan"):
@@ -147,6 +154,7 @@ class DossierService:
             else:  # orphan — detach from the dossier, keep the article
                 await self._reports.set_dossier(art.id, None, None)  # type: ignore[arg-type]
         await self._dossiers.delete(dossier_id)
+        await self._activity.record(user_id, "dossier", dossier_id, "deleted", d.name)
 
     async def tree(self, user_id: str, dossier_id: str) -> list[dict]:
         """Articles in the dossier as flat tree nodes ({id, title, parent_id});

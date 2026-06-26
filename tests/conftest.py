@@ -30,6 +30,7 @@ from src.infra.memory.mem_dossier_repo import InMemoryDossierRepository
 from src.infra.memory.mem_visualization_repo import InMemoryVisualizationRepository
 from src.infra.memory.mem_resource_grant_repo import InMemoryResourceGrantRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
+from src.infra.memory.mem_activity_repo import InMemoryActivityRepository
 from src.infra.memory.mem_moderation_repo import InMemoryModerationRepository
 from src.infra.memory.mem_permission_repo import InMemoryPermissionRepository
 from src.infra.memory.mem_authz_audit_repo import InMemoryAuthzAuditRepository
@@ -40,6 +41,7 @@ from src.infra.memory.mem_auth_token_repo import InMemoryAuthTokenRepository
 from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
 from src.services.issue_service import IssueService
+from src.services.activity_service import ActivityService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
 from src.services.authz import AuthorizationService
@@ -110,13 +112,16 @@ def services():
     dossier_repo = InMemoryDossierRepository()
     visualization_repo = InMemoryVisualizationRepository()
     resource_grant_repo = InMemoryResourceGrantRepository()
+    activity_repo = InMemoryActivityRepository()
+    activity_svc = ActivityService(activity_repo)
     investigation_svc = InvestigationService(
-        investigation_repo, user_repo, authz_svc, report_repo, dossier_repo, visualization_repo)
-    dossier_svc = DossierService(dossier_repo, report_repo, authz_svc, investigation_repo, resource_grant_repo, user_repo)
+        investigation_repo, user_repo, authz_svc, report_repo, dossier_repo, visualization_repo,
+        activity_svc)
+    dossier_svc = DossierService(dossier_repo, report_repo, authz_svc, investigation_repo, resource_grant_repo, user_repo, activity_svc)
     visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
     inheritance = AccessInheritance(investigation_repo, dossier_repo)
-    report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance, user_repo, group_repo)
-    issue_svc = IssueService(issue_repo, user_repo, authz_svc)
+    report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance, user_repo, group_repo, activity_svc)
+    issue_svc = IssueService(issue_repo, user_repo, authz_svc, activity_svc)
     mod_svc = ModerationService(mod_repo, user_repo, authz_svc)
     tag_svc = TagService(report_repo, tag_follow_repo, perm_svc, authz_svc)
     flower_svc = FlowerService(flower_repo, report_repo, authz_svc)
@@ -139,6 +144,8 @@ def services():
         "report_repo": report_repo,
         "permission_repo": permission_repo,
         "issue_repo": issue_repo,
+        "activity_repo": activity_repo,
+        "activity_svc": activity_svc,
         "mod_repo": mod_repo,
         "tag_follow_repo": tag_follow_repo,
         "flower_repo": flower_repo,

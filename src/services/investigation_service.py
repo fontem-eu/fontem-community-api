@@ -15,6 +15,7 @@ from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.report_repository import ReportRepository
 from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.user_repository import UserRepository
+from src.services.activity_service import ActivityService
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
 
@@ -43,8 +44,10 @@ class InvestigationService:
         reports: ReportRepository,
         dossiers: DossierRepository,
         visualizations: VisualizationRepository,
+        activity: ActivityService,
     ) -> None:
         self._inv = investigations
+        self._activity = activity
         self._users = users
         self._authz = authz
         self._reports = reports
@@ -85,6 +88,7 @@ class InvestigationService:
             user_id=user_id,
             role="owner",
         ))
+        await self._activity.record(user_id, "investigation", inv.id or "", "created", inv.name)
         return inv
 
     async def get(self, user_id: str | None, investigation_id: str) -> Investigation:
@@ -124,7 +128,11 @@ class InvestigationService:
             inv.name = name.strip()
         if description is not None:
             inv.description = description
-        return await self._inv.update(inv)
+        updated = await self._inv.update(inv)
+        await self._activity.record(
+            user_id, "investigation", investigation_id, "updated", updated.name
+        )
+        return updated
 
     async def delete(
         self, user_id: str, investigation_id: str, content: str = "orphan",
@@ -145,6 +153,7 @@ class InvestigationService:
         else:
             await self._orphan_content(investigation_id)
         await self._inv.delete(investigation_id)
+        await self._activity.record(user_id, "investigation", investigation_id, "deleted", inv.name)
 
     async def _cascade_content(self, investigation_id: str) -> None:
         """Delete contained dossiers (with their articles), loose articles, and

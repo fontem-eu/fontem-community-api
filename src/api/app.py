@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from src.api.di import make_container
 from src.api.rate_limit import limiter
 from src.api.routers import (
-    auth, dossiers, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
+    activity, auth, dossiers, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
 )
 from src.assistant import router as assistant_router
 from src.infra.postgres.models import Base
@@ -311,6 +311,7 @@ def build_app(database_url: str | None = None) -> FastAPI:
     application.include_router(flowers.router, prefix=_DATA_STORIES_PREFIX)
     application.include_router(flowers.router, prefix=_REPORTS_ALIAS_PREFIX, deprecated=True)
     application.include_router(issues.router)
+    application.include_router(activity.router)
     application.include_router(users.router)
     application.include_router(groups.router)
     application.include_router(investigations.router)

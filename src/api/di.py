@@ -35,6 +35,7 @@ from src.infra.postgres.pg_dossier_repo import PgDossierRepository
 from src.infra.postgres.pg_visualization_repo import PgVisualizationRepository
 from src.infra.postgres.pg_resource_grant_repo import PgResourceGrantRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
+from src.infra.postgres.pg_activity_repo import PgActivityRepository
 from src.infra.postgres.pg_moderation_repo import PgModerationRepository
 from src.infra.postgres.pg_permission_repo import PgPermissionRepository
 from src.infra.postgres.pg_report_repo import PgReportRepository
@@ -49,6 +50,7 @@ from src.repositories.dossier_repository import DossierRepository
 from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.issue_repository import IssueRepository
+from src.repositories.activity_repository import ActivityRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
@@ -64,6 +66,7 @@ from src.services.investigation_service import InvestigationService
 from src.services.visualization_service import VisualizationService
 from src.services.dossier_service import DossierService
 from src.services.issue_service import IssueService
+from src.services.activity_service import ActivityService
 from src.services.moderation_service import ModerationService
 from src.services.access_inheritance import AccessInheritance
 from src.services.permission_service import PermissionService
@@ -175,6 +178,10 @@ class RepositoryProvider(Provider):
         return PgIssueRepository(session)
 
     @provide(scope=Scope.REQUEST)
+    def activity_repo(self, session: AsyncSession) -> ActivityRepository:
+        return PgActivityRepository(session)
+
+    @provide(scope=Scope.REQUEST)
     def moderation_repo(self, session: AsyncSession) -> ModerationRepository:
         return PgModerationRepository(session)
 
@@ -263,10 +270,12 @@ class ServiceProvider(Provider):
         reports: ReportRepository,
         dossiers: DossierRepository,
         visualizations: VisualizationRepository,
+        activity: ActivityService,
     ) -> InvestigationService:
         return InvestigationService(
             investigations=investigations, users=users, authz=authz,
             reports=reports, dossiers=dossiers, visualizations=visualizations,
+            activity=activity,
         )
 
     @provide(scope=Scope.REQUEST)
@@ -292,10 +301,11 @@ class ServiceProvider(Provider):
         investigations: InvestigationRepository,
         grants: ResourceGrantRepository,
         users: UserRepository,
+        activity: ActivityService,
     ) -> DossierService:
         return DossierService(
             dossiers=dossiers, reports=reports, authz=authz, investigations=investigations,
-            grants=grants, users=users,
+            grants=grants, users=users, activity=activity,
         )
 
     @provide(scope=Scope.REQUEST)
@@ -324,20 +334,26 @@ class ServiceProvider(Provider):
         inheritance: AccessInheritance,
         users: UserRepository,
         groups: GroupRepository,
+        activity: ActivityService,
     ) -> ReportService:
         return ReportService(
             reports=reports, perms=perms, authz=authz, inheritance=inheritance,
-            users=users, groups=groups,
+            users=users, groups=groups, activity=activity,
         )
 
     @provide(scope=Scope.REQUEST)
-    def issue_service(
+    def issue_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         issues: IssueRepository,
         users: UserRepository,
         authz: AuthorizationService,
+        activity: ActivityService,
     ) -> IssueService:
-        return IssueService(issues=issues, users=users, authz=authz)
+        return IssueService(issues=issues, users=users, authz=authz, activity=activity)
+
+    @provide(scope=Scope.REQUEST)
+    def activity_service(self, activity: ActivityRepository) -> ActivityService:
+        return ActivityService(activity_repo=activity)
 
     @provide(scope=Scope.REQUEST)
     def moderation_service(

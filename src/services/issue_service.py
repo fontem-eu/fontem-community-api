@@ -13,17 +13,20 @@ from src.domain.issue import Comment, Issue
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
+from src.services.activity_service import ActivityService
 from src.services.exceptions import Conflict, NotFound, PermissionDenied
 
 
 class IssueService:
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         issues: IssueRepository,
         users: UserRepository,
         authz: AuthorizationService,
+        activity: ActivityService,
     ) -> None:
         self._issues = issues
+        self._activity = activity
         self._users = users
         self._authz = authz
 
@@ -50,7 +53,9 @@ class IssueService:
             entity_id=entity_id,
             created_by=user_id,
         )
-        return await self._issues.create(issue)
+        created = await self._issues.create(issue)
+        await self._activity.record(user_id, "issue", created.id or "", "created", created.title)
+        return created
 
     async def add_comment(self, user_id: str, issue_id: str, body: str) -> Comment:
         issue = await self._issues.get_by_id(issue_id)

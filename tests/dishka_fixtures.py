@@ -22,6 +22,7 @@ from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.dossier_repository import DossierRepository
 from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.issue_repository import IssueRepository
+from src.repositories.activity_repository import ActivityRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
@@ -32,6 +33,7 @@ from src.repositories.tag_follow_repository import TagFollowRepository
 from src.infra.minio_client import MinioStorage
 from src.repositories.user_repository import UserRepository
 from src.services.issue_service import IssueService
+from src.services.activity_service import ActivityService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
 from src.services.authz import AuthorizationService
@@ -96,6 +98,10 @@ class InMemoryProvider(Provider):
         return self._svc["issue_repo"]
 
     @provide(scope=Scope.REQUEST)
+    def activity_repo(self) -> ActivityRepository:
+        return self._svc["activity_repo"]
+
+    @provide(scope=Scope.REQUEST)
     def moderation_repo(self) -> ModerationRepository:
         return self._svc["mod_repo"]
 
@@ -154,6 +160,10 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def issue_service(self) -> IssueService:
         return self._svc["issue_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def activity_service(self) -> ActivityService:
+        return self._svc["activity_svc"]
 
     @provide(scope=Scope.REQUEST)
     def moderation_service(self) -> ModerationService:

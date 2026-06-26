@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from src.domain.report import Report, Section
 from src.repositories.report_repository import ReportRepository
+from src.services.activity_service import ActivityService
 from src.services.authz import (
     Action,
     AuthorizationService,
@@ -33,7 +34,7 @@ DEFAULT_LOCK_TTL = 300  # 5 minutes
 
 
 class ReportService:
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         reports: ReportRepository,
         perms: PermissionService,
@@ -41,8 +42,10 @@ class ReportService:
         inheritance: AccessInheritance,
         users: UserRepository,
         groups: GroupRepository,
+        activity: ActivityService,
     ) -> None:
         self._reports = reports
+        self._activity = activity
         self._perms = perms
         self._authz = authz
         self._inheritance = inheritance
@@ -98,6 +101,7 @@ class ReportService:
         )
         report = await self._reports.create(report)
         await self._perms.grant_access(report.id, user_id, "owner")
+        await self._activity.record(user_id, "story", report.id or "", "created", report.title)
         return report
 
     async def get(self, user_id: str, report_id: str) -> Report:
@@ -155,11 +159,13 @@ class ReportService:
         if visibility is not None:
             report.visibility = visibility
         report = await self._reports.update(report)
+        await self._activity.record(user_id, "story", report_id, "updated", report.title)
         return report
 
     async def delete(self, user_id: str, report_id: str) -> None:
-        await self._load_for(user_id, report_id, Action.STORIES_DELETE)
+        report, _ = await self._load_for(user_id, report_id, Action.STORIES_DELETE)
         await self._reports.delete(report_id)
+        await self._activity.record(user_id, "story", report_id, "deleted", report.title)
 
     async def add_section(self, user_id: str, report_id: str, content: dict) -> Section:
         await self._load_for(user_id, report_id, Action.STORIES_EDIT)

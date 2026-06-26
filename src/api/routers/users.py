@@ -110,6 +110,7 @@ async def delete_me(
         "DELETE FROM reports WHERE created_by = :uid",
         "DELETE FROM group_members WHERE user_id = :uid",
         "DELETE FROM user_roles WHERE user_id = :uid",
+        "DELETE FROM activity_log WHERE actor_id = :uid",
         "DELETE FROM users WHERE id = :uid",
     ]
     for stmt in cleanup:

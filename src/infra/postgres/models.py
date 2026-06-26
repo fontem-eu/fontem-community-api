@@ -644,3 +644,23 @@ class ResourceGrantModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+class ActivityLogModel(Base):
+    """A user's create/update/delete events, for the activity feed."""
+    __tablename__ = "activity_log"
+    __table_args__ = (
+        Index("ix_activity_log_actor", "actor_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    actor_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
+    )
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_id: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
