@@ -21,6 +21,7 @@ from src.repositories.group_repository import GroupRepository
 from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.dossier_repository import DossierRepository
 from src.repositories.visualization_repository import VisualizationRepository
+from src.repositories.data_project_repository import DataProjectRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.activity_repository import ActivityRepository
 from src.repositories.moderation_repository import ModerationRepository
@@ -41,6 +42,7 @@ from src.services.group_service import GroupService
 from src.services.investigation_service import InvestigationService
 from src.services.dossier_service import DossierService
 from src.services.visualization_service import VisualizationService
+from src.services.data_project_service import DataProjectService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
@@ -152,6 +154,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def visualization_service(self) -> VisualizationService:
         return self._svc["visualization_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def data_project_repo(self) -> DataProjectRepository:
+        return self._svc["data_project_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def data_project_service(self) -> DataProjectService:
+        return self._svc["data_project_svc"]
 
     @provide(scope=Scope.REQUEST)
     def report_service(self) -> ReportService:

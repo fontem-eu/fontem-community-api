@@ -664,3 +664,71 @@ class ActivityLogModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow
     )
+
+
+class DataProjectModel(Base):
+    # Data Studio project — owner-private container for queries + plots. New
+    # tables -> create_all provisions them (no manual ALTER needed).
+    __tablename__ = "data_projects"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_by: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    queries: Mapped[list[DataQueryModel]] = relationship(
+        "DataQueryModel", back_populates="project",
+        cascade="all, delete-orphan", order_by="DataQueryModel.sort_order", lazy="selectin",
+    )
+    plots: Mapped[list[DataPlotModel]] = relationship(
+        "DataPlotModel", back_populates="project",
+        cascade="all, delete-orphan", order_by="DataPlotModel.sort_order", lazy="selectin",
+    )
+
+
+class DataQueryModel(Base):
+    __tablename__ = "data_queries"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    project_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("data_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    lang: Mapped[str] = mapped_column(Text, nullable=False, default="cypher")
+    query: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    project: Mapped[DataProjectModel] = relationship("DataProjectModel", back_populates="queries")
+
+
+class DataPlotModel(Base):
+    __tablename__ = "data_plots"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    project_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("data_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    spec: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    project: Mapped[DataProjectModel] = relationship("DataProjectModel", back_populates="plots")

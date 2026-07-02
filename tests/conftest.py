@@ -28,6 +28,7 @@ from src.infra.memory.mem_group_repo import InMemoryGroupRepository
 from src.infra.memory.mem_investigation_repo import InMemoryInvestigationRepository
 from src.infra.memory.mem_dossier_repo import InMemoryDossierRepository
 from src.infra.memory.mem_visualization_repo import InMemoryVisualizationRepository
+from src.infra.memory.mem_data_project_repo import InMemoryDataProjectRepository
 from src.infra.memory.mem_resource_grant_repo import InMemoryResourceGrantRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
 from src.infra.memory.mem_activity_repo import InMemoryActivityRepository
@@ -51,6 +52,7 @@ from src.services.investigation_service import InvestigationService
 from src.services.dossier_service import DossierService
 from src.services.access_inheritance import AccessInheritance
 from src.services.visualization_service import VisualizationService
+from src.services.data_project_service import DataProjectService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
@@ -111,6 +113,7 @@ def services():
     investigation_repo = InMemoryInvestigationRepository()
     dossier_repo = InMemoryDossierRepository()
     visualization_repo = InMemoryVisualizationRepository()
+    data_project_repo = InMemoryDataProjectRepository()
     resource_grant_repo = InMemoryResourceGrantRepository()
     activity_repo = InMemoryActivityRepository()
     activity_svc = ActivityService(activity_repo)
@@ -119,6 +122,7 @@ def services():
         activity_svc)
     dossier_svc = DossierService(dossier_repo, report_repo, authz_svc, investigation_repo, resource_grant_repo, user_repo, activity_svc)
     visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
+    data_project_svc = DataProjectService(data_project_repo)
     inheritance = AccessInheritance(investigation_repo, dossier_repo)
     report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance, user_repo, group_repo, activity_svc)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc, activity_svc)
@@ -141,6 +145,8 @@ def services():
         "visualization_repo": visualization_repo,
         "resource_grant_repo": resource_grant_repo,
         "visualization_svc": visualization_svc,
+        "data_project_repo": data_project_repo,
+        "data_project_svc": data_project_svc,
         "report_repo": report_repo,
         "permission_repo": permission_repo,
         "issue_repo": issue_repo,
