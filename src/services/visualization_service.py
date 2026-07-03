@@ -14,6 +14,7 @@ from src.repositories.visualization_repository import VisualizationRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.effective_access import _effective_access
 from src.services.permission_service import LEVEL_HIERARCHY
+from src.services.share_targets import resolve_share_target
 from src.services.exceptions import InvalidInput, NotFound
 
 
@@ -61,8 +62,9 @@ class VisualizationService:
             raise InvalidInput(
                 f"'{level}' is not a valid access level (viewer, commenter, editor, owner)."
             )
-        target = await self._resolve_user(target_user_id, target_email)
-        await self._grants.set_grant("visualization", viz_id, target, level)
+        target = await resolve_share_target(self._users, target_user_id, target_email)
+        if target is not None:  # unknown email -> uniform no-op (no enumeration oracle)
+            await self._grants.set_grant("visualization", viz_id, target, level)
 
     async def revoke(self, user_id: str, viz_id: str, target_user_id: str) -> None:
         v = await self._load(viz_id)
@@ -81,16 +83,6 @@ class VisualizationService:
             })
         return out
 
-    async def _resolve_user(self, target_user_id: str | None, target_email: str | None) -> str:
-        if target_user_id:
-            u = await self._users.get_by_id(target_user_id)
-        elif target_email:
-            u = await self._users.get_by_email(target_email.strip().lower())
-        else:
-            raise InvalidInput("must supply target user_id or email")
-        if u is None:
-            raise NotFound("Target user not found")
-        return u.id
 
     async def effective_access(self, user_id: str, viz_id: str) -> list[dict]:
         """Who has access and why (owner / inherited:<role> / direct). READ-gated."""

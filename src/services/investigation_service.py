@@ -17,6 +17,7 @@ from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.user_repository import UserRepository
 from src.services.activity_service import ActivityService
 from src.services.authz import Action, AuthorizationService, ResourceRef
+from src.services.share_targets import resolve_share_target
 from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
 
 # User-facing owner-invariant messages (surfaced inline in the UI).
@@ -225,15 +226,10 @@ class InvestigationService:
             ResourceRef.for_investigation(inv, actor),
         )
         is_platform_admin = principal is not None and "admin" in principal.roles
-        if target_user_id:
-            target = await self._users.get_by_id(target_user_id)
-        elif target_email:
-            target = await self._users.get_by_email(target_email.strip().lower())
-        else:
-            raise InvalidInput("must supply target user_id or email")
-        if target is None:
-            raise NotFound("Target user not found")
-        target_user_id = target.id
+        resolved = await resolve_share_target(self._users, target_user_id, target_email)
+        if resolved is None:
+            return  # unknown user id/email -> uniform no-op (no enumeration oracle)
+        target_user_id = resolved
         current = await self._inv.get_member(investigation_id, target_user_id)
         actor_is_owner = (
             is_platform_admin

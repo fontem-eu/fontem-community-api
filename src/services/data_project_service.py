@@ -17,6 +17,7 @@ from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.user_repository import UserRepository
 from src.services.authz import Action, AuthorizationService, ResourceRef
 from src.services.effective_access import _effective_access
+from src.services.share_targets import resolve_share_target
 from src.services.exceptions import InvalidInput, NotFound
 from src.services.permission_service import LEVEL_HIERARCHY
 
@@ -177,8 +178,9 @@ class DataProjectService:
             raise InvalidInput(
                 f"'{level}' is not a valid access level (viewer, commenter, editor, owner)."
             )
-        target = await self._resolve_user(target_user_id, target_email)
-        await self._grants.set_grant(_RESOURCE, project_id, target, level)
+        target = await resolve_share_target(self._users, target_user_id, target_email)
+        if target is not None:  # unknown email -> uniform no-op (no enumeration oracle)
+            await self._grants.set_grant(_RESOURCE, project_id, target, level)
 
     async def revoke(self, user_id: str, project_id: str, target_user_id: str) -> None:
         project = await self._load(project_id)
@@ -206,16 +208,6 @@ class DataProjectService:
             project.created_by, project.investigation_id,
         )
 
-    async def _resolve_user(self, target_user_id: str | None, target_email: str | None) -> str:
-        if target_user_id:
-            u = await self._users.get_by_id(target_user_id)
-        elif target_email:
-            u = await self._users.get_by_email(target_email.strip().lower())
-        else:
-            raise InvalidInput("must supply target user_id or email")
-        if u is None:
-            raise NotFound("Target user not found")
-        return u.id
 
     # ── queries ─────────────────────────────────────────────────
     async def add_query(  # pylint: disable=too-many-arguments,too-many-positional-arguments

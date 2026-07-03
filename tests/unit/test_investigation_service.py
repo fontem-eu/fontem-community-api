@@ -148,13 +148,18 @@ async def test_invite_member_by_email(services):
 
 
 @pytest.mark.asyncio
-async def test_invite_unknown_email_404(services):
+async def test_invite_unknown_email_is_uniform_noop(services):
+    """Inviting an unregistered email must NOT reveal that it doesn't exist
+    (user-enumeration oracle): uniform success, and no member is added."""
     await seed_user(services["user_repo"], "u1")
     svc = services["investigation_svc"]
     u1 = _stable_uuid("u1")
     inv = await svc.create(u1, "I")
-    with pytest.raises(NotFound):
-        await svc.set_member(u1, inv.id, target_email="nobody@x.io")
+    before = len(await svc.list_members(u1, inv.id))
+    # no raise (same response as inviting a real user) ...
+    await svc.set_member(u1, inv.id, target_email="nobody@x.io")
+    # ... but nothing was actually added
+    assert len(await svc.list_members(u1, inv.id)) == before
 
 
 # ── owner "abandon" corner cases ──

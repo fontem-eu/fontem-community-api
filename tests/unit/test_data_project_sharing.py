@@ -275,3 +275,22 @@ async def test_access_flags_reflect_role(services):
     assert viewer["level"] == "viewer" and not viewer["can_edit"]
     granted = await flags(x)  # editor grant
     assert granted["can_edit"] and not granted["can_share"]
+
+
+# ── user-enumeration hardening (share-by-email) ─────────────────
+@pytest.mark.asyncio
+async def test_share_by_email_no_enumeration_oracle(services):
+    """Sharing to a registered vs unregistered email must be indistinguishable
+    (no user-enumeration): both succeed, only the real user gets a grant."""
+    o, x = await _users(services, "o", "x")  # x is a real user
+    dsvc = services["data_project_svc"]
+    p = await _project(services, o)
+    # share to a REAL email -> succeeds + grant created
+    await dsvc.share(o, p.id, target_email="x@test.com", level="viewer")
+    assert (await dsvc.get_project(x, p.id)).id == p.id  # x can now read
+    # share to an UNKNOWN email -> same outcome (no raise), no grant created
+    await dsvc.share(o, p.id, target_email="ghost-nobody@nowhere.tld", level="viewer")
+    grants = await dsvc.list_grants(o, p.id)
+    assert not any(g["email"] == "ghost-nobody@nowhere.tld" for g in grants)
+    # exactly one direct grant exists (x), proving the unknown email was a no-op
+    assert len(grants) == 1 and grants[0]["user_id"] == x
