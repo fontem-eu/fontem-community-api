@@ -98,5 +98,22 @@ class AuthorizationService:
         if not verdict.allowed:
             raise PermissionDenied(verdict.reason)
 
+    def can_do(
+        self,
+        principal: Principal | None,
+        action: Action,
+        resource: ResourceRef | None = None,
+    ) -> bool:
+        """Non-auditing capability probe for cheap UI hints.
+
+        Unlike :meth:`decide` this records NOTHING — use it to answer
+        "should the client show the edit/share button?" without spamming
+        the audit log on every read. The real gate is still ``require`` on
+        the mutation itself. Synchronous: the principal is already built.
+        """
+        if principal is None:
+            return False
+        return evaluate(principal, action, resource).allowed
+
 
 __all__ = ["AuthorizationService"]

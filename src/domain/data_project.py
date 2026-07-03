@@ -35,6 +35,9 @@ class DataProject:  # pylint: disable=too-many-instance-attributes
     id: str | None = None
     name: str = ""
     created_by: str = ""
+    # When set, the project is attached to an investigation and its members
+    # inherit access by role (viewer→read, contributor→edit, owner→own).
+    investigation_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     queries: list[DataQuery] = field(default_factory=list)

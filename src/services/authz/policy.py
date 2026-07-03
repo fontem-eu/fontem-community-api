@@ -181,6 +181,18 @@ class ResourceRef:
             effective_grant=effective_grant,
         )
 
+    @classmethod
+    def for_data_project(
+        cls, project, member_role: str | None = None, effective_grant: str | None = None,
+    ) -> "ResourceRef":
+        return cls(
+            kind="data_project",
+            id=project.id,
+            owner_id=getattr(project, "created_by", None),
+            member_role=member_role,
+            effective_grant=effective_grant,
+        )
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -252,6 +264,8 @@ _VERIFIED_REQUIRED: frozenset[str] = frozenset({
     Action.INVESTIGATIONS_REMOVE_STORY,
     Action.INVESTIGATIONS_ADD_VIZ,
     Action.INVESTIGATIONS_REMOVE_VIZ,
+    Action.INVESTIGATIONS_ADD_DATA_PROJECT,
+    Action.INVESTIGATIONS_REMOVE_DATA_PROJECT,
     Action.DOSSIERS_CREATE,
     Action.DOSSIERS_EDIT,
     Action.DOSSIERS_DELETE,
@@ -262,6 +276,10 @@ _VERIFIED_REQUIRED: frozenset[str] = frozenset({
     Action.VISUALIZATIONS_DELETE,
     Action.DOSSIERS_SHARE,
     Action.VISUALIZATIONS_SHARE,
+    Action.DATA_PROJECTS_CREATE,
+    Action.DATA_PROJECTS_EDIT,
+    Action.DATA_PROJECTS_DELETE,
+    Action.DATA_PROJECTS_SHARE,
 })
 
 
@@ -550,6 +568,8 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     Action.INVESTIGATIONS_REMOVE_STORY: _inv_role_at_least("contributor"),
     Action.INVESTIGATIONS_ADD_VIZ: _inv_role_at_least("contributor"),
     Action.INVESTIGATIONS_REMOVE_VIZ: _inv_role_at_least("contributor"),
+    Action.INVESTIGATIONS_ADD_DATA_PROJECT: _inv_role_at_least("contributor"),
+    Action.INVESTIGATIONS_REMOVE_DATA_PROJECT: _inv_role_at_least("contributor"),
     Action.INVESTIGATIONS_DELETE: _inv_owner,
 
     # Dossiers — owner-gated (creator); create gated by trust.
@@ -564,6 +584,16 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     Action.VISUALIZATIONS_EDIT: _owner_role_or_grant("contributor"),
     Action.VISUALIZATIONS_DELETE: _owner_role_or_grant("owner"),
     Action.VISUALIZATIONS_SHARE: _owner_or_role("admin"),
+
+    # Data Studio projects — same additive gate as viz/dossiers: owner →
+    # investigation role → direct grant. SHARE (manage grants + attach) needs
+    # ownership or an admin investigation seat, with no direct-grant path so a
+    # viewer/editor grant can't re-share.
+    Action.DATA_PROJECTS_CREATE: _trust_at_least_factory("new_user"),
+    Action.DATA_PROJECTS_READ: _owner_role_or_grant("viewer"),
+    Action.DATA_PROJECTS_EDIT: _owner_role_or_grant("contributor"),
+    Action.DATA_PROJECTS_DELETE: _owner_role_or_grant("owner"),
+    Action.DATA_PROJECTS_SHARE: _owner_or_role("admin"),
     Action.DOSSIERS_ADD_ARTICLE: _owner_role_or_grant("contributor"),
     Action.DOSSIERS_REMOVE_ARTICLE: _owner_role_or_grant("contributor"),
     Action.DOSSIERS_SHARE: _owner_or_role("admin"),

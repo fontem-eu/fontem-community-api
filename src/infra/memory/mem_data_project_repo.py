@@ -47,6 +47,18 @@ class InMemoryDataProjectRepository(DataProjectRepository):
         projects = [self._hydrate(pid) for pid in ids]
         return sorted(projects, key=lambda p: p.updated_at or _now(), reverse=True)
 
+    async def list_by_investigation(self, investigation_id: str) -> list[DataProject]:
+        ids = [pid for pid, p in self._projects.items()
+               if p.investigation_id == investigation_id]
+        projects = [self._hydrate(pid) for pid in ids]
+        return sorted(projects, key=lambda p: p.updated_at or _now(), reverse=True)
+
+    async def set_investigation(self, project_id: str, investigation_id: str | None) -> None:
+        stored = self._projects.get(project_id)
+        if stored is not None:
+            stored.investigation_id = investigation_id
+            stored.updated_at = _now()
+
     async def update_project(self, project: DataProject) -> DataProject:
         stored = self._projects[project.id]
         stored.name = project.name

@@ -333,8 +333,17 @@ class ServiceProvider(Provider):
         return AccessInheritance(investigations=investigations, dossiers=dossiers)
 
     @provide(scope=Scope.REQUEST)
-    def data_project_service(self, repo: DataProjectRepository) -> DataProjectService:
-        return DataProjectService(repo)
+    def data_project_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        repo: DataProjectRepository,
+        investigations: InvestigationRepository,
+        authz: AuthorizationService,
+        grants: ResourceGrantRepository,
+        users: UserRepository,
+    ) -> DataProjectService:
+        return DataProjectService(
+            repo=repo, investigations=investigations, authz=authz, grants=grants, users=users,
+        )
 
     @provide(scope=Scope.REQUEST)
     def report_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments

@@ -122,7 +122,8 @@ def services():
         activity_svc)
     dossier_svc = DossierService(dossier_repo, report_repo, authz_svc, investigation_repo, resource_grant_repo, user_repo, activity_svc)
     visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
-    data_project_svc = DataProjectService(data_project_repo)
+    data_project_svc = DataProjectService(
+        data_project_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
     inheritance = AccessInheritance(investigation_repo, dossier_repo)
     report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance, user_repo, group_repo, activity_svc)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc, activity_svc)

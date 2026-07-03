@@ -17,6 +17,14 @@ class DataProjectRepository(ABC):
     async def list_for_user(self, user_id: str) -> list[DataProject]: ...
 
     @abstractmethod
+    async def list_by_investigation(self, investigation_id: str) -> list[DataProject]: ...
+
+    @abstractmethod
+    async def set_investigation(
+        self, project_id: str, investigation_id: str | None
+    ) -> None: ...
+
+    @abstractmethod
     async def update_project(self, project: DataProject) -> DataProject: ...
 
     @abstractmethod

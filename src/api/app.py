@@ -172,6 +172,16 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
                 "CREATE INDEX IF NOT EXISTS ix_reports_parent_id "
                 "ON reports (parent_id) WHERE parent_id IS NOT NULL"
             ))
+            # data_projects predates investigation sharing; create_all won't add
+            # the column to the existing table, so ALTER it in explicitly.
+            await conn.execute(text(
+                "ALTER TABLE data_projects ADD COLUMN IF NOT EXISTS investigation_id UUID "
+                "REFERENCES investigations(id) ON DELETE SET NULL"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_data_projects_investigation "
+                "ON data_projects (investigation_id) WHERE investigation_id IS NOT NULL"
+            ))
         await engine.dispose()
 
     yield

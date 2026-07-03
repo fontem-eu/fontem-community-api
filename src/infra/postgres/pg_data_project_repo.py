@@ -34,6 +34,7 @@ class PgDataProjectRepository(DataProjectRepository):
     def _project_to_domain(self, row: DataProjectModel) -> DataProject:
         return DataProject(
             id=row.id, name=row.name, created_by=row.created_by,
+            investigation_id=row.investigation_id,
             created_at=row.created_at, updated_at=row.updated_at,
             queries=[self._query_to_domain(q) for q in row.queries],
             plots=[self._plot_to_domain(p) for p in row.plots],
@@ -43,12 +44,14 @@ class PgDataProjectRepository(DataProjectRepository):
         now = datetime.now(timezone.utc)
         model = DataProjectModel(
             id=project.id or str(uuid4()), name=project.name,
-            created_by=project.created_by, created_at=now, updated_at=now,
+            created_by=project.created_by, investigation_id=project.investigation_id,
+            created_at=now, updated_at=now,
         )
         self._session.add(model)
         await self._session.commit()
         return DataProject(
             id=model.id, name=model.name, created_by=model.created_by,
+            investigation_id=model.investigation_id,
             created_at=model.created_at, updated_at=model.updated_at, queries=[], plots=[],
         )
 
@@ -65,6 +68,23 @@ class PgDataProjectRepository(DataProjectRepository):
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         return [self._project_to_domain(r) for r in rows]
+
+    async def list_by_investigation(self, investigation_id: str) -> list[DataProject]:
+        stmt = (
+            select(DataProjectModel)
+            .where(DataProjectModel.investigation_id == investigation_id)
+            .order_by(DataProjectModel.updated_at.desc())
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [self._project_to_domain(r) for r in rows]
+
+    async def set_investigation(self, project_id: str, investigation_id: str | None) -> None:
+        await self._session.execute(
+            DataProjectModel.__table__.update()
+            .where(DataProjectModel.id == project_id)
+            .values(investigation_id=investigation_id)
+        )
+        await self._session.commit()
 
     async def update_project(self, project: DataProject) -> DataProject:
         model = await self._session.get(DataProjectModel, project.id)

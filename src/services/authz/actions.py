@@ -59,6 +59,8 @@ class Action(StrEnum):
     INVESTIGATIONS_REMOVE_STORY = "investigations:remove_story"
     INVESTIGATIONS_ADD_VIZ = "investigations:add_viz"
     INVESTIGATIONS_REMOVE_VIZ = "investigations:remove_viz"
+    INVESTIGATIONS_ADD_DATA_PROJECT = "investigations:add_data_project"
+    INVESTIGATIONS_REMOVE_DATA_PROJECT = "investigations:remove_data_project"
 
     # ── Dossiers ──────────────────────────────────────────────
     # Thin tree-of-articles. Owned by the creator; all mutations are
@@ -81,6 +83,17 @@ class Action(StrEnum):
     VISUALIZATIONS_EDIT = "visualizations:edit"
     VISUALIZATIONS_DELETE = "visualizations:delete"
     VISUALIZATIONS_SHARE = "visualizations:share"
+
+    # ── Data Studio projects ──────────────────────────────────
+    # Server-side saved query/plot recipes. Owned by the creator; attaching to
+    # an investigation lets its members inherit access (viewer→read,
+    # contributor→edit, owner→own) exactly like visualizations. EDIT covers the
+    # project's queries + plots (sub-resources); DELETE is the whole project.
+    DATA_PROJECTS_CREATE = "data_projects:create"
+    DATA_PROJECTS_READ = "data_projects:read"
+    DATA_PROJECTS_EDIT = "data_projects:edit"
+    DATA_PROJECTS_DELETE = "data_projects:delete"
+    DATA_PROJECTS_SHARE = "data_projects:share"
 
     # ── Issues + comments ─────────────────────────────────────
     ISSUES_CREATE = "issues:create"

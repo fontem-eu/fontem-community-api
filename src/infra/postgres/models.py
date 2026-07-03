@@ -667,14 +667,20 @@ class ActivityLogModel(Base):
 
 
 class DataProjectModel(Base):
-    # Data Studio project — owner-private container for queries + plots. New
-    # tables -> create_all provisions them (no manual ALTER needed).
+    # Data Studio project — container for queries + plots. Owned by its creator;
+    # optionally attached to an investigation so members inherit access. The
+    # investigation_id column is added to the existing table via an explicit
+    # ALTER in the app lifespan (create_all only creates new tables, it never
+    # adds columns to existing ones) — see app.py.
     __tablename__ = "data_projects"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     name: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_by: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    investigation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("investigations.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow
