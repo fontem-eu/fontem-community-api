@@ -4,7 +4,7 @@ from dataclasses import asdict
 from typing import Annotated, Literal
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user, get_optional_user
@@ -43,6 +43,7 @@ class UpdateReportRequest(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     abstract: str | None = Field(default=None, max_length=4000)
     visibility: Literal["private", "public_open", "public_auth"] | None = None
+    language: str | None = Field(default=None, pattern="^[a-z]{2}$")
 
 
 class CreateSectionRequest(BaseModel):
@@ -57,6 +58,19 @@ class SaveDocumentRequest(BaseModel):
     """Save the full TipTap JSON document (v2 format)."""
     tiptap: dict
     version: int = 2
+
+
+class SaveTranslationRequest(BaseModel):
+    """Create/replace one language's translation of a story."""
+    title: str = Field(default="", max_length=300)
+    abstract: str | None = Field(default=None, max_length=4000)
+    tiptap: dict
+    version: int = 2
+
+
+# path param for the translation endpoints; mirrors the service check so
+# swagger-driven fuzzing gets a 422 (schema) rather than a 400 (impl).
+LangPath = Annotated[str, Path(pattern="^[a-z]{2}$")]
 
 
 @router.post("", status_code=201)
@@ -155,6 +169,12 @@ async def get_report(
     # Tag pills on the story page render from this; the same payload
     # also seeds the editor when the owner edits tags.
     result["tags"] = await svc.get_tags(report_id)
+    # Language switcher on the story page renders from this summary —
+    # full translated bodies are fetched lazily per language.
+    _, tmeta = await svc.list_translations(uid, report_id)
+    result["translations"] = [
+        {"lang": t["lang"], "outdated": t["outdated"]} for t in tmeta
+    ]
     # Rewrite every `/uploads/<key>` reference in the payload to a
     # freshly-signed URL. Authz has already cleared the read; this is
     # purely the URL-minting step. The bucket itself is private.
@@ -170,7 +190,10 @@ async def update_report(
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    report = await svc.update(user.id, report_id, body.title, body.abstract, body.visibility)
+    report = await svc.update(
+        user.id, report_id, body.title, body.abstract, body.visibility,
+        language=body.language,
+    )
     return asdict(report)
 
 
@@ -281,6 +304,92 @@ async def list_versions(
 
 
 # ── v2 Document API ──────────────────────────────────────────
+
+@router.get("/{report_id}/translations", openapi_extra={"security": []})
+@inject
+async def list_translations(
+    report_id: UuidPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User | None, Depends(get_optional_user)],
+) -> dict:
+    """Translation metadata (no bodies). Readable by whoever can read the story."""
+    uid = user.id if user is not None else None
+    report, translations = await svc.list_translations(uid, report_id)
+    return {
+        "language": report.language,
+        "content_version": report.content_version,
+        "translations": translations,
+    }
+
+
+@router.get("/{report_id}/translations/{lang}", openapi_extra={"security": []})
+@inject
+async def get_translation(
+    report_id: UuidPath,
+    lang: LangPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User | None, Depends(get_optional_user)],
+) -> dict:
+    uid = user.id if user is not None else None
+    t, outdated = await svc.get_translation(uid, report_id, lang)
+    return {
+        "lang": t.lang,
+        "title": t.title,
+        "abstract": t.abstract,
+        "content_doc": t.content_json,
+        "source_version": t.source_version,
+        "outdated": outdated,
+        "updated_at": t.updated_at,
+    }
+
+
+@router.put("/{report_id}/translations/{lang}")
+@inject
+async def save_translation(
+    report_id: UuidPath,
+    lang: LangPath,
+    body: SaveTranslationRequest,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Upsert a translation. Saving pins it to the original's current
+    content_version, clearing any outdated flag."""
+    t = await svc.upsert_translation(
+        user.id, report_id, lang, body.title, body.abstract,
+        {"tiptap": body.tiptap, "version": body.version},
+    )
+    return {"ok": True, "lang": t.lang, "source_version": t.source_version}
+
+
+@router.post("/{report_id}/translations/{lang}/resolve")
+@inject
+async def resolve_translation(
+    report_id: UuidPath,
+    lang: LangPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Mark a translation as reviewed against the current original
+    (clears the potentially-outdated flag without editing the text)."""
+    await svc.resolve_translation(user.id, report_id, lang)
+    return {"ok": True}
+
+
+@router.delete("/{report_id}/translations/{lang}", status_code=204)
+@inject
+async def delete_translation(
+    report_id: UuidPath,
+    lang: LangPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    await svc.delete_translation(user.id, report_id, lang)
+
 
 @router.put("/{report_id}/content")
 @inject

@@ -14,6 +14,25 @@ class Report:  # pylint: disable=too-many-instance-attributes
     parent_id: str | None = None  # tree position within a dossier (None = root)
     dossier_id: str | None = None  # which dossier this article belongs to
     investigation_id: str | None = None  # direct investigation link (M4)
+    language: str = "en"  # language of the original text (ISO 639-1)
+    # Monotonic counter bumped on every translatable change (document save,
+    # title/abstract edit). Translations pin the version they were made
+    # against; translation.source_version < content_version = maybe outdated.
+    content_version: int = 1
+    created_by: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass
+class ReportTranslation:
+    id: str | None = None
+    report_id: str = ""
+    lang: str = ""  # ISO 639-1 of the translation
+    title: str = ""
+    abstract: str | None = None
+    content_json: dict = field(default_factory=dict)  # same v2 tiptap shape as sections
+    source_version: int = 1  # report.content_version this translation tracked
     created_by: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None

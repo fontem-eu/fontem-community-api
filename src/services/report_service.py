@@ -13,7 +13,9 @@ that the policy can decide on without touching the database.
 """
 from __future__ import annotations
 
-from src.domain.report import Report, Section
+import re
+
+from src.domain.report import Report, ReportTranslation, Section
 from src.repositories.report_repository import ReportRepository
 from src.services.activity_service import ActivityService
 from src.services.authz import (
@@ -22,7 +24,7 @@ from src.services.authz import (
     ResourceRef,
 )
 from src.services.authz.policy import Principal
-from src.services.exceptions import Conflict, NotFound
+from src.services.exceptions import Conflict, InvalidInput, NotFound
 from src.services.access_inheritance import AccessInheritance, max_level
 from src.repositories.group_repository import GroupRepository
 from src.repositories.user_repository import UserRepository
@@ -30,10 +32,14 @@ from src.services.permission_service import LEVEL_HIERARCHY
 from src.services.permission_service import PermissionService
 from src.services.sanitize import sanitize_html, sanitize_text
 
+_LANG_RE = re.compile(r"[a-z]{2}")
+
 DEFAULT_LOCK_TTL = 300  # 5 minutes
 
 
-class ReportService:
+class ReportService:  # pylint: disable=too-many-public-methods
+    # One service per aggregate: report + sections + versions + locks +
+    # tags + translations share authz + activity plumbing here.
     def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         reports: ReportRepository,
@@ -150,14 +156,26 @@ class ReportService:
         title: str | None = None,
         abstract: str | None = None,
         visibility: str | None = None,
+        language: str | None = None,
     ) -> Report:
         report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT_META)
+        translatable_changed = False
         if title is not None:
-            report.title = sanitize_text(title)
+            clean = sanitize_text(title)
+            translatable_changed = translatable_changed or clean != report.title
+            report.title = clean
         if abstract is not None:
-            report.abstract = sanitize_text(abstract)
+            clean = sanitize_text(abstract)
+            translatable_changed = translatable_changed or clean != report.abstract
+            report.abstract = clean
         if visibility is not None:
             report.visibility = visibility
+        if language is not None:
+            report.language = language
+        # Title/abstract are part of what translators translate — a real
+        # change makes existing translations potentially outdated.
+        if translatable_changed:
+            report.content_version += 1
         report = await self._reports.update(report)
         await self._activity.record(user_id, "story", report_id, "updated", report.title)
         return report
@@ -241,7 +259,7 @@ class ReportService:
         Replaces all existing sections with one section containing the
         full document. Previous content is saved as a version snapshot.
         """
-        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT)
         sections = await self._reports.get_sections(report_id)
         if sections:
             # Save a version of the first section before overwriting
@@ -255,6 +273,86 @@ class ReportService:
             # No sections yet — create one
             section = Section(content_json=content)
             await self._reports.add_section(report_id, section)
+        # Every document save is a content change from a translator's
+        # point of view — existing translations become maybe-outdated.
+        report.content_version += 1
+        await self._reports.update(report)
+
+    # ── translations ───────────────────────────────────────────
+    # An article has one original text (report.title/abstract/document,
+    # in report.language) and any number of translations keyed by lang.
+    # Each translation pins the content_version it was made against;
+    # a lower pin than the report's current version marks it as
+    # potentially outdated until a translator updates or resolves it.
+
+    @staticmethod
+    def _validate_lang(lang: str) -> str:
+        if not _LANG_RE.fullmatch(lang or ""):
+            raise InvalidInput("lang must be a two-letter ISO 639-1 code")
+        return lang
+
+    async def list_translations(
+        self, user_id: str | None, report_id: str
+    ) -> tuple[Report, list[dict]]:
+        """Translation metadata for the story page + editor: no bodies."""
+        report = await self.get_viewable(user_id, report_id)
+        rows = await self._reports.list_translations(report_id)
+        return report, [
+            {
+                "lang": t.lang,
+                "title": t.title,
+                "outdated": t.source_version < report.content_version,
+                "updated_at": t.updated_at,
+            }
+            for t in rows
+        ]
+
+    async def get_translation(
+        self, user_id: str | None, report_id: str, lang: str
+    ) -> tuple[ReportTranslation, bool]:
+        """One full translation + its outdated flag. Read follows the story."""
+        report = await self.get_viewable(user_id, report_id)
+        t = await self._reports.get_translation(report_id, self._validate_lang(lang))
+        if t is None:
+            raise NotFound(f"No {lang} translation for story {report_id}")
+        return t, t.source_version < report.content_version
+
+    async def upsert_translation(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, user_id: str, report_id: str, lang: str,
+        title: str, abstract: str | None, content: dict,
+    ) -> ReportTranslation:
+        """Create or replace a translation; it becomes current-by-definition
+        (pinned to the report's content_version at save time)."""
+        report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        self._validate_lang(lang)
+        translation = ReportTranslation(
+            report_id=report_id,
+            lang=lang,
+            title=sanitize_text(title),
+            abstract=sanitize_text(abstract) if abstract is not None else None,
+            content_json=content,
+            source_version=report.content_version,
+            created_by=user_id,
+        )
+        saved = await self._reports.upsert_translation(translation)
+        await self._activity.record(
+            user_id, "story", report_id, "translated", f"{report.title} [{lang}]")
+        return saved
+
+    async def resolve_translation(self, user_id: str, report_id: str, lang: str) -> None:
+        """Mark a translation as up to date with the current original —
+        the translator reviewed the original's changes and decided the
+        existing translation still stands."""
+        report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        t = await self._reports.get_translation(report_id, self._validate_lang(lang))
+        if t is None:
+            raise NotFound(f"No {lang} translation for story {report_id}")
+        t.source_version = report.content_version
+        await self._reports.upsert_translation(t)
+
+    async def delete_translation(self, user_id: str, report_id: str, lang: str) -> None:
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        await self._reports.delete_translation(report_id, self._validate_lang(lang))
 
     async def require_upload(self, user_id: str, report_id: str) -> None:
         """Authorisation gate for image/SVG upload.

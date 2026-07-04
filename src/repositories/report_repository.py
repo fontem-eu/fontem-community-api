@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from src.domain.report import Report, Section, SectionVersion
+from src.domain.report import Report, ReportTranslation, Section, SectionVersion
 
 
-class ReportRepository(ABC):
+class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
+    # Interface mirrors the report aggregate (see PgReportRepository).
     @abstractmethod
     async def create(self, report: Report) -> Report: ...
 
@@ -81,6 +82,19 @@ class ReportRepository(ABC):
 
     @abstractmethod
     async def list_children(self, parent_id: str) -> list[Report]: ...
+
+    @abstractmethod
+    async def get_translation(self, report_id: str, lang: str) -> ReportTranslation | None: ...
+
+    @abstractmethod
+    async def list_translations(self, report_id: str) -> list[ReportTranslation]: ...
+
+    @abstractmethod
+    async def upsert_translation(self, translation: ReportTranslation) -> ReportTranslation:
+        """Insert or update the (report_id, lang) translation row."""
+
+    @abstractmethod
+    async def delete_translation(self, report_id: str, lang: str) -> None: ...
 
     @abstractmethod
     async def set_dossier(

@@ -182,6 +182,17 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
                 "CREATE INDEX IF NOT EXISTS ix_data_projects_investigation "
                 "ON data_projects (investigation_id) WHERE investigation_id IS NOT NULL"
             ))
+            # Story translations shipped after reports existed in prod;
+            # create_all only creates NEW tables, so ALTER the two
+            # original-side columns in explicitly.
+            await conn.execute(text(
+                "ALTER TABLE reports ADD COLUMN IF NOT EXISTS "
+                "language TEXT NOT NULL DEFAULT 'en'"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE reports ADD COLUMN IF NOT EXISTS "
+                "content_version INTEGER NOT NULL DEFAULT 1"
+            ))
         await engine.dispose()
 
     yield

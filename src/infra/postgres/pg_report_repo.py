@@ -12,10 +12,11 @@ from uuid import uuid4
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.domain.report import Report, Section, SectionVersion
+from src.domain.report import Report, ReportTranslation, Section, SectionVersion
 from src.infra.postgres.models import (
     ReportAccessModel,
     ReportModel,
+    ReportTranslationModel,
     SectionModel,
     SectionVersionModel,
     StoryTagModel,
@@ -23,7 +24,10 @@ from src.infra.postgres.models import (
 from src.repositories.report_repository import ReportRepository
 
 
-class PgReportRepository(ReportRepository):
+class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-methods
+    # The repo mirrors the report aggregate (report + sections + versions
+    # + locks + tags + translations); splitting it would split one
+    # transaction boundary across classes.
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -39,6 +43,8 @@ class PgReportRepository(ReportRepository):
             parent_id=row.parent_id,
             dossier_id=row.dossier_id,
             investigation_id=row.investigation_id,
+            language=row.language,
+            content_version=row.content_version,
             created_by=row.created_by,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -78,6 +84,8 @@ class PgReportRepository(ReportRepository):
             parent_id=report.parent_id,
             dossier_id=report.dossier_id,
             investigation_id=report.investigation_id,
+            language=report.language,
+            content_version=report.content_version,
             created_by=report.created_by,
             created_at=report.created_at or now,
             updated_at=report.updated_at or now,
@@ -103,6 +111,8 @@ class PgReportRepository(ReportRepository):
         row.title = report.title
         row.abstract = report.abstract
         row.visibility = report.visibility
+        row.language = report.language
+        row.content_version = report.content_version
         row.updated_at = datetime.now(timezone.utc)
         await self._session.commit()
         return self._report_to_domain(row)
@@ -370,3 +380,77 @@ class PgReportRepository(ReportRepository):
             .order_by(ReportModel.created_at)
         )
         return [self._report_to_domain(r) for r in result.scalars().all()]
+
+    @staticmethod
+    def _translation_to_domain(row: ReportTranslationModel) -> ReportTranslation:
+        return ReportTranslation(
+            id=row.id,
+            report_id=row.report_id,
+            lang=row.lang,
+            title=row.title,
+            abstract=row.abstract,
+            content_json=row.content_json or {},
+            source_version=row.source_version,
+            created_by=row.created_by,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    async def get_translation(self, report_id: str, lang: str) -> ReportTranslation | None:
+        result = await self._session.execute(
+            select(ReportTranslationModel).where(
+                ReportTranslationModel.report_id == report_id,
+                ReportTranslationModel.lang == lang,
+            )
+        )
+        row = result.scalar_one_or_none()
+        return self._translation_to_domain(row) if row else None
+
+    async def list_translations(self, report_id: str) -> list[ReportTranslation]:
+        result = await self._session.execute(
+            select(ReportTranslationModel)
+            .where(ReportTranslationModel.report_id == report_id)
+            .order_by(ReportTranslationModel.lang)
+        )
+        return [self._translation_to_domain(r) for r in result.scalars().all()]
+
+    async def upsert_translation(self, translation: ReportTranslation) -> ReportTranslation:
+        result = await self._session.execute(
+            select(ReportTranslationModel).where(
+                ReportTranslationModel.report_id == translation.report_id,
+                ReportTranslationModel.lang == translation.lang,
+            )
+        )
+        row = result.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if row is None:
+            row = ReportTranslationModel(
+                id=translation.id or str(uuid4()),
+                report_id=translation.report_id,
+                lang=translation.lang,
+                title=translation.title,
+                abstract=translation.abstract,
+                content_json=translation.content_json,
+                source_version=translation.source_version,
+                created_by=translation.created_by,
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(row)
+        else:
+            row.title = translation.title
+            row.abstract = translation.abstract
+            row.content_json = translation.content_json
+            row.source_version = translation.source_version
+            row.updated_at = now
+        await self._session.commit()
+        return self._translation_to_domain(row)
+
+    async def delete_translation(self, report_id: str, lang: str) -> None:
+        await self._session.execute(
+            delete(ReportTranslationModel).where(
+                ReportTranslationModel.report_id == report_id,
+                ReportTranslationModel.lang == lang,
+            )
+        )
+        await self._session.commit()

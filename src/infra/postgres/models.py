@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     PrimaryKeyConstraint,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -121,6 +122,8 @@ class ReportModel(Base):
     investigation_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("investigations.id", ondelete="SET NULL"), nullable=True
     )
+    language: Mapped[str] = mapped_column(Text, nullable=False, default="en")
+    content_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_by: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
     )
@@ -155,6 +158,30 @@ class ReportAccessModel(Base):
     level: Mapped[str] = mapped_column(Text, nullable=False, default="viewer")
 
     report: Mapped[ReportModel] = relationship("ReportModel", back_populates="access_grants")
+
+
+class ReportTranslationModel(Base):
+    __tablename__ = "report_translations"
+    __table_args__ = (UniqueConstraint("report_id", "lang", name="uq_report_translation_lang"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    report_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+    lang: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    source_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_by: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
 
 
 class SectionModel(Base):

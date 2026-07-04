@@ -4,16 +4,20 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from src.domain.report import Report, Section, SectionVersion
+from src.domain.report import Report, ReportTranslation, Section, SectionVersion
 from src.repositories.report_repository import ReportRepository
 
 
-class InMemoryReportRepository(ReportRepository):
+class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-public-methods
+    # The repo mirrors the report aggregate (report + sections + versions
+    # + locks + tags + translations); splitting it would split one
+    # transaction boundary across classes.
     def __init__(self) -> None:
         self._reports: dict[str, Report] = {}
         self._sections: dict[str, Section] = {}
         self._versions: dict[str, list[SectionVersion]] = {}
         self._tags: dict[str, list[str]] = {}
+        self._translations: dict[tuple[str, str], ReportTranslation] = {}
 
     async def create(self, report: Report) -> Report:
         if report.id is None:
@@ -189,3 +193,29 @@ class InMemoryReportRepository(ReportRepository):
         results = [deepcopy(r) for r in self._reports.values() if r.parent_id == parent_id]
         results.sort(key=lambda r: r.created_at or datetime.min)
         return results
+
+    async def get_translation(self, report_id: str, lang: str) -> ReportTranslation | None:
+        t = self._translations.get((report_id, lang))
+        return deepcopy(t) if t else None
+
+    async def list_translations(self, report_id: str) -> list[ReportTranslation]:
+        out = [deepcopy(t) for (rid, _), t in self._translations.items() if rid == report_id]
+        out.sort(key=lambda t: t.lang)
+        return out
+
+    async def upsert_translation(self, translation: ReportTranslation) -> ReportTranslation:
+        key = (translation.report_id, translation.lang)
+        now = datetime.now(timezone.utc)
+        existing = self._translations.get(key)
+        if existing is None:
+            translation.id = translation.id or str(uuid4())
+            translation.created_at = now
+        else:
+            translation.id = existing.id
+            translation.created_at = existing.created_at
+        translation.updated_at = now
+        self._translations[key] = deepcopy(translation)
+        return deepcopy(translation)
+
+    async def delete_translation(self, report_id: str, lang: str) -> None:
+        self._translations.pop((report_id, lang), None)
