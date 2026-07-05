@@ -91,6 +91,20 @@ async def create_report(
 # requirement; otherwise it gets flagged as "API accepts requests
 # without authentication". The handler still consumes get_optional_user
 # so signed-in callers see public_auth stories on top of public_open.
+def _apply_translation(d: dict, t: dict | None, lang: str | None) -> None:
+    """Swap a feed card's title/abstract for the reader's language. The
+    original text stays available under original_title so the UI can
+    disambiguate, and translation_* fields let it badge outdated ones."""
+    if not t:
+        return
+    d["original_title"] = d["title"]
+    d["title"] = t["title"] or d["title"]
+    if t["abstract"]:
+        d["abstract"] = t["abstract"]
+    d["translation_lang"] = lang
+    d["translation_outdated"] = t["outdated"]
+
+
 @router.get(
     "",
     openapi_extra={"security": []},
@@ -107,6 +121,7 @@ async def list_reports(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=2**31 - 1)] = 0,
     tag: Annotated[str | None, Query(max_length=40)] = None,
+    lang: Annotated[str | None, Query(pattern="^[a-z]{2}$")] = None,
     svc: FromDishka[ReportService],
     user: Annotated[User | None, Depends(get_optional_user)],
 ) -> list[dict]:
@@ -121,17 +136,25 @@ async def list_reports(
         )
         # Embed tags inline so the feed cards can render the tag pills
         # without N+1 round-trips. Cheap — at most 3 per story.
+        overlay = await svc.translation_overlay(reports, lang)
         out = []
         for r in reports:
             d = asdict(r)
             d["tags"] = await svc.get_tags(r.id)
+            _apply_translation(d, overlay.get(r.id), lang)
             out.append(d)
         return out
     # scope=mine requires auth — re-raise the 401 the optional dep swallowed.
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
     reports = await svc.list_my_reports(user.id, limit, offset)
-    return [asdict(r) for r in reports]
+    overlay = await svc.translation_overlay(reports, lang)
+    out = []
+    for r in reports:
+        d = asdict(r)
+        _apply_translation(d, overlay.get(r.id), lang)
+        out.append(d)
+    return out
 
 
 # public_open reports are readable anonymously; mark the operation as

@@ -197,3 +197,59 @@ class TestTranslationAPI:
         rid = self._mk_story(client, h)
         assert client.get(f"/reports/{rid}/translations/sv", headers=h).status_code == 404
         assert client.post(f"/reports/{rid}/translations/sv/resolve", headers=h).status_code == 404
+
+    # ── feed overlay: lists show the reader's language ──────────
+
+    def test_list_shows_translated_title_and_abstract_for_lang(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._setup_users(services))
+        h = make_headers("user-1")
+        rid = self._mk_story(client, h, visibility="public_open")
+        client.put(f"/reports/{rid}/translations/pt",
+                   json={"title": "Título traduzido", "abstract": "Resumo",
+                         "tiptap": DOC_PT["tiptap"]}, headers=h)
+
+        # scope=mine
+        mine = client.get("/reports?scope=mine&lang=pt", headers=h).json()
+        card = next(c for c in mine if c["id"] == rid)
+        assert card["title"] == "Título traduzido"
+        assert card["abstract"] == "Resumo"
+        assert card["original_title"] == "Original title"
+        assert card["translation_lang"] == "pt"
+        assert card["translation_outdated"] is False
+
+        # scope=public, anonymous
+        pub = client.get("/reports?scope=public&lang=pt").json()
+        card = next(c for c in pub if c["id"] == rid)
+        assert card["title"] == "Título traduzido"
+
+    def test_list_without_lang_or_without_translation_keeps_original(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._setup_users(services))
+        h = make_headers("user-1")
+        rid = self._mk_story(client, h)
+        client.put(f"/reports/{rid}/translations/pt",
+                   json={"title": "Título", "tiptap": DOC_PT["tiptap"]}, headers=h)
+        # no lang -> original
+        card = next(c for c in client.get("/reports?scope=mine", headers=h).json()
+                    if c["id"] == rid)
+        assert card["title"] == "Original title"
+        assert "translation_lang" not in card
+        # lang without a matching translation -> original
+        card = next(c for c in client.get("/reports?scope=mine&lang=de", headers=h).json()
+                    if c["id"] == rid)
+        assert card["title"] == "Original title"
+        # lang equal to the original's language -> original (no self-overlay)
+        card = next(c for c in client.get("/reports?scope=mine&lang=en", headers=h).json()
+                    if c["id"] == rid)
+        assert card["title"] == "Original title"
+
+    def test_list_marks_outdated_translations(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._setup_users(services))
+        h = make_headers("user-1")
+        rid = self._mk_story(client, h)
+        client.put(f"/reports/{rid}/translations/pt",
+                   json={"title": "Título", "tiptap": DOC_PT["tiptap"]}, headers=h)
+        client.put(f"/reports/{rid}/content", json=DOC, headers=h)  # original moved on
+        card = next(c for c in client.get("/reports?scope=mine&lang=pt", headers=h).json()
+                    if c["id"] == rid)
+        assert card["title"] == "Título"  # still shown, but…
+        assert card["translation_outdated"] is True

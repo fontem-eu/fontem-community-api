@@ -291,6 +291,30 @@ class ReportService:  # pylint: disable=too-many-public-methods
             raise InvalidInput("lang must be a two-letter ISO 639-1 code")
         return lang
 
+    async def translation_overlay(
+        self, reports: list[Report], lang: str | None
+    ) -> dict[str, dict]:
+        """Feed-card overlay: for stories translated into ``lang``, the
+        translated title/abstract (+ outdated flag) keyed by story id.
+        Stories whose original already is ``lang`` are left alone."""
+        if not lang or not _LANG_RE.fullmatch(lang):
+            return {}
+        ids = [r.id for r in reports if r.id and r.language != lang]
+        if not ids:
+            return {}
+        by_id = {r.id: r for r in reports}
+        out: dict[str, dict] = {}
+        for t in await self._reports.get_translation_summaries(ids, lang):
+            report = by_id.get(t.report_id)
+            if report is None:
+                continue
+            out[t.report_id] = {
+                "title": t.title,
+                "abstract": t.abstract,
+                "outdated": t.source_version < report.content_version,
+            }
+        return out
+
     async def list_translations(
         self, user_id: str | None, report_id: str
     ) -> tuple[Report, list[dict]]:

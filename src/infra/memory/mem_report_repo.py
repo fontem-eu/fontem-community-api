@@ -219,3 +219,10 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
 
     async def delete_translation(self, report_id: str, lang: str) -> None:
         self._translations.pop((report_id, lang), None)
+
+    async def get_translation_summaries(
+        self, report_ids: list[str], lang: str
+    ) -> list[ReportTranslation]:
+        wanted = set(report_ids)
+        return [deepcopy(t) for (rid, l), t in self._translations.items()
+                if l == lang and rid in wanted]

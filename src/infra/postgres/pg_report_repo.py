@@ -454,3 +454,16 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
             )
         )
         await self._session.commit()
+
+    async def get_translation_summaries(
+        self, report_ids: list[str], lang: str
+    ) -> list[ReportTranslation]:
+        if not report_ids:
+            return []
+        result = await self._session.execute(
+            select(ReportTranslationModel).where(
+                ReportTranslationModel.report_id.in_(report_ids),
+                ReportTranslationModel.lang == lang,
+            )
+        )
+        return [self._translation_to_domain(r) for r in result.scalars().all()]

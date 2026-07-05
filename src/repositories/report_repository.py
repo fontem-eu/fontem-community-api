@@ -97,6 +97,13 @@ class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
     async def delete_translation(self, report_id: str, lang: str) -> None: ...
 
     @abstractmethod
+    async def get_translation_summaries(
+        self, report_ids: list[str], lang: str
+    ) -> list[ReportTranslation]:
+        """Translations of one language across many reports (feed overlay)."""
+
+
+    @abstractmethod
     async def set_dossier(
         self, report_id: str, dossier_id: str | None, parent_id: str | None,
     ) -> None: ...
