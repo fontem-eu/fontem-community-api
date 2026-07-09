@@ -41,6 +41,7 @@ from src.infra.memory.mem_refresh_token_repo import InMemoryRefreshTokenReposito
 from src.infra.memory.mem_auth_token_repo import InMemoryAuthTokenRepository
 from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
+from src.infra.memory.mem_user_profile_repo import InMemoryUserProfileRepository
 from src.services.issue_service import IssueService
 from src.services.activity_service import ActivityService
 from src.services.moderation_service import ModerationService
@@ -54,6 +55,7 @@ from src.services.access_inheritance import AccessInheritance
 from src.services.visualization_service import VisualizationService
 from src.services.data_project_service import DataProjectService
 from src.services.report_service import ReportService
+from src.services.profile_service import ProfileService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
 from src.services.mail_service import MailService
@@ -117,6 +119,9 @@ def services():
     resource_grant_repo = InMemoryResourceGrantRepository()
     activity_repo = InMemoryActivityRepository()
     activity_svc = ActivityService(activity_repo)
+    user_profile_repo = InMemoryUserProfileRepository()
+    profile_svc = ProfileService(
+        users=user_repo, profiles=user_profile_repo, reports=report_repo, activity=activity_repo)
     investigation_svc = InvestigationService(
         investigation_repo, user_repo, authz_svc, report_repo, dossier_repo, visualization_repo,
         activity_svc)
@@ -153,6 +158,8 @@ def services():
         "issue_repo": issue_repo,
         "activity_repo": activity_repo,
         "activity_svc": activity_svc,
+        "user_profile_repo": user_profile_repo,
+        "profile_svc": profile_svc,
         "mod_repo": mod_repo,
         "tag_follow_repo": tag_follow_repo,
         "flower_repo": flower_repo,

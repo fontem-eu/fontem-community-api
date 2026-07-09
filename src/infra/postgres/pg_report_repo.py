@@ -145,7 +145,7 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
 
     async def list_public(
         self, limit: int, offset: int, authenticated: bool = False,
-        tag: str | None = None,
+        tag: str | None = None, author_id: str | None = None,
     ) -> list[Report]:
         # Anonymous callers only see ``public_open``. Authenticated ones
         # also see ``public_auth`` (visible to any signed-in user but not
@@ -157,6 +157,8 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
             select(ReportModel)
             .where(ReportModel.visibility.in_(allowed))
         )
+        if author_id:
+            stmt = stmt.where(ReportModel.created_by == author_id)
         if tag:
             # JOIN against story_tags rather than EXISTS — the planner
             # picks an index-only scan on the (tag, report_id)-shaped

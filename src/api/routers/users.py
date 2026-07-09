@@ -4,14 +4,16 @@ from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.auth import get_current_user
+from src.api.auth import get_current_user, get_optional_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.assistant.repository import AssistRepository
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
+from src.services.profile_service import ProfileService
 from src.services.authz import Action, AuthorizationService
 from src.services.authz.policy import ResourceRef
 from src.services.exceptions import NotFound
@@ -138,3 +140,43 @@ async def get_user(
         "avatar_url": target.avatar_url,
         "trust_level": target.trust_level,
     }
+
+
+class ProfileLinkIn(BaseModel):
+    name: str = Field(default="", max_length=60)
+    url: str = Field(default="", max_length=500)
+
+
+class ProfileUpdate(BaseModel):
+    summary: str = Field(default="", max_length=2000)
+    links: list[ProfileLinkIn] = Field(default_factory=list, max_length=20)
+
+
+# Public author profiles are readable anonymously — same transparency stance
+# as public stories. `security: []` documents the anonymous path; the handler
+# only ever exposes the author's PUBLIC articles (visibility gated by whether
+# the caller is signed in).
+@router.get("/{user_id}/profile", openapi_extra={"security": []})
+@inject
+async def get_user_profile(
+    user_id: UuidPath,
+    *,
+    svc: FromDishka[ProfileService],
+    user: Annotated[User | None, Depends(get_optional_user)],
+) -> dict:
+    return await svc.get_profile(user_id, viewer_authed=user is not None)
+
+
+@router.put("/me/profile")
+@inject
+async def update_my_profile(
+    body: ProfileUpdate,
+    *,
+    svc: FromDishka[ProfileService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    return await svc.update_own_profile(
+        user.id,
+        body.summary,
+        [{"name": l.name, "url": l.url} for l in body.links],
+    )

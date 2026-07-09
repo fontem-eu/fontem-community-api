@@ -52,7 +52,7 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
 
     async def list_public(
         self, limit: int, offset: int, authenticated: bool = False,
-        tag: str | None = None,
+        tag: str | None = None, author_id: str | None = None,
     ) -> list[Report]:
         allowed = ("public_open",) if not authenticated else ("public_open", "public_auth")
         results = [
@@ -60,6 +60,7 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
             for r in self._reports.values()
             if r.visibility in allowed
             and (tag is None or tag in self._tags.get(r.id, []))
+            and (author_id is None or r.created_by == author_id)
         ]
         results.sort(key=lambda r: r.updated_at or r.created_at or datetime.min, reverse=True)
         return results[offset : offset + limit]

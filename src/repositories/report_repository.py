@@ -25,7 +25,7 @@ class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     async def list_public(
         self, limit: int, offset: int, authenticated: bool = False,
-        tag: str | None = None,
+        tag: str | None = None, author_id: str | None = None,
     ) -> list[Report]: ...
 
     # ── Tags (story side) ─────────────────────────────────────

@@ -765,3 +765,20 @@ class DataPlotModel(Base):
     )
 
     project: Mapped[DataProjectModel] = relationship("DataProjectModel", back_populates="plots")
+
+
+class UserProfileModel(Base):
+    # Public-profile extras (summary + labelled links). Separate table so it
+    # ships via create_all (a NEW table) rather than an ALTER on the users
+    # table — this repo's prod path has no alembic.
+    __tablename__ = "user_profiles"
+
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    links: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )

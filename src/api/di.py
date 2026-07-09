@@ -37,6 +37,7 @@ from src.infra.postgres.pg_data_project_repo import PgDataProjectRepository
 from src.infra.postgres.pg_resource_grant_repo import PgResourceGrantRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
 from src.infra.postgres.pg_activity_repo import PgActivityRepository
+from src.infra.postgres.pg_user_profile_repo import PgUserProfileRepository
 from src.infra.postgres.pg_moderation_repo import PgModerationRepository
 from src.infra.postgres.pg_permission_repo import PgPermissionRepository
 from src.infra.postgres.pg_report_repo import PgReportRepository
@@ -53,6 +54,7 @@ from src.repositories.data_project_repository import DataProjectRepository
 from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.activity_repository import ActivityRepository
+from src.repositories.user_profile_repository import UserProfileRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
@@ -70,6 +72,7 @@ from src.services.data_project_service import DataProjectService
 from src.services.dossier_service import DossierService
 from src.services.issue_service import IssueService
 from src.services.activity_service import ActivityService
+from src.services.profile_service import ProfileService
 from src.services.moderation_service import ModerationService
 from src.services.access_inheritance import AccessInheritance
 from src.services.permission_service import PermissionService
@@ -187,6 +190,10 @@ class RepositoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def activity_repo(self, session: AsyncSession) -> ActivityRepository:
         return PgActivityRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def user_profile_repo(self, session: AsyncSession) -> UserProfileRepository:
+        return PgUserProfileRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def moderation_repo(self, session: AsyncSession) -> ModerationRepository:
@@ -374,6 +381,18 @@ class ServiceProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def activity_service(self, activity: ActivityRepository) -> ActivityService:
         return ActivityService(activity_repo=activity)
+
+    @provide(scope=Scope.REQUEST)
+    def profile_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        users: UserRepository,
+        profiles: UserProfileRepository,
+        reports: ReportRepository,
+        activity: ActivityRepository,
+    ) -> ProfileService:
+        return ProfileService(
+            users=users, profiles=profiles, reports=reports, activity=activity,
+        )
 
     @provide(scope=Scope.REQUEST)
     def moderation_service(
