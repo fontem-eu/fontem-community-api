@@ -24,6 +24,7 @@ from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.data_project_repository import DataProjectRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.activity_repository import ActivityRepository
+from src.repositories.user_profile_repository import UserProfileRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
 from src.repositories.report_repository import ReportRepository
@@ -35,6 +36,7 @@ from src.infra.minio_client import MinioStorage
 from src.repositories.user_repository import UserRepository
 from src.services.issue_service import IssueService
 from src.services.activity_service import ActivityService
+from src.services.profile_service import ProfileService
 from src.services.moderation_service import ModerationService
 from src.services.permission_service import PermissionService
 from src.services.authz import AuthorizationService
@@ -102,6 +104,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def activity_repo(self) -> ActivityRepository:
         return self._svc["activity_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def user_profile_repo(self) -> UserProfileRepository:
+        return self._svc["user_profile_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def profile_service(self) -> ProfileService:
+        return self._svc["profile_svc"]
 
     @provide(scope=Scope.REQUEST)
     def moderation_repo(self) -> ModerationRepository:
