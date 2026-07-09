@@ -82,7 +82,7 @@ class ProfileService:
             url = (raw.get("url") or "").strip()[:MAX_LINK_URL]
             if not name or not url:
                 continue
-            if not (url.startswith("http://") or url.startswith("https://")):
+            if not url.startswith("https://"):
                 continue
             clean_links.append(ProfileLink(name=name, url=url))
         saved = await self._profiles.upsert(
