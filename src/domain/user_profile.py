@@ -12,7 +12,7 @@ class ProfileLink:
 
 
 @dataclass
-class UserProfile:
+class UserProfile:  # pylint: disable=too-many-instance-attributes
     """Editable public-profile extras for a user.
 
     Kept in a side table (``user_profiles``) rather than on ``users`` so it
@@ -26,4 +26,9 @@ class UserProfile:
     # centre their photo within the round frame. Default 50/50 = centred.
     avatar_x: float = 50.0
     avatar_y: float = 50.0
+    # Email display: opt-in (show_email); optionally a public-facing address
+    # different from the account email (use_custom_email + custom_email).
+    show_email: bool = False
+    use_custom_email: bool = False
+    custom_email: str = ""
     updated_at: datetime | None = None

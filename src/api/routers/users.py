@@ -168,6 +168,10 @@ class ProfileUpdate(BaseModel):
     links: list[ProfileLinkIn] = Field(default_factory=list, max_length=20)
     avatar_x: float | None = Field(default=None, ge=0, le=100)
     avatar_y: float | None = Field(default=None, ge=0, le=100)
+    name: str | None = Field(default=None, max_length=100)
+    show_email: bool | None = None
+    use_custom_email: bool | None = None
+    custom_email: str | None = Field(default=None, max_length=254)
 
 
 # Public author profiles are readable anonymously — same transparency stance
@@ -183,7 +187,10 @@ async def get_user_profile(
     storage: FromDishka[MinioStorage],
     user: Annotated[User | None, Depends(get_optional_user)],
 ) -> dict:
-    result = await svc.get_profile(user_id, viewer_authed=user is not None)
+    result = await svc.get_profile(
+        user_id, viewer_authed=user is not None,
+        caller_id=user.id if user is not None else None,
+    )
     return presign_uploads(result, storage.presigned_get_url)
 
 
@@ -201,6 +208,10 @@ async def update_my_profile(
         [{"name": l.name, "url": l.url} for l in body.links],
         avatar_x=body.avatar_x,
         avatar_y=body.avatar_y,
+        name=body.name,
+        show_email=body.show_email,
+        use_custom_email=body.use_custom_email,
+        custom_email=body.custom_email,
     )
 
 

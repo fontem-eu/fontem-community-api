@@ -104,3 +104,32 @@ class TestProfileService:
         await svc.update_own_profile(u.id, "hi", [])
         prof = await svc.get_profile(u.id, viewer_authed=False)
         assert prof["avatar_x"] == 25 and prof["avatar_y"] == 100
+
+    async def test_name_change_and_email_settings(self):
+        svc, users, *_ = await _make()
+        u = await seed_user(users, "u1")
+        # set a display email (account email), a custom one, and rename
+        r = await svc.update_own_profile(
+            u.id, "", [], name="  New Name  ",
+            show_email=True, use_custom_email=True, custom_email="hi@x.io")
+        assert r["name"] == "New Name"
+        assert r["show_email"] is True and r["use_custom_email"] is True
+        assert r["custom_email"] == "hi@x.io"
+        # invalid custom email -> use_custom falls back off
+        r2 = await svc.update_own_profile(u.id, "", [], custom_email="not-an-email")
+        assert r2["use_custom_email"] is False and r2["custom_email"] == ""
+        # owner GET exposes settings; public GET only the resolved email
+        owner = await svc.get_profile(u.id, viewer_authed=True, caller_id=u.id)
+        assert owner["show_email"] is True and owner["account_email"] == u.email
+        # after r2 the custom email is gone -> public email is the account one
+        assert owner["email"] == u.email
+        public = await svc.get_profile(u.id, viewer_authed=False, caller_id=None)
+        assert "account_email" not in public and "custom_email" not in public
+        assert public["email"] == u.email
+
+    async def test_email_hidden_when_show_email_off(self):
+        svc, users, *_ = await _make()
+        u = await seed_user(users, "u1")
+        await svc.update_own_profile(u.id, "", [], show_email=False)
+        prof = await svc.get_profile(u.id, viewer_authed=False)
+        assert prof["email"] == ""
