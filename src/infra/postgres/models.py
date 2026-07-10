@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     CheckConstraint,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -779,6 +780,8 @@ class UserProfileModel(Base):
     )
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     links: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    avatar_x: Mapped[float] = mapped_column(Float, nullable=False, default=50.0)
+    avatar_y: Mapped[float] = mapped_column(Float, nullable=False, default=50.0)
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )

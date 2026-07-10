@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from src.domain.user_profile import ProfileLink, UserProfile
 from src.repositories.activity_repository import ActivityRepository
 from src.repositories.report_repository import ReportRepository
@@ -11,6 +13,33 @@ MAX_LINKS = 10
 MAX_SUMMARY = 2000
 MAX_LINK_NAME = 60
 MAX_LINK_URL = 500
+
+
+_SCHEME_SLASHES = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*)://")
+_BARE_SCHEME = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*):")
+
+
+def _normalize_url(url: str) -> str | None:
+    """Normalise a user-entered link URL so a valid link is never silently
+    dropped just because the user omitted the scheme.
+
+    - ``scheme://…`` — only http/https accepted; always normalised to https
+      (avoids mixed content on the https app). Any other scheme rejected.
+    - ``token:…`` without ``//`` (e.g. ``javascript:``, ``mailto:``) — rejected
+      as an unsafe/non-web scheme, unless the token contains a dot (a bare
+      ``host:port`` like ``example.com:8080``, which is a schemeless URL).
+    - anything else — treated as schemeless and given an ``https://`` prefix.
+
+    Returns None when the URL can't be made into a safe web link."""
+    m = _SCHEME_SLASHES.match(url)
+    if m:
+        if m.group(1).lower() not in ("http", "https"):
+            return None
+        return "https://" + url[m.end():]
+    b = _BARE_SCHEME.match(url)
+    if b and "." not in b.group(1):
+        return None
+    return "https://" + url
 
 
 class ProfileService:
@@ -50,6 +79,8 @@ class ProfileService:
             "summary": extras.summary if extras else "",
             "links": [{"name": l.name, "url": l.url}
                       for l in (extras.links if extras else [])],
+            "avatar_x": extras.avatar_x if extras else 50.0,
+            "avatar_y": extras.avatar_y if extras else 50.0,
             "articles": [
                 {
                     "id": a.id,
@@ -72,8 +103,9 @@ class ProfileService:
             ],
         }
 
-    async def update_own_profile(
+    async def update_own_profile(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, user_id: str, summary: str | None, links: list[dict] | None,
+        avatar_x: float | None = None, avatar_y: float | None = None,
     ) -> dict:
         clean_summary = (summary or "").strip()[:MAX_SUMMARY]
         clean_links: list[ProfileLink] = []
@@ -82,13 +114,25 @@ class ProfileService:
             url = (raw.get("url") or "").strip()[:MAX_LINK_URL]
             if not name or not url:
                 continue
-            if not url.startswith("https://"):
+            normalised = _normalize_url(url)
+            if normalised is None:
                 continue
-            clean_links.append(ProfileLink(name=name, url=url))
-        saved = await self._profiles.upsert(
-            UserProfile(user_id=user_id, summary=clean_summary, links=clean_links)
-        )
+            clean_links.append(ProfileLink(name=name, url=normalised[:MAX_LINK_URL]))
+        # Preserve the stored focal point unless the caller sends a new one.
+        existing = await self._profiles.get(user_id)
+        ax = existing.avatar_x if existing else 50.0
+        ay = existing.avatar_y if existing else 50.0
+        if avatar_x is not None:
+            ax = min(100.0, max(0.0, float(avatar_x)))
+        if avatar_y is not None:
+            ay = min(100.0, max(0.0, float(avatar_y)))
+        saved = await self._profiles.upsert(UserProfile(
+            user_id=user_id, summary=clean_summary, links=clean_links,
+            avatar_x=ax, avatar_y=ay,
+        ))
         return {
             "summary": saved.summary,
             "links": [{"name": l.name, "url": l.url} for l in saved.links],
+            "avatar_x": saved.avatar_x,
+            "avatar_y": saved.avatar_y,
         }

@@ -20,6 +20,8 @@ class PgUserProfileRepository(UserProfileRepository):
             summary=row.summary or "",
             links=[ProfileLink(name=l.get("name", ""), url=l.get("url", ""))
                    for l in (row.links or [])],
+            avatar_x=row.avatar_x if row.avatar_x is not None else 50.0,
+            avatar_y=row.avatar_y if row.avatar_y is not None else 50.0,
             updated_at=row.updated_at,
         )
 
@@ -36,6 +38,8 @@ class PgUserProfileRepository(UserProfileRepository):
             self._session.add(row)
         row.summary = profile.summary or ""
         row.links = links
+        row.avatar_x = profile.avatar_x
+        row.avatar_y = profile.avatar_y
         row.updated_at = now
         await self._session.flush()
         return self._to_domain(row)

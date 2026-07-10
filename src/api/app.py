@@ -193,6 +193,16 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
                 "ALTER TABLE reports ADD COLUMN IF NOT EXISTS "
                 "content_version INTEGER NOT NULL DEFAULT 1"
             ))
+            # user_profiles avatar focal point shipped after the table's
+            # first create_all, so ALTER the columns in explicitly.
+            await conn.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
+                "avatar_x REAL NOT NULL DEFAULT 50"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
+                "avatar_y REAL NOT NULL DEFAULT 50"
+            ))
         await engine.dispose()
 
     yield

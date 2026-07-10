@@ -67,6 +67,14 @@ class _PresignFake:
     def presigned_get_url(key: str) -> str:
         return f"https://test-presigned/{key}?sig=stub"
 
+    @staticmethod
+    def upload(prefix: str, data: bytes, content_type: str) -> str:  # noqa: ARG004
+        return f"{prefix}/00000000000000000000000000000000.png"
+
+    @staticmethod
+    def get_url(key: str) -> str:
+        return f"/uploads/{key}"
+
 
 class InMemoryProvider(Provider):
     """Wraps the ``services`` dict from conftest.py into dishka providers.
