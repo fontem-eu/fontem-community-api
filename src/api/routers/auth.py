@@ -42,6 +42,8 @@ from typing import Annotated
 import bcrypt
 import httpx
 from dishka.integrations.fastapi import FromDishka, inject
+from src.infra.minio_client import MinioStorage
+from src.services.upload_urls import presign_uploads
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import jwt as jose_jwt
 from pydantic import BaseModel, EmailStr, Field
@@ -228,7 +230,9 @@ def _mint_access_jwt(user: User) -> str:
     )
 
 
-def _to_token_response(user: User, access_jwt: str) -> TokenResponse:
+def _to_token_response(
+    user: User, access_jwt: str, storage: MinioStorage,
+) -> TokenResponse:
     return TokenResponse(
         access_token=access_jwt,
         expires_in=int(_ACCESS_TOKEN_TTL.total_seconds()),
@@ -236,7 +240,9 @@ def _to_token_response(user: User, access_jwt: str) -> TokenResponse:
             id=user.id,
             email=user.email,
             name=user.name,
-            avatar_url=user.avatar_url,
+            # Presign the stored /uploads/<key> avatar ref so the SPA (and the
+            # top-right avatar) get a working URL; external URLs pass through.
+            avatar_url=presign_uploads(user.avatar_url, storage.presigned_get_url),
             trust_level=user.trust_level,
             email_verified=user.email_verified_at is not None,
         ),
@@ -248,6 +254,7 @@ async def _issue_session(
     request: Request,
     response: Response,
     refresh_service: RefreshTokenService,
+    storage: MinioStorage,
 ) -> TokenResponse:
     """Mint access JWT + open a refresh family + set the cookie.
 
@@ -267,7 +274,7 @@ async def _issue_session(
         (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
     )
     _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
-    return _to_token_response(user, _mint_access_jwt(user))
+    return _to_token_response(user, _mint_access_jwt(user), storage)
 
 
 # ── Google OAuth ───────────────────────────────────────────────────
@@ -344,6 +351,7 @@ async def google_login(
     *,
     user_repo: FromDishka[UserRepository],
     refresh_service: FromDishka[RefreshTokenService],
+    storage: FromDishka[MinioStorage],
 ) -> TokenResponse:
     """Exchange a Google ID token for a Fontem session JWT + refresh cookie."""
     payload = await _verify_google_token(body.credential)
@@ -372,7 +380,7 @@ async def google_login(
     if sanction is not None and sanction.type == "ban":
         raise HTTPException(status_code=401, detail=_BANNED_DETAIL)
 
-    return await _issue_session(user, request, response, refresh_service)
+    return await _issue_session(user, request, response, refresh_service, storage)
 
 
 # ── Local account registration + login ─────────────────────────────
@@ -441,6 +449,7 @@ async def register(
     *,
     user_repo: FromDishka[UserRepository],
     refresh_service: FromDishka[RefreshTokenService],
+    storage: FromDishka[MinioStorage],
     verify_service: FromDishka[EmailVerificationService],
 ) -> TokenResponse:
     """Register a new local account.
@@ -470,7 +479,7 @@ async def register(
     # so a flaky Brevo never 500s a registration — the token is
     # persisted and the user can hit "resend".
     await verify_service.issue(user)
-    return await _issue_session(user, request, response, refresh_service)
+    return await _issue_session(user, request, response, refresh_service, storage)
 
 
 @router.post(
@@ -500,6 +509,7 @@ async def login(
     *,
     user_repo: FromDishka[UserRepository],
     refresh_service: FromDishka[RefreshTokenService],
+    storage: FromDishka[MinioStorage],
 ) -> TokenResponse:
     """Login with email + password."""
     user = await user_repo.get_by_email(body.email)
@@ -536,7 +546,7 @@ async def login(
 
     await user_repo.clear_failed_logins(user.id)
 
-    return await _issue_session(user, request, response, refresh_service)
+    return await _issue_session(user, request, response, refresh_service, storage)
 
 
 # ── Refresh + logout + sign-out-everywhere ─────────────────────────
@@ -563,6 +573,7 @@ async def refresh(
     *,
     user_repo: FromDishka[UserRepository],
     refresh_service: FromDishka[RefreshTokenService],
+    storage: FromDishka[MinioStorage],
 ) -> TokenResponse:
     """Rotate the session — new access JWT, new refresh cookie.
 
@@ -602,7 +613,7 @@ async def refresh(
         (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
     )
     _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
-    return _to_token_response(user, _mint_access_jwt(user))
+    return _to_token_response(user, _mint_access_jwt(user), storage)
 
 
 @router.post("/logout")
