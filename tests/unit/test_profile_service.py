@@ -76,12 +76,31 @@ class TestProfileService:
             "  My bio  ",
             [
                 {"name": "Good", "url": "https://ok.io"},
+                {"name": "Schemeless", "url": "linkedin.com/in/x"},  # normalised
+                {"name": "Http", "url": "http://legacy.io"},         # upgraded
                 {"name": "", "url": "https://noname.io"},            # no name
                 {"name": "NoUrl", "url": ""},                        # no url
-                {"name": "Bad", "url": "javascript:alert(1)"},       # bad scheme
+                {"name": "Bad", "url": "javascript:alert(1)"},       # rejected
             ],
         )
         assert result["summary"] == "My bio"
-        assert result["links"] == [{"name": "Good", "url": "https://ok.io"}]
+        assert result["links"] == [
+            {"name": "Good", "url": "https://ok.io"},
+            {"name": "Schemeless", "url": "https://linkedin.com/in/x"},
+            {"name": "Http", "url": "https://legacy.io"},
+        ]
         prof = await svc.get_profile(u.id, viewer_authed=False)
-        assert prof["links"] == [{"name": "Good", "url": "https://ok.io"}]
+        assert [l["url"] for l in prof["links"]] == [
+            "https://ok.io", "https://linkedin.com/in/x", "https://legacy.io",
+        ]
+
+    async def test_avatar_focal_point_persists_and_clamps(self):
+        svc, users, *_ = await _make()
+        u = await seed_user(users, "u1")
+        r = await svc.update_own_profile(u.id, "", [], avatar_x=25, avatar_y=150)
+        assert r["avatar_x"] == 25
+        assert r["avatar_y"] == 100  # clamped to [0, 100]
+        # a summary-only save preserves the focal point
+        await svc.update_own_profile(u.id, "hi", [])
+        prof = await svc.get_profile(u.id, viewer_authed=False)
+        assert prof["avatar_x"] == 25 and prof["avatar_y"] == 100

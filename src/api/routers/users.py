@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,11 +14,25 @@ from src.assistant.repository import AssistRepository
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 from src.services.profile_service import ProfileService
+from src.infra.minio_client import MinioStorage
+from src.services.file_security import make_clamd_client, scan_and_sanitise
+from src.services.upload_urls import presign_uploads
 from src.services.authz import Action, AuthorizationService
 from src.services.authz.policy import ResourceRef
 from src.services.exceptions import NotFound
 
 router = APIRouter(prefix="/users", tags=["users"], responses=RESOURCE_RESPONSES)
+
+_CLAMD_SENTINEL = object()
+_clamd_client = _CLAMD_SENTINEL  # pylint: disable=invalid-name
+
+
+def _get_clamd():
+    """Lazy singleton clamd client; None in dev/tests (no AV env)."""
+    global _clamd_client  # pylint: disable=global-statement
+    if _clamd_client is _CLAMD_SENTINEL:
+        _clamd_client = make_clamd_client()
+    return _clamd_client
 
 
 def _safe_self_view(user: User) -> dict:
@@ -54,11 +68,12 @@ def _user_ref(user_id: str) -> ResourceRef:
 async def get_me(
     *,
     authz: FromDishka[AuthorizationService],
+    storage: FromDishka[MinioStorage],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     principal = await authz.principal(user.id)
     await authz.require(principal, Action.USERS_READ_SELF, _user_ref(user.id))
-    return _safe_self_view(user)
+    return presign_uploads(_safe_self_view(user), storage.presigned_get_url)
 
 
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
@@ -127,6 +142,7 @@ async def get_user(
     *,
     repo: FromDishka[UserRepository],
     authz: FromDishka[AuthorizationService],
+    storage: FromDishka[MinioStorage],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     principal = await authz.principal(user.id)
@@ -134,12 +150,12 @@ async def get_user(
     target = await repo.get_by_id(user_id)
     if target is None:
         raise NotFound(f"User {user_id} not found")
-    return {
+    return presign_uploads({
         "id": target.id,
         "name": target.name,
         "avatar_url": target.avatar_url,
         "trust_level": target.trust_level,
-    }
+    }, storage.presigned_get_url)
 
 
 class ProfileLinkIn(BaseModel):
@@ -150,6 +166,8 @@ class ProfileLinkIn(BaseModel):
 class ProfileUpdate(BaseModel):
     summary: str = Field(default="", max_length=2000)
     links: list[ProfileLinkIn] = Field(default_factory=list, max_length=20)
+    avatar_x: float | None = Field(default=None, ge=0, le=100)
+    avatar_y: float | None = Field(default=None, ge=0, le=100)
 
 
 # Public author profiles are readable anonymously — same transparency stance
@@ -162,9 +180,11 @@ async def get_user_profile(
     user_id: UuidPath,
     *,
     svc: FromDishka[ProfileService],
+    storage: FromDishka[MinioStorage],
     user: Annotated[User | None, Depends(get_optional_user)],
 ) -> dict:
-    return await svc.get_profile(user_id, viewer_authed=user is not None)
+    result = await svc.get_profile(user_id, viewer_authed=user is not None)
+    return presign_uploads(result, storage.presigned_get_url)
 
 
 @router.put("/me/profile")
@@ -179,4 +199,30 @@ async def update_my_profile(
         user.id,
         body.summary,
         [{"name": l.name, "url": l.url} for l in body.links],
+        avatar_x=body.avatar_x,
+        avatar_y=body.avatar_y,
     )
+
+
+@router.post("/me/avatar")
+@inject
+async def upload_my_avatar(
+    *,
+    file: Annotated[UploadFile, File(...)],
+    repo: FromDishka[UserRepository],
+    storage: FromDishka[MinioStorage],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Upload the signed-in user's avatar.
+
+    Goes through the same file_security pipeline as story images (magic-byte
+    sniff -> raster re-encode / SVG sanitise -> clamd). We store the stable
+    ``/uploads/<key>`` reference on the user and return a presigned URL for
+    immediate display; subsequent reads presign afresh (TTLs never persist).
+    """
+    raw = await file.read()
+    cleaned = scan_and_sanitise(raw, clamd_client=_get_clamd())
+    key = storage.upload(user.id, cleaned.data, cleaned.content_type)
+    user.avatar_url = storage.get_url(key)
+    await repo.upsert(user)
+    return {"avatar_url": storage.presigned_get_url(key)}

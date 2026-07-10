@@ -22,4 +22,8 @@ class UserProfile:
     user_id: str = ""
     summary: str = ""
     links: list[ProfileLink] = field(default_factory=list)
+    # Avatar focal point as percentages (CSS object-position) so the user can
+    # centre their photo within the round frame. Default 50/50 = centred.
+    avatar_x: float = 50.0
+    avatar_y: float = 50.0
     updated_at: datetime | None = None
