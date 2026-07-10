@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from dishka.integrations.fastapi import setup_dishka
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -360,6 +360,31 @@ def build_app(database_url: str | None = None) -> FastAPI:
     @application.get("/health", tags=["Health"])
     async def health() -> dict:
         return {"status": "ok"}
+
+    @application.post("/csp-report", tags=["Security"], status_code=204,
+                      openapi_extra={"security": []})
+    async def csp_report(request: Request) -> Response:
+        """Receive browser CSP violation reports (the CSP `report-uri`).
+
+        A CSP block fails silently in the browser and produces no server
+        error, so this is the only server-side signal that content is being
+        refused (e.g. a presigned image on a cross-origin host). Anonymous,
+        best-effort, never raises."""
+        try:
+            body = await request.json()
+        except Exception:  # pylint: disable=broad-exception-caught
+            body = None
+        report = body.get("csp-report", body) if isinstance(body, dict) else body
+        if isinstance(report, dict):
+            logger.warning(
+                "CSP violation: directive=%s blocked=%s document=%s",
+                report.get("violated-directive") or report.get("effective-directive"),
+                report.get("blocked-uri"),
+                report.get("document-uri"),
+            )
+        else:
+            logger.warning("CSP violation (unparsed): %s", str(body)[:500])
+        return Response(status_code=204)
 
     return application
 
