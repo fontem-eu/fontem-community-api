@@ -22,6 +22,9 @@ class PgUserProfileRepository(UserProfileRepository):
                    for l in (row.links or [])],
             avatar_x=row.avatar_x if row.avatar_x is not None else 50.0,
             avatar_y=row.avatar_y if row.avatar_y is not None else 50.0,
+            show_email=bool(row.show_email),
+            use_custom_email=bool(row.use_custom_email),
+            custom_email=row.custom_email or "",
             updated_at=row.updated_at,
         )
 
@@ -40,6 +43,9 @@ class PgUserProfileRepository(UserProfileRepository):
         row.links = links
         row.avatar_x = profile.avatar_x
         row.avatar_y = profile.avatar_y
+        row.show_email = profile.show_email
+        row.use_custom_email = profile.use_custom_email
+        row.custom_email = profile.custom_email or ""
         row.updated_at = now
         await self._session.flush()
         return self._to_domain(row)
