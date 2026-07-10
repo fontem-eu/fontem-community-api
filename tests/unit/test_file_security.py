@@ -305,3 +305,25 @@ class TestExifStrip:
 
         cleaned = scan_and_sanitise(raw, clamd_client=clamd_ok)
         assert b"secret-user-comment" not in cleaned.data
+
+
+class TestAvatarDownscale:
+    """max_dim standardises resolution (avatars) without upscaling; the
+    default (articles) keeps full resolution."""
+
+    def test_downscales_large_image_preserving_aspect(self, clamd_ok):
+        cleaned = scan_and_sanitise(_make_png(1000, 600), clamd_client=clamd_ok, max_dim=512)
+        with Image.open(io.BytesIO(cleaned.data)) as img:
+            assert max(img.width, img.height) == 512
+            assert img.width == 512 and img.height < 512
+            assert abs(img.width / img.height - 1000 / 600) < 0.03
+
+    def test_never_upscales_small_image(self, clamd_ok):
+        cleaned = scan_and_sanitise(_make_png(200, 120), clamd_client=clamd_ok, max_dim=512)
+        with Image.open(io.BytesIO(cleaned.data)) as img:
+            assert (img.width, img.height) == (200, 120)
+
+    def test_default_keeps_full_resolution(self, clamd_ok):
+        cleaned = scan_and_sanitise(_make_png(1000, 600), clamd_client=clamd_ok)
+        with Image.open(io.BytesIO(cleaned.data)) as img:
+            assert (img.width, img.height) == (1000, 600)

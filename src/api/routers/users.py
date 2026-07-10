@@ -15,7 +15,7 @@ from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 from src.services.profile_service import ProfileService
 from src.infra.minio_client import MinioStorage
-from src.services.file_security import make_clamd_client, scan_and_sanitise
+from src.services.file_security import AVATAR_MAX_DIM, make_clamd_client, scan_and_sanitise
 from src.services.upload_urls import presign_uploads
 from src.services.authz import Action, AuthorizationService
 from src.services.authz.policy import ResourceRef
@@ -221,7 +221,7 @@ async def upload_my_avatar(
     immediate display; subsequent reads presign afresh (TTLs never persist).
     """
     raw = await file.read()
-    cleaned = scan_and_sanitise(raw, clamd_client=_get_clamd())
+    cleaned = scan_and_sanitise(raw, clamd_client=_get_clamd(), max_dim=AVATAR_MAX_DIM)
     key = storage.upload(user.id, cleaned.data, cleaned.content_type)
     user.avatar_url = storage.get_url(key)
     await repo.upsert(user)

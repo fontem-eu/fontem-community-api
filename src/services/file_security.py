@@ -68,6 +68,10 @@ logger = logging.getLogger(__name__)
 MAX_RASTER_BYTES = 20 * 1024 * 1024
 MAX_SVG_BYTES = 2 * 1024 * 1024
 RASTER_MAX_DIM = 8000  # per side; 8000×8000 ≈ 64 Mpx
+# Avatars render in a tiny round frame; standardise them to at most this many
+# pixels per side on upload so we never store/serve a multi-megapixel photo
+# for a ~96px box. 512 leaves headroom for retina + a larger profile header.
+AVATAR_MAX_DIM = 512
 
 ALLOWED_RASTER_MIMES = frozenset({
     "image/png",
@@ -123,6 +127,7 @@ def scan_and_sanitise(
     raw: bytes,
     *,
     clamd_client: clamd.ClamdNetworkSocket | None = None,
+    max_dim: int | None = None,
 ) -> CleanedFile:
     """Run the full pipeline on ``raw`` and return cleaned bytes.
 
@@ -150,7 +155,8 @@ def scan_and_sanitise(
             raise InvalidInput(
                 f"Image too large: {len(raw)} bytes > {MAX_RASTER_BYTES}",
             )
-        cleaned, canonical_mime = _reencode_raster(raw, expected_mime=sniffed)
+        cleaned, canonical_mime = _reencode_raster(
+            raw, expected_mime=sniffed, max_dim=max_dim)
 
     _av_scan(cleaned, clamd_client=clamd_client)
     return CleanedFile(content_type=canonical_mime, data=cleaned)
@@ -178,7 +184,9 @@ def _sniff_mime(raw: bytes) -> str:
 # ── Stage 3a: raster re-encode ───────────────────────────────
 
 
-def _reencode_raster(raw: bytes, *, expected_mime: str) -> tuple[bytes, str]:
+def _reencode_raster(
+    raw: bytes, *, expected_mime: str, max_dim: int | None = None,
+) -> tuple[bytes, str]:
     """Open, verify, and re-save the raster image.
 
     Two passes through Pillow: ``verify()`` does a structural check
@@ -223,6 +231,10 @@ def _reencode_raster(raw: bytes, *, expected_mime: str) -> tuple[bytes, str]:
             f"Image dimensions {img.width}x{img.height} exceed "
             f"{RASTER_MAX_DIM}x{RASTER_MAX_DIM} cap",
         )
+    # Standardise resolution when a target is given (avatars): shrink to fit
+    # within max_dim per side, preserving aspect ratio. Never upscales.
+    if max_dim and (img.width > max_dim or img.height > max_dim):
+        img.thumbnail((max_dim, max_dim))
 
     out = io.BytesIO()
     save_kwargs: dict = {}
