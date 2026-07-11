@@ -65,6 +65,32 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         results.sort(key=lambda r: r.updated_at or r.created_at or datetime.min, reverse=True)
         return results[offset : offset + limit]
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    async def search_public(
+        self, query: str, limit: int, offset: int,
+        authenticated: bool = False,
+        date_from=None, date_to=None,
+    ) -> list[Report]:
+        allowed = ("public_open",) if not authenticated else ("public_open", "public_auth")
+        needle = query.lower()
+
+        def _matches(r):
+            hay = f"{r.title or ''} {r.abstract or ''}".lower()
+            if needle not in hay:
+                return False
+            if date_from is not None and (r.created_at or datetime.min) < date_from:
+                return False
+            if date_to is not None and (r.created_at or datetime.min) > date_to:
+                return False
+            return True
+
+        results = [
+            deepcopy(r) for r in self._reports.values()
+            if r.visibility in allowed and _matches(r)
+        ]
+        results.sort(key=lambda r: r.updated_at or r.created_at or datetime.min, reverse=True)
+        return results[offset : offset + limit]
+
     # ── Tags ──────────────────────────────────────────────────
 
     async def get_story_tags(self, report_id: str) -> list[str]:

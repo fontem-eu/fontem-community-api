@@ -157,6 +157,44 @@ async def list_reports(
     return out
 
 
+# Declared before /{report_id} so the literal "search" segment routes here
+# rather than being parsed as a (non-UUID) report id.
+@router.get("/search", openapi_extra={"security": []})
+@inject
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+async def search_reports(
+    *,
+    q: Annotated[str, Query(min_length=1, max_length=200)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    offset: Annotated[int, Query(ge=0, le=2**31 - 1)] = 0,
+    date_from: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    date_to: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    lang: Annotated[str | None, Query(pattern="^[a-z]{2}$")] = None,
+    svc: FromDishka[ReportService],
+    user: Annotated[User | None, Depends(get_optional_user)],
+) -> list[dict]:
+    """Keyword search over public data stories (title + abstract).
+
+    Anonymous callers see ``public_open`` only; signed-in callers also see
+    ``public_auth`` — the same visibility gate as the public feed, so search
+    never surfaces a private story. Backs the data-stories section of the
+    unified /search results page.
+    """
+    reports = await svc.search_public(
+        q, limit, offset,
+        authenticated=user is not None,
+        date_from=date_from, date_to=date_to,
+    )
+    overlay = await svc.translation_overlay(reports, lang)
+    out = []
+    for r in reports:
+        d = asdict(r)
+        d["tags"] = await svc.get_tags(r.id)
+        _apply_translation(d, overlay.get(r.id), lang)
+        out.append(d)
+    return out
+
+
 # public_open reports are readable anonymously; mark the operation as
 # unauthenticated in the OpenAPI spec so schemathesis stops flagging
 # the 200 responses as "accepts requests without authentication".

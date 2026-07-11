@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from abc import ABC, abstractmethod
 
 from src.domain.report import Report, ReportTranslation, Section, SectionVersion
@@ -26,6 +28,15 @@ class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
     async def list_public(
         self, limit: int, offset: int, authenticated: bool = False,
         tag: str | None = None, author_id: str | None = None,
+    ) -> list[Report]: ...
+
+    @abstractmethod
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    async def search_public(
+        self, query: str, limit: int, offset: int,
+        authenticated: bool = False,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> list[Report]: ...
 
     # ── Tags (story side) ─────────────────────────────────────

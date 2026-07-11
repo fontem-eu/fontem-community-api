@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.report import Report, ReportTranslation, Section, SectionVersion
@@ -167,6 +167,42 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
             stmt = stmt.join(
                 StoryTagModel, StoryTagModel.report_id == ReportModel.id,
             ).where(StoryTagModel.tag == tag)
+        stmt = (
+            stmt.order_by(ReportModel.updated_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return [self._report_to_domain(r) for r in result.scalars().all()]
+
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    async def search_public(
+        self, query: str, limit: int, offset: int,
+        authenticated: bool = False,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> list[Report]:
+        # Same visibility gate as list_public: anon → public_open only,
+        # signed-in → also public_auth. Never surfaces private stories.
+        allowed = ["public_open"]
+        if authenticated:
+            allowed.append("public_auth")
+        # Escape LIKE wildcards in the user's query so a literal % or _
+        # can't widen the match into "everything".
+        esc = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{esc}%"
+        stmt = (
+            select(ReportModel)
+            .where(ReportModel.visibility.in_(allowed))
+            .where(or_(
+                ReportModel.title.ilike(like, escape="\\"),
+                ReportModel.abstract.ilike(like, escape="\\"),
+            ))
+        )
+        if date_from is not None:
+            stmt = stmt.where(ReportModel.created_at >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(ReportModel.created_at <= date_to)
         stmt = (
             stmt.order_by(ReportModel.updated_at.desc())
             .limit(limit)
