@@ -14,6 +14,7 @@ that the policy can decide on without touching the database.
 from __future__ import annotations
 
 import re
+from datetime import datetime, time, timezone
 
 from src.domain.report import Report, ReportTranslation, Section
 from src.repositories.report_repository import ReportRepository
@@ -35,6 +36,24 @@ from src.services.sanitize import sanitize_html, sanitize_text
 _LANG_RE = re.compile(r"[a-z]{2}")
 
 DEFAULT_LOCK_TTL = 300  # 5 minutes
+
+
+
+def _day_start(iso: str | None) -> datetime | None:
+    """Parse an ISO yyyy-mm-dd into a tz-aware start-of-day datetime."""
+    if not iso:
+        return None
+    d = datetime.strptime(iso, "%Y-%m-%d").date()
+    return datetime.combine(d, time.min, tzinfo=timezone.utc)
+
+
+def _day_end(iso: str | None) -> datetime | None:
+    """Parse an ISO yyyy-mm-dd into a tz-aware end-of-day datetime
+    (inclusive upper bound)."""
+    if not iso:
+        return None
+    d = datetime.strptime(iso, "%Y-%m-%d").date()
+    return datetime.combine(d, time.max, tzinfo=timezone.utc)
 
 
 class ReportService:  # pylint: disable=too-many-public-methods
@@ -242,6 +261,23 @@ class ReportService:  # pylint: disable=too-many-public-methods
         """
         return await self._reports.list_public(
             limit, offset, authenticated=authenticated, tag=tag,
+        )
+
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    async def search_public(
+        self, query: str, limit: int, offset: int,
+        authenticated: bool = False,
+        date_from: str | None = None, date_to: str | None = None,
+    ) -> list[Report]:
+        """Keyword search over public stories (title + abstract),
+        visibility-aware like list_public. ``date_from``/``date_to`` are
+        inclusive ISO ``yyyy-mm-dd`` strings filtered on ``created_at``."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        return await self._reports.search_public(
+            q, limit, offset, authenticated=authenticated,
+            date_from=_day_start(date_from), date_to=_day_end(date_to),
         )
 
     async def get_tags(self, report_id: str) -> list[str]:
