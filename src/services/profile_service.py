@@ -19,9 +19,12 @@ MAX_EMAIL = 254
 
 def _valid_email(email: str) -> bool:
     """Lightweight email sanity check (no regex backtracking): exactly one
-    '@', non-empty local part, a domain with a dot, no spaces."""
+    '@', non-empty local part, a domain with a dot, and no whitespace or
+    control characters (so a value can't smuggle a CRLF into the `mailto:`
+    link the profile renders)."""
     email = email.strip()
-    if not email or len(email) > MAX_EMAIL or " " in email or email.count("@") != 1:
+    if (not email or len(email) > MAX_EMAIL or email.count("@") != 1
+            or any(c.isspace() or ord(c) < 0x20 or ord(c) == 0x7f for c in email)):
         return False
     local, _, domain = email.partition("@")
     return bool(local) and bool(domain) and "." in domain and not domain.startswith(".")
@@ -84,6 +87,29 @@ def _merge_email(existing, show_email, use_custom_email, custom_email):
     return show, use_custom, custom
 
 
+
+def _public_email(user, show_email: bool, use_custom: bool, custom: str) -> str:
+    """The address shown publicly: nothing unless opted in; the custom address
+    when set, else the account email."""
+    if not show_email:
+        return ""
+    return custom if (use_custom and custom) else user.email
+
+
+def _visible_activity(activity, articles, *, is_owner: bool):
+    """SECURITY: the activity log records each entity's title at event time,
+    including PRIVATE stories/dossiers/investigations/issues. The owner sees
+    their full feed; everyone else sees only activity on this author's PUBLIC
+    articles, so private-entity titles never leak on a public profile."""
+    if is_owner:
+        return activity
+    public_ids = {a.id for a in articles}
+    return [
+        e for e in activity
+        if e.entity_type == "story" and e.entity_id in public_ids
+    ]
+
+
 class ProfileService:
     """Assembles a user's public profile: identity + editable extras
     (summary/links) + the public articles they authored + recent activity."""
@@ -111,15 +137,13 @@ class ProfileService:
         show_email = extras.show_email if extras else False
         use_custom = extras.use_custom_email if extras else False
         custom = extras.custom_email if extras else ""
-        # Public display email: only when opted in; the custom address when set,
-        # otherwise the account email.
-        public_email = ""
-        if show_email:
-            public_email = custom if (use_custom and custom) else user.email
+        public_email = _public_email(user, show_email, use_custom, custom)
+        is_owner = caller_id is not None and caller_id == user_id
         articles = await self._reports.list_public(
             article_limit, 0, authenticated=viewer_authed, author_id=user_id,
         )
         activity = await self._activity.list_for_actor(user_id, activity_limit, 0)
+        visible_activity = _visible_activity(activity, articles, is_owner=is_owner)
         result = {
             "id": user.id,
             "name": user.name,
@@ -150,11 +174,11 @@ class ProfileService:
                     "summary": e.summary,
                     "created_at": e.created_at,
                 }
-                for e in activity
+                for e in visible_activity
             ],
         }
         # Owner viewing their own profile: expose the editable email settings.
-        if caller_id and caller_id == user_id:
+        if is_owner:
             result["show_email"] = show_email
             result["use_custom_email"] = use_custom
             result["custom_email"] = custom
@@ -175,7 +199,7 @@ class ProfileService:
                 return nm
         return user.name
 
-    async def update_own_profile(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    async def update_own_profile(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self, user_id: str, summary: str | None, links: list[dict] | None,
         avatar_x: float | None = None, avatar_y: float | None = None,
         name: str | None = None, show_email: bool | None = None,

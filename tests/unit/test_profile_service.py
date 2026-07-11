@@ -12,7 +12,7 @@ from src.infra.memory.mem_report_repo import InMemoryReportRepository
 from src.infra.memory.mem_user_profile_repo import InMemoryUserProfileRepository
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
 from src.services.exceptions import NotFound
-from src.services.profile_service import ProfileService
+from src.services.profile_service import ProfileService, _valid_email
 from tests.conftest import seed_user
 
 
@@ -133,3 +133,10 @@ class TestProfileService:
         await svc.update_own_profile(u.id, "", [], show_email=False)
         prof = await svc.get_profile(u.id, viewer_authed=False)
         assert prof["email"] == ""
+
+def test_valid_email_rejects_control_chars_for_mailto_safety():
+    """A custom email must not smuggle CRLF/tabs into the rendered mailto link."""
+    assert _valid_email("person@example.com")
+    for bad in ("a@b.com\r\nbcc:x@y.com", "a@b.com\tx", "a@b.com y",
+                "a@b\u00a0.com", "x@y", "@y.com", "a@.com"):
+        assert not _valid_email(bad), bad
