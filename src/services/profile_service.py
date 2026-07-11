@@ -19,9 +19,12 @@ MAX_EMAIL = 254
 
 def _valid_email(email: str) -> bool:
     """Lightweight email sanity check (no regex backtracking): exactly one
-    '@', non-empty local part, a domain with a dot, no spaces."""
+    '@', non-empty local part, a domain with a dot, and no whitespace or
+    control characters (so a value can't smuggle a CRLF into the `mailto:`
+    link the profile renders)."""
     email = email.strip()
-    if not email or len(email) > MAX_EMAIL or " " in email or email.count("@") != 1:
+    if (not email or len(email) > MAX_EMAIL or email.count("@") != 1
+            or any(c.isspace() or ord(c) < 0x20 or ord(c) == 0x7f for c in email)):
         return False
     local, _, domain = email.partition("@")
     return bool(local) and bool(domain) and "." in domain and not domain.startswith(".")
@@ -120,6 +123,19 @@ class ProfileService:
             article_limit, 0, authenticated=viewer_authed, author_id=user_id,
         )
         activity = await self._activity.list_for_actor(user_id, activity_limit, 0)
+        # SECURITY: the activity log captures each entity's title at event time,
+        # including PRIVATE stories/dossiers/investigations/issues. The owner
+        # sees their full feed; everyone else sees only activity on this
+        # author's PUBLIC articles (the ids the viewer can actually access),
+        # so private-entity titles never leak on a public profile.
+        if caller_id is not None and caller_id == user_id:
+            visible_activity = activity
+        else:
+            public_ids = {a.id for a in articles}
+            visible_activity = [
+                e for e in activity
+                if e.entity_type == "story" and e.entity_id in public_ids
+            ]
         result = {
             "id": user.id,
             "name": user.name,
@@ -150,7 +166,7 @@ class ProfileService:
                     "summary": e.summary,
                     "created_at": e.created_at,
                 }
-                for e in activity
+                for e in visible_activity
             ],
         }
         # Owner viewing their own profile: expose the editable email settings.
@@ -175,7 +191,7 @@ class ProfileService:
                 return nm
         return user.name
 
-    async def update_own_profile(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    async def update_own_profile(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self, user_id: str, summary: str | None, links: list[dict] | None,
         avatar_x: float | None = None, avatar_y: float | None = None,
         name: str | None = None, show_email: bool | None = None,
