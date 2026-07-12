@@ -8,6 +8,7 @@ All tests use InMemory repositories — 0 I/O, sub-millisecond.
 #    name-collision bug. Disable module-wide rather than per-line.
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 
@@ -16,6 +17,27 @@ import uuid
 os.environ.setdefault("FONTEM_COOKIE_INSECURE", "1")
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _ensure_current_event_loop():
+    """Guarantee a current asyncio event loop for every test.
+
+    pytest-asyncio 1.x runs each async test on a function-scoped loop and
+    leaves *no current loop* set afterwards. The many sync tests here that use
+    ``asyncio.get_event_loop().run_until_complete(...)`` then fail with
+    "There is no current event loop" — order-dependently, which CI's randomised
+    ordering reliably surfaces. Restore a usable current loop before each test;
+    only creates one when none is set, so it never fights pytest-asyncio's own
+    loop for async tests.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    yield
 from dishka.integrations.fastapi import setup_dishka
 from jose import jwt
 from starlette.testclient import TestClient
