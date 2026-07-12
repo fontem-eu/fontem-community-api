@@ -71,6 +71,26 @@ def _clean_links(links: list[dict] | None) -> list[ProfileLink]:
     return out
 
 
+_NUTS_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{0,3}$")
+
+
+def _merge_home_nuts(existing, home_nuts):
+    """Resolve the stored home NUTS code against an update.
+
+    ``None`` leaves it untouched (partial update); an empty string clears it;
+    a valid NUTS code (2-letter country + up to 3 alnum, any level) is stored
+    normalised to upper-case. Anything malformed is ignored (keeps existing)
+    so a bad client value can't wipe a good one.
+    """
+    current = existing.home_nuts if existing else ""
+    if home_nuts is None:
+        return current
+    code = home_nuts.strip().upper()
+    if code == "":
+        return ""
+    return code if _NUTS_RE.match(code) else current
+
+
 def _merge_email(existing, show_email, use_custom_email, custom_email):
     show = existing.show_email if existing else False
     use_custom = existing.use_custom_email if existing else False
@@ -155,6 +175,7 @@ class ProfileService:
                       for l in (extras.links if extras else [])],
             "avatar_x": extras.avatar_x if extras else 50.0,
             "avatar_y": extras.avatar_y if extras else 50.0,
+            "home_nuts": extras.home_nuts if extras else "",
             "email": public_email,
             "articles": [
                 {
@@ -204,6 +225,7 @@ class ProfileService:
         avatar_x: float | None = None, avatar_y: float | None = None,
         name: str | None = None, show_email: bool | None = None,
         use_custom_email: bool | None = None, custom_email: str | None = None,
+        home_nuts: str | None = None,
     ) -> dict:
         clean_summary = (summary or "").strip()[:MAX_SUMMARY]
         clean_links = _clean_links(links)
@@ -218,10 +240,11 @@ class ProfileService:
             ay = min(100.0, max(0.0, float(avatar_y)))
         show, use_custom, custom = _merge_email(
             existing, show_email, use_custom_email, custom_email)
+        home = _merge_home_nuts(existing, home_nuts)
         saved = await self._profiles.upsert(UserProfile(
             user_id=user_id, summary=clean_summary, links=clean_links,
             avatar_x=ax, avatar_y=ay, show_email=show,
-            use_custom_email=use_custom, custom_email=custom,
+            use_custom_email=use_custom, custom_email=custom, home_nuts=home,
         ))
         current_name = await self._maybe_rename(user_id, name)
         return {
@@ -233,4 +256,5 @@ class ProfileService:
             "show_email": saved.show_email,
             "use_custom_email": saved.use_custom_email,
             "custom_email": saved.custom_email,
+            "home_nuts": saved.home_nuts,
         }

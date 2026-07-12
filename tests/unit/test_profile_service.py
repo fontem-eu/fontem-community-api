@@ -140,3 +140,30 @@ def test_valid_email_rejects_control_chars_for_mailto_safety():
     for bad in ("a@b.com\r\nbcc:x@y.com", "a@b.com\tx", "a@b.com y",
                 "a@b\u00a0.com", "x@y", "@y.com", "a@.com"):
         assert not _valid_email(bad), bad
+
+@pytest.mark.asyncio
+async def test_home_nuts_set_validate_clear_and_partial_update():
+    svc, users, _profiles, _reports, _activity = await _make()
+    u = await seed_user(users, "u1")
+    # set a valid NUTS-3 code (lowercased input is normalised to upper)
+    r = await svc.update_own_profile(u.id, "", [], home_nuts="pt170")
+    assert r["home_nuts"] == "PT170"
+    # a partial update (home_nuts=None) leaves it intact
+    r = await svc.update_own_profile(u.id, "new bio", [])
+    assert r["home_nuts"] == "PT170"
+    # a malformed code is ignored (keeps the good one)
+    r = await svc.update_own_profile(u.id, "", [], home_nuts="not a nuts!!")
+    assert r["home_nuts"] == "PT170"
+    # empty string clears it
+    r = await svc.update_own_profile(u.id, "", [], home_nuts="")
+    assert r["home_nuts"] == ""
+
+
+@pytest.mark.asyncio
+async def test_home_nuts_is_public_on_the_profile():
+    svc, users, _profiles, _reports, _activity = await _make()
+    u = await seed_user(users, "u1")
+    await svc.update_own_profile(u.id, "", [], home_nuts="DE21")
+    # visible to an anonymous viewer (the user opted to set it)
+    prof = await svc.get_profile(u.id, viewer_authed=False, caller_id=None)
+    assert prof["home_nuts"] == "DE21"
