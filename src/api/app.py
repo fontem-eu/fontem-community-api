@@ -215,6 +215,10 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
                 "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
                 "custom_email TEXT NOT NULL DEFAULT ''"
             ))
+            await conn.execute(text(
+                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
+                "home_nuts TEXT NOT NULL DEFAULT ''"
+            ))
         await engine.dispose()
 
     yield

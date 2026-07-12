@@ -172,6 +172,8 @@ class ProfileUpdate(BaseModel):
     show_email: bool | None = None
     use_custom_email: bool | None = None
     custom_email: str | None = Field(default=None, max_length=254)
+    # "Where you're from" — a NUTS code (any level) or "" to clear.
+    home_nuts: str | None = Field(default=None, max_length=5, pattern=r"^([A-Za-z]{2}[A-Za-z0-9]{0,3})?$")
 
 
 # Public author profiles are readable anonymously — same transparency stance
@@ -212,6 +214,7 @@ async def update_my_profile(
         show_email=body.show_email,
         use_custom_email=body.use_custom_email,
         custom_email=body.custom_email,
+        home_nuts=body.home_nuts,
     )
 
 

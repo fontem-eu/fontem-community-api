@@ -786,6 +786,7 @@ class UserProfileModel(Base):
     show_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     use_custom_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     custom_email: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    home_nuts: Mapped[str] = mapped_column(Text, nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )

@@ -25,6 +25,7 @@ class PgUserProfileRepository(UserProfileRepository):
             show_email=bool(row.show_email),
             use_custom_email=bool(row.use_custom_email),
             custom_email=row.custom_email or "",
+            home_nuts=row.home_nuts or "",
             updated_at=row.updated_at,
         )
 
@@ -46,6 +47,7 @@ class PgUserProfileRepository(UserProfileRepository):
         row.show_email = profile.show_email
         row.use_custom_email = profile.use_custom_email
         row.custom_email = profile.custom_email or ""
+        row.home_nuts = profile.home_nuts or ""
         row.updated_at = now
         await self._session.flush()
         return self._to_domain(row)

@@ -143,3 +143,19 @@ class TestProfileSecurity:
             assert "SECRET-PRIVATE" not in titles and "SECRET-DOSSIER" not in titles
             blob = json.dumps(body)
             assert "SECRET-PRIVATE" not in blob and "SECRET-DOSSIER" not in blob
+
+class TestHomeNutsApi:
+    def test_set_home_nuts_then_returned_publicly(self, client, services):
+        asyncio.get_event_loop().run_until_complete(seed_user(services["user_repo"], "u1"))
+        put = client.put("/users/me/profile", headers=make_headers("u1"),
+                         json={"summary": "", "links": [], "home_nuts": "PT17"})
+        assert put.status_code == 200 and put.json()["home_nuts"] == "PT17"
+        # anonymous GET sees the home region the user chose to publish
+        got = client.get(f"/users/{_stable_uuid('u1')}/profile").json()
+        assert got["home_nuts"] == "PT17"
+
+    def test_bad_home_nuts_rejected_by_schema(self, client, services):
+        asyncio.get_event_loop().run_until_complete(seed_user(services["user_repo"], "u1"))
+        bad = client.put("/users/me/profile", headers=make_headers("u1"),
+                         json={"summary": "", "links": [], "home_nuts": "not-a-code"})
+        assert bad.status_code == 422

@@ -31,4 +31,7 @@ class UserProfile:  # pylint: disable=too-many-instance-attributes
     show_email: bool = False
     use_custom_email: bool = False
     custom_email: str = ""
+    # "Where you're from" — a NUTS region code (any level, e.g. PT / PT17 /
+    # PT170). Empty means unset; the UI then falls back to an IP-based guess.
+    home_nuts: str = ""
     updated_at: datetime | None = None

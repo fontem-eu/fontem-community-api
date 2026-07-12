@@ -134,6 +134,30 @@ class TestProfileService:
         prof = await svc.get_profile(u.id, viewer_authed=False)
         assert prof["email"] == ""
 
+    async def test_home_nuts_set_validate_clear_and_partial_update(self):
+        svc, users, _profiles, _reports, _activity = await _make()
+        u = await seed_user(users, "u1")
+        # a valid NUTS-3 code (lowercased input is normalised to upper)
+        r = await svc.update_own_profile(u.id, "", [], home_nuts="pt170")
+        assert r["home_nuts"] == "PT170"
+        # a partial update (home_nuts=None) leaves it intact
+        r = await svc.update_own_profile(u.id, "new bio", [])
+        assert r["home_nuts"] == "PT170"
+        # a malformed code is ignored (keeps the good one)
+        r = await svc.update_own_profile(u.id, "", [], home_nuts="not a nuts!!")
+        assert r["home_nuts"] == "PT170"
+        # empty string clears it
+        r = await svc.update_own_profile(u.id, "", [], home_nuts="")
+        assert r["home_nuts"] == ""
+
+    async def test_home_nuts_is_public_on_the_profile(self):
+        svc, users, _profiles, _reports, _activity = await _make()
+        u = await seed_user(users, "u1")
+        await svc.update_own_profile(u.id, "", [], home_nuts="DE21")
+        prof = await svc.get_profile(u.id, viewer_authed=False, caller_id=None)
+        assert prof["home_nuts"] == "DE21"
+
+
 def test_valid_email_rejects_control_chars_for_mailto_safety():
     """A custom email must not smuggle CRLF/tabs into the rendered mailto link."""
     assert _valid_email("person@example.com")
