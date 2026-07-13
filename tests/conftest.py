@@ -39,7 +39,7 @@ def _ensure_current_event_loop():
         asyncio.set_event_loop(asyncio.new_event_loop())
     yield
 from dishka.integrations.fastapi import setup_dishka
-from jose import jwt
+import jwt
 from starlette.testclient import TestClient
 
 from src.api.app import app
