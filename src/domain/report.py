@@ -11,6 +11,8 @@ class Report:  # pylint: disable=too-many-instance-attributes
     title: str = ""
     abstract: str | None = None
     visibility: str = "private"  # private, group, public_auth, public_open
+    # Optional NUTS region this story is about (any level, e.g. PT / PT17).
+    nuts_region: str = ""
     parent_id: str | None = None  # tree position within a dossier (None = root)
     dossier_id: str | None = None  # which dossier this article belongs to
     investigation_id: str | None = None  # direct investigation link (M4)

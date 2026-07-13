@@ -25,6 +25,7 @@ from src.services.authz import (
     ResourceRef,
 )
 from src.services.authz.policy import Principal
+from src.services.nuts import normalize_nuts
 from src.services.exceptions import Conflict, InvalidInput, NotFound
 from src.services.access_inheritance import AccessInheritance, max_level
 from src.repositories.group_repository import GroupRepository
@@ -176,6 +177,7 @@ class ReportService:  # pylint: disable=too-many-public-methods
         abstract: str | None = None,
         visibility: str | None = None,
         language: str | None = None,
+        nuts_region: str | None = None,
     ) -> Report:
         report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT_META)
         translatable_changed = False
@@ -191,6 +193,10 @@ class ReportService:  # pylint: disable=too-many-public-methods
             report.visibility = visibility
         if language is not None:
             report.language = language
+        if nuts_region is not None:
+            # Region tag isn't translated content, so it never bumps the
+            # translation content_version.
+            report.nuts_region = normalize_nuts(nuts_region, report.nuts_region)
         # Title/abstract are part of what translators translate — a real
         # change makes existing translations potentially outdated.
         if translatable_changed:

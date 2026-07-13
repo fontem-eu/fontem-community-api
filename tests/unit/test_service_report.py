@@ -34,6 +34,23 @@ class TestReportServiceExtended:
         updated = await s["report_svc"].update(_stable_uuid("u1"), r.id, visibility="public_open")
         assert updated.visibility == "public_open"
 
+    async def test_update_report_nuts_region(self, services):
+        """update() sets, validates, preserves and clears the region tag."""
+        s = services
+        await seed_user(s["user_repo"], "u1")
+        r = await s["report_svc"].create(_stable_uuid("u1"), "R")
+        u = await s["report_svc"].update(_stable_uuid("u1"), r.id, nuts_region="pt170")
+        assert u.nuts_region == "PT170"
+        # a partial update (region not passed) leaves it intact
+        u = await s["report_svc"].update(_stable_uuid("u1"), r.id, title="X")
+        assert u.nuts_region == "PT170"
+        # a malformed code is ignored
+        u = await s["report_svc"].update(_stable_uuid("u1"), r.id, nuts_region="!!bad")
+        assert u.nuts_region == "PT170"
+        # empty clears it
+        u = await s["report_svc"].update(_stable_uuid("u1"), r.id, nuts_region="")
+        assert u.nuts_region == ""
+
     async def test_update_nonexistent_report(self, services):
         """update() on nonexistent report raises NotFound.
 
