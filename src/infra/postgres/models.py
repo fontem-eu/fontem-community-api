@@ -115,6 +115,7 @@ class ReportModel(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
     abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
     visibility: Mapped[str] = mapped_column(Text, nullable=False, default="private")
+    nuts_region: Mapped[str] = mapped_column(Text, nullable=False, default="")
     parent_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
     dossier_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("dossiers.id", ondelete="SET NULL"), nullable=True

@@ -63,6 +63,18 @@ class TestReportAPI:
         assert resp.status_code == 200
         assert resp.json()["title"] == "New"
 
+    def test_update_report_nuts_region(self, client, services):
+        """PUT sets the region tag; GET returns it; a bad code is 422."""
+        asyncio.get_event_loop().run_until_complete(self._setup_user(services))
+        h = make_headers("user-1")
+        rid = client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+        resp = client.put(f"/reports/{rid}", json={"nuts_region": "PT17"}, headers=h)
+        assert resp.status_code == 200 and resp.json()["nuts_region"] == "PT17"
+        got = client.get(f"/data-stories/{rid}", headers=h).json()
+        assert got["nuts_region"] == "PT17"
+        bad = client.put(f"/reports/{rid}", json={"nuts_region": "not-a-code"}, headers=h)
+        assert bad.status_code == 422
+
     def test_delete_report(self, client, services):
         """DELETE /reports/:id returns 204."""
         asyncio.get_event_loop().run_until_complete(self._setup_user(services))

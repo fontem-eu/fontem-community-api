@@ -43,6 +43,8 @@ class UpdateReportRequest(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     abstract: str | None = Field(default=None, max_length=4000)
     visibility: Literal["private", "public_open", "public_auth"] | None = None
+    # Optional NUTS region this story is about (any level) or "" to clear.
+    nuts_region: str | None = Field(default=None, max_length=5, pattern=r"^([A-Za-z]{2}[A-Za-z0-9]{0,3})?$")
     language: str | None = Field(default=None, pattern="^[a-z]{2}$")
 
 
@@ -253,7 +255,7 @@ async def update_report(
 ) -> dict:
     report = await svc.update(
         user.id, report_id, body.title, body.abstract, body.visibility,
-        language=body.language,
+        language=body.language, nuts_region=body.nuts_region,
     )
     return asdict(report)
 
