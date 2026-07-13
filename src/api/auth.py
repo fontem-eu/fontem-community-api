@@ -6,7 +6,7 @@ import uuid as _uuid
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+import jwt
 
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
@@ -25,7 +25,7 @@ async def _resolve_user(
     token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
     user_id: str | None = payload.get("sub")
