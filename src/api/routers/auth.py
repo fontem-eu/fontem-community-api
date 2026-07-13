@@ -41,11 +41,12 @@ from typing import Annotated
 
 import bcrypt
 import httpx
+import jwt
+from jwt.algorithms import RSAAlgorithm
 from dishka.integrations.fastapi import FromDishka, inject
 from src.infra.minio_client import MinioStorage
 from src.services.upload_urls import presign_uploads
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from jose import jwt as jose_jwt
 from pydantic import BaseModel, EmailStr, Field
 
 from src.api.auth import JWT_ALGORITHM, JWT_SECRET, get_current_user
@@ -217,7 +218,7 @@ class LogoutResponse(BaseModel):
 def _mint_access_jwt(user: User) -> str:
     now = datetime.now(timezone.utc)
     expires = now + _ACCESS_TOKEN_TTL
-    return jose_jwt.encode(
+    return jwt.encode(
         {
             "sub": user.id,
             "email": user.email,
@@ -310,15 +311,24 @@ async def _verify_google_token(credential: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid Google token: unknown key")
 
     try:
-        payload = jose_jwt.decode(
+        # PyJWT needs a key object, not a raw JWK dict, and its `issuer`
+        # option is single-valued — Google issues either host form, so we
+        # verify the issuer ourselves below.
+        pub_key = RSAAlgorithm.from_jwk(json.dumps(matching_key))
+        payload = jwt.decode(
             credential,
-            matching_key,
+            pub_key,
             algorithms=["RS256"],
             audience=GOOGLE_CLIENT_ID,
-            issuer=["accounts.google.com", "https://accounts.google.com"],
+            options={"verify_iss": False},
         )
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Invalid Google token") from exc
+
+    if payload.get("iss") not in (
+        "accounts.google.com", "https://accounts.google.com",
+    ):
+        raise HTTPException(status_code=401, detail="Invalid Google token: issuer")
 
     if not payload.get("email_verified", False):
         raise HTTPException(status_code=401, detail="Email not verified by Google")

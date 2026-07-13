@@ -29,7 +29,7 @@ jobs:
         with:
           repository: void42/fontem-ci
           path: .fontem-ci
-          token: ${{ secrets.GMR_CI_READ_TOKEN }}
+          token: ${{ secrets.CI_READ_TOKEN }}
       - name: OSV-Scanner lockfile gate
         uses: ./.fontem-ci/actions/osv-scan
       - name: Secret scan (gitleaks)
@@ -44,7 +44,7 @@ jobs:
         with:
           repository: void42/fontem-ci
           path: .fontem-ci
-          token: ${{ secrets.GMR_CI_READ_TOKEN }}
+          token: ${{ secrets.CI_READ_TOKEN }}
       - name: Install deps and generate coverage
         env:
           PIP_INDEX_URL: https://nexus.void42.internal/repository/pypi-proxy/simple/
@@ -71,7 +71,7 @@ jobs:
         with:
           repository: void42/fontem-ci
           path: .fontem-ci
-          token: ${{ secrets.GMR_CI_READ_TOKEN }}
+          token: ${{ secrets.CI_READ_TOKEN }}
 
       - id: sbom
         name: Generate + upload SBOM
@@ -107,7 +107,7 @@ jobs:
             /tmp/gitops
           cd /tmp/gitops
           sed -i 's/version: ".*"/version: "'"$TAG"'"/' testing/fontem-community-api.yaml
-          git config user.name "GMR CI"
+          git config user.name "Fontem CI"
           git config user.email "ci@void42.internal"
           git add testing/fontem-community-api.yaml
           if git diff --cached --quiet; then

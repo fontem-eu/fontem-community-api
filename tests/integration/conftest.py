@@ -18,7 +18,7 @@ import os
 import uuid
 
 import pytest
-from jose import jwt
+import jwt
 from testcontainers.minio import MinioContainer
 from testcontainers.postgres import PostgresContainer
 

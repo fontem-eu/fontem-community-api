@@ -4,10 +4,17 @@ from __future__ import annotations
 import base64
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+import json
+import time
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import jwt
+from jwt.algorithms import RSAAlgorithm
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from fastapi import HTTPException
 
+from src.api.routers.auth import GOOGLE_CLIENT_ID
 from src.domain.moderation import Sanction
 
 
@@ -154,4 +161,59 @@ class TestGoogleAuthMalformedTokens:
     def test_two_segments_returns_401(self, client):
         """Two dot-separated segments (malformed JWT) must return 401."""
         resp = client.post("/auth/google", json={"credential": "header.payload"})
+        assert resp.status_code == 401
+
+
+class TestGoogleTokenVerificationReal:
+    """Exercise the REAL RS256 verification path (PyJWT RSAAlgorithm.from_jwk):
+    generate an RSA key, publish it as a JWK, sign a Google-style id_token,
+    and mock the JWKS fetch — no _verify_google_token mock."""
+
+    @staticmethod
+    def _signed_token_and_jwk(*, aud, iss="accounts.google.com",
+                              email_verified=True, kid="test-kid"):
+        priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        jwk = json.loads(RSAAlgorithm.to_jwk(priv.public_key()))
+        jwk.update({"kid": kid, "alg": "RS256", "use": "sig"})
+        token = jwt.encode(
+            {
+                "sub": "google-sub-123", "email": "real@gmail.com",
+                "email_verified": email_verified, "name": "Real User",
+                "picture": "https://lh3.googleusercontent.com/x.jpg",
+                "aud": aud, "iss": iss,
+                "iat": int(time.time()), "exp": int(time.time()) + 3600,
+            },
+            priv, algorithm="RS256", headers={"kid": kid},
+        )
+        return token, jwk
+
+    @staticmethod
+    def _patch_jwks(jwk):
+        resp = MagicMock()
+        resp.json.return_value = {"keys": [jwk]}
+        resp.raise_for_status = MagicMock()
+        http_client = AsyncMock()
+        http_client.get = AsyncMock(return_value=resp)
+        acm = MagicMock()
+        acm.__aenter__ = AsyncMock(return_value=http_client)
+        acm.__aexit__ = AsyncMock(return_value=False)
+        return patch("src.api.routers.auth.httpx.AsyncClient", return_value=acm)
+
+    def test_valid_rs256_id_token_is_accepted(self, client):
+        token, jwk = self._signed_token_and_jwk(aud=GOOGLE_CLIENT_ID)
+        with self._patch_jwks(jwk):
+            resp = client.post("/auth/google", json={"credential": token})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["user"]["email"] == "real@gmail.com"
+
+    def test_wrong_audience_is_rejected(self, client):
+        token, jwk = self._signed_token_and_jwk(aud="some-other-client")
+        with self._patch_jwks(jwk):
+            resp = client.post("/auth/google", json={"credential": token})
+        assert resp.status_code == 401
+
+    def test_bad_issuer_is_rejected(self, client):
+        token, jwk = self._signed_token_and_jwk(aud=GOOGLE_CLIENT_ID, iss="evil.example.com")
+        with self._patch_jwks(jwk):
+            resp = client.post("/auth/google", json={"credential": token})
         assert resp.status_code == 401

@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from jose import jwt
+import jwt
 
 from tests.conftest import make_headers, make_token, seed_user, _stable_uuid
 from src.api.auth import JWT_SECRET, JWT_ALGORITHM
