@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -13,6 +14,17 @@ config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# The URL comes from the environment, not the ini. Same variable the app
+# reads, so `alembic upgrade` cannot be aimed at a different database
+# than the service whose models it is migrating. Fail loudly rather than
+# silently falling back to a default that would be somebody's localhost.
+_db_url = os.environ.get("DATABASE_URL")
+if not _db_url:
+    raise RuntimeError(
+        "DATABASE_URL is not set — refusing to guess which database to migrate"
+    )
+config.set_main_option("sqlalchemy.url", _db_url)
 
 target_metadata = Base.metadata
 
