@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import date
 from typing import Annotated, Literal
 
 from dishka.integrations.fastapi import FromDishka, inject
@@ -169,8 +170,14 @@ async def search_reports(
     q: Annotated[str, Query(min_length=1, max_length=200)],
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     offset: Annotated[int, Query(ge=0, le=2**31 - 1)] = 0,
-    date_from: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
-    date_to: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    # `date`, not a shape-only regex. The pattern was r"^\d{4}-\d{2}-\d{2}$",
+    # which accepts digit-shaped non-dates: "0000-00-00" passed validation,
+    # reached datetime.strptime in ReportService._day_start, raised
+    # ValueError and surfaced as a 500. Found by the Schemathesis fuzz in
+    # the DAST run. Pydantic rejects an impossible date with 422 here, so
+    # the service never sees one.
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
     lang: Annotated[str | None, Query(pattern="^[a-z]{2}$")] = None,
     svc: FromDishka[ReportService],
     user: Annotated[User | None, Depends(get_optional_user)],
@@ -185,7 +192,9 @@ async def search_reports(
     reports = await svc.search_public(
         q, limit, offset,
         authenticated=user is not None,
-        date_from=date_from, date_to=date_to,
+        # The service takes ISO strings; hand it back the canonical form.
+        date_from=date_from.isoformat() if date_from else None,
+        date_to=date_to.isoformat() if date_to else None,
     )
     overlay = await svc.translation_overlay(reports, lang)
     out = []
