@@ -93,3 +93,28 @@ class TestDataStorySearch:
     def test_empty_query_rejected(self, client, services):
         _seed(services)
         assert client.get("/data-stories/search?q=").status_code == 422
+
+    def test_impossible_date_is_rejected_not_a_500(self, client, services):
+        """A digit-shaped non-date must be a 422, never a server error.
+
+        The query params were validated with r"^\d{4}-\d{2}-\d{2}$", which
+        checks the shape and not the value, so "0000-00-00" passed, reached
+        datetime.strptime in ReportService._day_start and raised ValueError
+        — surfacing as 500 Internal Server Error. Found by the Schemathesis
+        fuzz run against the DAST environment, on both /data-stories/search
+        and /reports/search (one handler, two prefixes).
+        """
+        _seed(services)
+        for param in ("date_from", "date_to"):
+            for bad in ("0000-00-00", "2023-13-01", "2023-02-30", "9999-99-99"):
+                r = client.get(f"/data-stories/search?q=apple&{param}={bad}")
+                assert r.status_code == 422, (
+                    f"{param}={bad} returned {r.status_code}, expected 422"
+                )
+
+    def test_real_dates_still_work(self, client, services):
+        """The fix must not narrow what was already accepted."""
+        _seed(services)
+        for good in ("2022-01-01", "0001-01-01", "2024-02-29"):
+            r = client.get(f"/data-stories/search?q=apple&date_from={good}")
+            assert r.status_code == 200, f"date_from={good} -> {r.status_code}"
