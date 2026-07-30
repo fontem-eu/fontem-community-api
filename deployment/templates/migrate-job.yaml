@@ -1,0 +1,80 @@
+{{- /*
+Schema migrations, as an ArgoCD PreSync hook.
+
+Argo runs this to completion BEFORE it applies the rest of the sync, and a
+non-zero exit aborts the sync — so a broken migration blocks the release
+rather than rolling out pods that expect a schema the database does not
+have. That ordering is the whole point of using a hook instead of an
+initContainer: an initContainer runs once per pod, so two replicas would
+race each other to migrate, and a failure there leaves the old ReplicaSet
+up while the new one crash-loops.
+
+Before this existed, the app migrated itself in its FastAPI lifespan with
+create_all plus eighteen hand-written ALTER ... IF NOT EXISTS statements.
+That had no ordering, no versioning and no record of what ran, and it
+drifted far enough that /auth/login returned 500 in testing.
+
+Sequencing consequence to keep in mind: the hook finishes before the new
+pods start, so for a few seconds the OLD code is talking to the NEW
+schema. Additive migrations are safe. A rename or a drop needs the usual
+two-release dance — add the new shape, ship the code that uses it, then
+remove the old shape in a later release.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Stable name + BeforeHookCreation: exactly one migration Job exists at
+  # a time and it is deleted immediately before the next one is created,
+  # so the last run stays around to be read after a sync.
+  name: fontem-community-api-migrate
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+  labels:
+    app: fontem-community-api-migrate
+spec:
+  # No retries. A migration that failed once should be read by a human,
+  # not attempted again against a database it may have half-changed.
+  backoffLimit: 0
+  # Long enough for a real migration on the largest table, short enough
+  # that a hung lock does not wedge the release indefinitely.
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: fontem-community-api-migrate
+      annotations:
+        # The mesh sidecar never exits, so a Job with linkerd injected
+        # never reaches Complete and Argo waits forever on the hook.
+        linkerd.io/inject: disabled
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: migrate
+          # Same image and tag as the app being deployed, so the
+          # migrations that run are exactly the ones that shipped with
+          # this code. The image already carries migrations/ and
+          # alembic.ini.
+          image: contribute.void42.internal/fontem/fontem-community-api:{{ .Values.version }}
+          command: ["python", "-m", "alembic", "upgrade", "head"]
+          env:
+            # POSTGRES_PASSWORD MUST come first. databaseUrl embeds
+            # $(POSTGRES_PASSWORD), and Kubernetes only expands a
+            # $(VAR) reference to a variable declared EARLIER in the
+            # same env list — declared after, it is left as the literal
+            # string and the connection fails with a password of
+            # "$(POSTGRES_PASSWORD)". deployment.yaml orders it the same
+            # way for the same reason.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fontem-postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: {{ .Values.databaseUrl | quote }}
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
