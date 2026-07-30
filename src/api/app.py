@@ -12,9 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 import asyncpg.exceptions as asyncpg_exc
-from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.api.di import make_container
 from src.api.rate_limit import limiter
@@ -22,7 +20,6 @@ from src.api.routers import (
     activity, auth, data_projects, dossiers, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
 )
 from src.assistant import router as assistant_router
-from src.infra.postgres.models import Base
 from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
 
 
@@ -97,134 +94,33 @@ def _find_asyncpg_data_error(exc: BaseException) -> asyncpg_exc.DataError | None
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-    # The FastAPI lifespan protocol passes the bound application as the
-    # first positional argument; this hook only needs the env-derived
-    # DATABASE_URL, so the parameter is underscore-prefixed.
-    db_url = os.environ.get("DATABASE_URL")
-    if db_url:
-        engine = create_async_engine(db_url, connect_args={"timeout": 10, "ssl": None})
-        # Ensure schema exists (idempotent — safe for fresh and existing DBs)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        async with engine.begin() as conn:
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
-                "failed_login_attempts INTEGER NOT NULL DEFAULT 0"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ"
-            ))
-            await conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id UUID NOT NULL REFERENCES users(id),
-                    report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
-                    messages JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    UNIQUE (user_id, report_id)
-                )
-            """))
-            await conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS assist_conversations (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id UUID NOT NULL,
-                    conversation_key TEXT NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    CONSTRAINT uq_assist_conv_user_key UNIQUE (user_id, conversation_key)
-                )
-            """))
-            await conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS assist_messages (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    conversation_id UUID NOT NULL REFERENCES assist_conversations(id) ON DELETE CASCADE,
-                    user_id UUID NOT NULL,
-                    role VARCHAR(16) NOT NULL,
-                    content TEXT NOT NULL,
-                    extras JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    tokens_in INTEGER,
-                    tokens_out INTEGER,
-                    model VARCHAR(64),
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    CONSTRAINT ck_assist_msg_role CHECK (role IN ('user', 'assistant'))
-                )
-            """))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_assist_msg_user_created "
-                "ON assist_messages (user_id, created_at)"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_assist_msg_conv_created "
-                "ON assist_messages (conversation_id, created_at)"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_issues_status "
-                "ON issues (status)"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_reports_visibility "
-                "ON reports (visibility)"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_reports_parent_id "
-                "ON reports (parent_id) WHERE parent_id IS NOT NULL"
-            ))
-            # data_projects predates investigation sharing; create_all won't add
-            # the column to the existing table, so ALTER it in explicitly.
-            await conn.execute(text(
-                "ALTER TABLE data_projects ADD COLUMN IF NOT EXISTS investigation_id UUID "
-                "REFERENCES investigations(id) ON DELETE SET NULL"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_data_projects_investigation "
-                "ON data_projects (investigation_id) WHERE investigation_id IS NOT NULL"
-            ))
-            # Story translations shipped after reports existed in prod;
-            # create_all only creates NEW tables, so ALTER the two
-            # original-side columns in explicitly.
-            await conn.execute(text(
-                "ALTER TABLE reports ADD COLUMN IF NOT EXISTS "
-                "language TEXT NOT NULL DEFAULT 'en'"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE reports ADD COLUMN IF NOT EXISTS "
-                "content_version INTEGER NOT NULL DEFAULT 1"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE reports ADD COLUMN IF NOT EXISTS "
-                "nuts_region TEXT NOT NULL DEFAULT ''"
-            ))
-            # user_profiles avatar focal point shipped after the table's
-            # first create_all, so ALTER the columns in explicitly.
-            await conn.execute(text(
-                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
-                "avatar_x REAL NOT NULL DEFAULT 50"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
-                "avatar_y REAL NOT NULL DEFAULT 50"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
-                "show_email BOOLEAN NOT NULL DEFAULT false"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
-                "use_custom_email BOOLEAN NOT NULL DEFAULT false"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
-                "custom_email TEXT NOT NULL DEFAULT ''"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS "
-                "home_nuts TEXT NOT NULL DEFAULT ''"
-            ))
-        await engine.dispose()
+    """No schema work here. Alembic owns the schema.
 
+    This hook used to run ``Base.metadata.create_all`` and then eighteen
+    hand-written ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS`` statements,
+    because create_all creates new tables but never alters existing ones.
+    That was a migration system with no ordering, no versioning and no
+    record of what had run, and it drifted: the testing database ended up
+    both missing columns the models needed and carrying NOT NULL columns
+    the models had forgotten, which is how /auth/login and
+    /data-stories came to return 500.
+
+    Schema changes are now migrations. ``alembic upgrade head`` runs as an
+    ArgoCD PreSync hook (deployment/templates/migrate-job.yaml) before any
+    new pod rolls, so a failed migration blocks the release instead of
+    leaving half-migrated pods serving traffic. Every environment is
+    stamped at 008 and a fresh database is built by 001..008.
+
+    Two consequences worth keeping in mind:
+
+    * Migrations must be backward compatible with the running code. The
+      PreSync hook completes before the new pods start, so for a moment
+      the OLD pods are talking to the NEW schema. Additive changes are
+      safe; a rename or a drop needs the usual two-release dance.
+    * The app no longer repairs its own database. If a column is missing
+      the request fails, loudly, instead of being silently patched at the
+      next restart. That is the point.
+    """
     yield
 
 
