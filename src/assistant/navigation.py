@@ -21,6 +21,7 @@ invalid we know that here, synchronously, and say so.
 from __future__ import annotations
 
 import json
+import re
 
 NAVIGATE_TOOL_NAME = "navigate"
 
@@ -68,17 +69,11 @@ def navigate_tool_schema() -> dict:
 
 def _pattern_to_regex(pattern: str) -> str:
     """`/c/:ticker/:view` -> a regex matching `/c/AAPL/summary`."""
-    import re
-
-    out, i = [], 0
+    out = []
     for part in pattern.split("/"):
         if not part:
             continue
-        if part.startswith(":"):
-            out.append(r"[^/]+")
-        else:
-            out.append(re.escape(part))
-        i += 1
+        out.append(r"[^/]+" if part.startswith(":") else re.escape(part))
     return "^/" + "/".join(out) + "/?$" if out else "^/$"
 
 
@@ -89,8 +84,6 @@ def validate_path(path: str, routes: list[dict]) -> tuple[bool, str]:
     means we can never authorise a path this build of the frontend cannot
     serve, which a server-side copy of the manifest could.
     """
-    import re
-
     if not path or not path.startswith("/"):
         return False, "path must start with '/'"
     if "://" in path or path.startswith("//"):

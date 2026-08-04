@@ -44,6 +44,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from src.assistant import navigation
+
 
 # ── Tool schemas (OpenAI / Mistral function-calling format) ────────────
 #
@@ -209,8 +211,6 @@ _TOOL_LABELS = {
 
 
 # Default Mistral endpoint. Overridable for tests / self-hosted gateways.
-from src.assistant import navigation
-
 _MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 _DEFAULT_MODEL = "mistral-small-latest"
 _DEFAULT_GMR_API = "http://fontem-api"
