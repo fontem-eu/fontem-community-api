@@ -209,6 +209,8 @@ _TOOL_LABELS = {
 
 
 # Default Mistral endpoint. Overridable for tests / self-hosted gateways.
+from src.assistant import navigation
+
 _MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 _DEFAULT_MODEL = "mistral-small-latest"
 _DEFAULT_GMR_API = "http://fontem-api"
@@ -425,6 +427,12 @@ class MistralProxyClient:
         """Execute a chat turn and yield SSE event blocks."""
         start = time.time()
         system = _system_prompt_with_today(payload.get("system", ""))
+        # Where the user is, and what pages exist. The manifest is generated
+        # by the frontend from its own router and sent with the turn, so it
+        # cannot disagree with what this build of the app actually serves.
+        nav = payload.get("nav") or {}
+        nav_routes = nav.get("routes") or []
+        system += navigation.system_context(nav)
         message = payload.get("message", "")
 
         if not message:
@@ -484,7 +492,14 @@ class MistralProxyClient:
                         json={
                             "model": self._model,
                             "messages": messages,
-                            "tools": _TOOLS,
+                            # navigate is offered only when the client sent a
+                            # site map. Advertising a tool whose every call we
+                            # would have to reject teaches the model to
+                            # distrust its own tools.
+                            "tools": (
+                                _TOOLS + [navigation.navigate_tool_schema()]
+                                if nav_routes else _TOOLS
+                            ),
                             "tool_choice": "auto",
                         },
                     )
@@ -563,7 +578,19 @@ class MistralProxyClient:
                         # calls return the cached result instead of paying
                         # the round-trip again.
                         cache_key = name + "|" + json.dumps(args, sort_keys=True)
-                        if cache_key in tool_cache:
+                        if name == navigation.NAVIGATE_TOOL_NAME:
+                            # Runs in the browser, not here: emit the
+                            # instruction and tell the model it landed.
+                            # Deliberately NOT cached — asking to go
+                            # somewhere twice in a turn should move the user
+                            # twice, and a cached "ok" would strand them on
+                            # the first page.
+                            result, emit = navigation.navigate_result(
+                                args.get("path", ""), nav_routes,
+                            )
+                            if emit:
+                                yield _sse("navigate", emit)
+                        elif cache_key in tool_cache:
                             result = tool_cache[cache_key]
                         else:
                             result = await self._execute_tool(client, name, args)
