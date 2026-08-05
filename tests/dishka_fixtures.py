@@ -14,6 +14,7 @@ from __future__ import annotations
 from dishka import Provider, Scope, provide, make_async_container
 
 from src.assistant.proxy_client import ClaudeProxyClient
+from src.assistant.credential_repository import CredentialRepository, McpTokenRepository
 from src.assistant.repository import AssistRepository, InMemoryAssistRepository
 from src.assistant.service import AssistantService
 from src.assistant.context import TurnLimits
@@ -124,6 +125,21 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def moderation_repo(self) -> ModerationRepository:
         return self._svc["mod_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def credential_repo(self) -> CredentialRepository:
+        """Stub: these tests exercise the chat route, not credential storage.
+
+        The route resolves the caller's provider key before each turn, so
+        the container must supply one. Returning None from
+        get_secret_for_turn is the "user has not configured a provider"
+        path, which is what these fixtures should exercise.
+        """
+        return self._svc.get("credential_repository") or _NullCredentialRepo()
+
+    @provide(scope=Scope.REQUEST)
+    def mcp_token_repo(self) -> McpTokenRepository:
+        return self._svc.get("mcp_token_repository") or _NullMcpTokenRepo()
 
     @provide(scope=Scope.REQUEST)
     def assist_repo(self) -> AssistRepository:
@@ -261,3 +277,23 @@ class InMemoryProvider(Provider):
 def make_test_container(services: dict):
     """Build a dishka container backed by in-memory repos."""
     return make_async_container(InMemoryProvider(services))
+
+
+class _NullCredentialRepo:
+    """No provider configured — the turn falls back to the platform key."""
+
+    async def get_secret_for_turn(self, user_id, provider=None):  # noqa: ARG002
+        return None
+
+    async def list_for_user(self, user_id):  # noqa: ARG002
+        return []
+
+
+class _NullMcpTokenRepo:
+    """No external clients connected."""
+
+    async def list_for_user(self, user_id):  # noqa: ARG002
+        return []
+
+    async def verify(self, plaintext):  # noqa: ARG002
+        return None

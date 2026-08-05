@@ -791,3 +791,58 @@ class UserProfileModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
+
+class UserLLMCredentialModel(Base):
+    """A user's own provider key, encrypted at rest.
+
+    One row per (user, provider) so somebody can keep an Anthropic key and
+    a Mistral key and switch between them without re-entering either.
+
+    `secret_enc` is AEAD ciphertext; the master key arrives through the
+    environment from Vault. A database dump on its own is therefore inert.
+    Nothing reads this column out to a caller — only the turn that spends
+    it. `fingerprint` exists so the UI can show *which* key is stored
+    without showing any part of it.
+    """
+
+    __tablename__ = "user_llm_credentials"
+    __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_user_provider"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secret_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+    )
+
+
+class McpTokenModel(Base):
+    """A personal access token for an external MCP client.
+
+    Only the hash is stored — see src/assistant/mcp_tokens.py. Multi-use
+    and long-lived, unlike auth_tokens, so it carries a label and
+    last_used_at: revoking safely means knowing which token is which.
+    """
+
+    __tablename__ = "mcp_tokens"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+    )

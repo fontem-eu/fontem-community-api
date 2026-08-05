@@ -44,6 +44,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from src.assistant import navigation
+
 
 # ── Tool schemas (OpenAI / Mistral function-calling format) ────────────
 #
@@ -232,6 +234,14 @@ _FRESHNESS_TTL_SECONDS = 300
 # the user stare at a spinner because the data-quality endpoint is
 # slow.
 _FRESHNESS_FETCH_TIMEOUT = 5.0
+
+
+def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
+    """The tool surface for one turn, scoped to the user's context."""
+    tools = navigation.scope_tools(_TOOLS, has_editor=has_editor)
+    if nav_routes:
+        tools = tools + [navigation.navigate_tool_schema()]
+    return tools
 
 
 def _sse(event: str, data: dict) -> str:
@@ -425,13 +435,35 @@ class MistralProxyClient:
         """Execute a chat turn and yield SSE event blocks."""
         start = time.time()
         system = _system_prompt_with_today(payload.get("system", ""))
+        # Where the user is, and what pages exist. The manifest is generated
+        # by the frontend from its own router and sent with the turn, so it
+        # cannot disagree with what this build of the app actually serves.
+        nav = payload.get("nav") or {}
+        nav_routes = nav.get("routes") or []
+        # An editing surface is registered when the caller sent a report
+        # context to work on. Drives which tools the model is offered.
+        has_editor = bool(payload.get("has_editor"))
+        system += navigation.system_context(nav)
         message = payload.get("message", "")
 
         if not message:
             yield _sse("error", {"error": "Missing message"})
             return
-        if not self._api_key:
-            yield _sse("error", {"error": "MISTRAL_API_KEY not configured"})
+        # The caller's own key wins over the platform key. Read per turn
+        # and never stored on self: this client is an APP-scoped singleton
+        # shared across requests, so keeping a key on the instance would
+        # spend one user's credential on another user's turn.
+        cred = payload.get("credential") or {}
+        api_key = cred.get("api_key") or self._api_key
+        model = cred.get("model") or self._model
+        if not api_key:
+            yield _sse("error", {
+                "error": (
+                    "No LLM provider configured. Add your own API key in "
+                    "Account settings to use the assistant."
+                ),
+                "code": "no_credential",
+            })
             return
 
         yield _sse("status", {
@@ -478,13 +510,20 @@ class MistralProxyClient:
                     resp = await client.post(
                         self._api_url,
                         headers={
-                            "Authorization": f"Bearer {self._api_key}",
+                            "Authorization": f"Bearer {api_key}",
                             "Content-Type": "application/json",
                         },
                         json={
-                            "model": self._model,
+                            "model": model,
                             "messages": messages,
-                            "tools": _TOOLS,
+                            # navigate is offered only when the client sent a
+                            # site map. Advertising a tool whose every call we
+                            # would have to reject teaches the model to
+                            # distrust its own tools.
+                            # Scoped to where the user actually is: no
+                            # propose_edit without an editor, no navigate
+                            # without a site map.
+                            "tools": _turn_tools(nav_routes, has_editor),
                             "tool_choice": "auto",
                         },
                     )
@@ -563,7 +602,19 @@ class MistralProxyClient:
                         # calls return the cached result instead of paying
                         # the round-trip again.
                         cache_key = name + "|" + json.dumps(args, sort_keys=True)
-                        if cache_key in tool_cache:
+                        if name == navigation.NAVIGATE_TOOL_NAME:
+                            # Runs in the browser, not here: emit the
+                            # instruction and tell the model it landed.
+                            # Deliberately NOT cached — asking to go
+                            # somewhere twice in a turn should move the user
+                            # twice, and a cached "ok" would strand them on
+                            # the first page.
+                            result, emit = navigation.navigate_result(
+                                args.get("path", ""), nav_routes,
+                            )
+                            if emit:
+                                yield _sse("navigate", emit)
+                        elif cache_key in tool_cache:
                             result = tool_cache[cache_key]
                         else:
                             result = await self._execute_tool(client, name, args)
