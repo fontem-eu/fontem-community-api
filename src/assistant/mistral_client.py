@@ -236,6 +236,14 @@ _FRESHNESS_TTL_SECONDS = 300
 _FRESHNESS_FETCH_TIMEOUT = 5.0
 
 
+def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
+    """The tool surface for one turn, scoped to the user's context."""
+    tools = navigation.scope_tools(_TOOLS, has_editor=has_editor)
+    if nav_routes:
+        tools = tools + [navigation.navigate_tool_schema()]
+    return tools
+
+
 def _sse(event: str, data: dict) -> str:
     """Serialize an SSE event block (one per ``yield``)."""
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
@@ -432,6 +440,9 @@ class MistralProxyClient:
         # cannot disagree with what this build of the app actually serves.
         nav = payload.get("nav") or {}
         nav_routes = nav.get("routes") or []
+        # An editing surface is registered when the caller sent a report
+        # context to work on. Drives which tools the model is offered.
+        has_editor = bool(payload.get("has_editor"))
         system += navigation.system_context(nav)
         message = payload.get("message", "")
 
@@ -509,10 +520,10 @@ class MistralProxyClient:
                             # site map. Advertising a tool whose every call we
                             # would have to reject teaches the model to
                             # distrust its own tools.
-                            "tools": (
-                                _TOOLS + [navigation.navigate_tool_schema()]
-                                if nav_routes else _TOOLS
-                            ),
+                            # Scoped to where the user actually is: no
+                            # propose_edit without an editor, no navigate
+                            # without a site map.
+                            "tools": _turn_tools(nav_routes, has_editor),
                             "tool_choice": "auto",
                         },
                     )

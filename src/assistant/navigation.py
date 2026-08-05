@@ -141,3 +141,25 @@ def navigate_result(path: str, routes: list[dict]) -> tuple[str, dict | None]:
     if not ok:
         return json.dumps({"ok": False, "error": why, "path": path}), None
     return json.dumps({"ok": True, "navigated_to": path}), {"path": path}
+
+
+# ── Tool scoping ──────────────────────────────────────────────
+#
+# Which tools make sense depends on where the user is. `propose_edit`
+# only means something while an article is open for editing; offering it
+# on the Atlas invites the model to propose changes to nothing, and a
+# tool that cannot succeed is worse than an absent one — the model spends
+# a turn discovering that, and learns to distrust what it is offered.
+
+#: Tools that require an editing surface to be registered.
+EDITOR_ONLY_TOOLS = frozenset({"mcp__gmr__propose_edit"})
+
+
+def scope_tools(tools: list[dict], *, has_editor: bool) -> list[dict]:
+    """Drop tools that cannot do anything from where the user currently is."""
+    if has_editor:
+        return tools
+    return [
+        t for t in tools
+        if (t.get("function", {}).get("name") or t.get("name")) not in EDITOR_ONLY_TOOLS
+    ]

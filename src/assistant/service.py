@@ -145,6 +145,10 @@ class AssistantService:
             "system": system_prompt,
             "message": req.message,
             "nav": req.nav,
+            # The assistant is on every page now, so the tool surface has
+            # to follow the user: propose_edit means nothing without an
+            # article open.
+            "has_editor": bool(req.context_block),
         }
         if req.credential:
             # Spending the user's own key, not the platform's. Passed per

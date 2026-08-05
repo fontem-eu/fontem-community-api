@@ -88,3 +88,33 @@ def test_tool_schema_shape():
     schema = navigate_tool_schema()
     assert schema["function"]["name"] == NAVIGATE_TOOL_NAME
     assert schema["function"]["parameters"]["required"] == ["path"]
+
+
+# ── Tool scoping ──────────────────────────────────────────────
+
+from src.assistant.navigation import EDITOR_ONLY_TOOLS, scope_tools  # noqa: E402
+
+TOOLS = [
+    {"type": "function", "function": {"name": "mcp__gmr__search_entities"}},
+    {"type": "function", "function": {"name": "mcp__gmr__propose_edit"}},
+    {"type": "function", "function": {"name": "mcp__gmr__find_paths"}},
+]
+
+
+def test_editor_tools_are_withheld_without_an_editor():
+    names = [t["function"]["name"] for t in scope_tools(TOOLS, has_editor=False)]
+    assert "mcp__gmr__propose_edit" not in names
+    # Everything else survives — scoping must not quietly shrink the surface.
+    assert "mcp__gmr__search_entities" in names
+    assert "mcp__gmr__find_paths" in names
+
+
+def test_editor_tools_are_offered_while_editing():
+    names = [t["function"]["name"] for t in scope_tools(TOOLS, has_editor=True)]
+    assert names == [t["function"]["name"] for t in TOOLS]
+
+
+def test_scoping_is_driven_by_a_named_set_not_a_string_match():
+    """A tool is editor-only because it is listed, not because of its name."""
+    assert "mcp__gmr__propose_edit" in EDITOR_ONLY_TOOLS
+    assert isinstance(EDITOR_ONLY_TOOLS, frozenset)
