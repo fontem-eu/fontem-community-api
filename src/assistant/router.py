@@ -240,7 +240,14 @@ class ProviderCredentialIn(BaseModel):
     )
 
 
-@router.put("/credentials", status_code=200)
+@router.put(
+    "/credentials",
+    status_code=200,
+    responses={
+        422: {"description": "Unsupported provider."},
+        503: {"description": "Credential encryption is not configured."},
+    },
+)
 @inject
 async def put_credential(
     body: ProviderCredentialIn,
@@ -277,7 +284,14 @@ async def list_credentials(
     }
 
 
-@router.delete("/credentials/{provider}", status_code=204)
+@router.delete(
+    "/credentials/{provider}",
+    status_code=204,
+    responses={
+        404: {"description": "No credential stored for that provider."},
+        422: {"description": "Unsupported provider."},
+    },
+)
 @inject
 async def delete_credential(
     provider: str,
@@ -327,7 +341,11 @@ async def list_mcp_tokens(
     return {"tokens": [t.as_dict() for t in await repo.list_for_user(user.id)]}
 
 
-@router.delete("/mcp-tokens/{token_id}", status_code=204)
+@router.delete(
+    "/mcp-tokens/{token_id}",
+    status_code=204,
+    responses={404: {"description": "No such token."}},
+)
 @inject
 async def revoke_mcp_token(
     token_id: str,
@@ -339,7 +357,11 @@ async def revoke_mcp_token(
         raise HTTPException(status_code=404, detail="No such token")
 
 
-@router.post("/mcp-tokens/verify", include_in_schema=False)
+@router.post(
+    "/mcp-tokens/verify",
+    include_in_schema=False,
+    responses={401: {"description": "Invalid or revoked token."}},
+)
 @inject
 async def verify_mcp_token(
     body: dict,
