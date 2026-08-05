@@ -822,3 +822,27 @@ class UserLLMCredentialModel(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True,
     )
+
+
+class McpTokenModel(Base):
+    """A personal access token for an external MCP client.
+
+    Only the hash is stored — see src/assistant/mcp_tokens.py. Multi-use
+    and long-lived, unlike auth_tokens, so it carries a label and
+    last_used_at: revoking safely means knowing which token is which.
+    """
+
+    __tablename__ = "mcp_tokens"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+    )

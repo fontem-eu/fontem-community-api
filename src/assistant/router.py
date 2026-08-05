@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES
-from src.assistant.credential_repository import CredentialRepository
+from src.assistant.credential_repository import CredentialRepository, McpTokenRepository
 from src.assistant.credentials import (
     SUPPORTED_PROVIDERS,
     CredentialEncryptionUnavailable,
@@ -291,3 +291,67 @@ async def delete_credential(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not await repo.delete(user.id, provider):
         raise HTTPException(status_code=404, detail="No credential for that provider")
+
+
+# ── MCP access tokens ─────────────────────────────────────────
+#
+# What a user pastes into their own LLM client so it can reach Fontem's
+# tools. Shown once at creation and never again: a token that can be
+# re-read is a token an attacker can re-read.
+
+
+class McpTokenIn(BaseModel):
+    label: str = Field("", max_length=80,
+                       description="Which client this is for, e.g. 'Claude Desktop'.")
+
+
+@router.post("/mcp-tokens", status_code=201)
+@inject
+async def create_mcp_token(
+    body: McpTokenIn,
+    repo: FromDishka[McpTokenRepository],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Mint a token. The plaintext is in this response and nowhere else."""
+    plaintext, summary = await repo.create(user.id, body.label)
+    return {**summary.as_dict(), "token": plaintext}
+
+
+@router.get("/mcp-tokens")
+@inject
+async def list_mcp_tokens(
+    repo: FromDishka[McpTokenRepository],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Which clients are connected. Never the tokens themselves."""
+    return {"tokens": [t.as_dict() for t in await repo.list_for_user(user.id)]}
+
+
+@router.delete("/mcp-tokens/{token_id}", status_code=204)
+@inject
+async def revoke_mcp_token(
+    token_id: str,
+    repo: FromDishka[McpTokenRepository],
+    user: Annotated[User, Depends(get_current_user)],
+) -> None:
+    """Disconnect a client."""
+    if not await repo.revoke(user.id, token_id):
+        raise HTTPException(status_code=404, detail="No such token")
+
+
+@router.post("/mcp-tokens/verify", include_in_schema=False)
+@inject
+async def verify_mcp_token(
+    body: dict,
+    repo: FromDishka[McpTokenRepository],
+) -> dict:
+    """Internal: resolve a token to a user for the MCP server.
+
+    Not in the public schema and not reachable from outside the cluster.
+    The MCP server calls this rather than re-implementing verification —
+    a second verifier is a second place for the rules to drift.
+    """
+    user_id = await repo.verify((body or {}).get("token", ""))
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return {"user_id": user_id}
