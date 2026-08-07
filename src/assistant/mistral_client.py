@@ -61,7 +61,10 @@ _TOOLS: list[dict] = [
                 "by name, ticker, or keyword. Use this first when the user "
                 "mentions an entity. Returns up to `limit` matches across "
                 "all entity types — pick one and call investigate_entity "
-                "to drill in."
+                "to drill in. The graph holds duplicates: country "
+                "subsidiaries, spellings, punctuation. For counts and "
+                "totals, search the variants and iterate every hit rather "
+                "than reporting the first."
             ),
             "parameters": {
                 "type": "object",
@@ -114,7 +117,12 @@ _TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "mcp__gmr__find_paths",
-            "description": "Find shortest paths between two entities.",
+            "description": (
+                "Find shortest paths between two entities. Use it to "
+                "surface the intermediary — the shared owner, common "
+                "supplier or lobbyist sitting between two parties who "
+                "appear unconnected."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -135,6 +143,8 @@ _TOOLS: list[dict] = [
                 "does NOT mutate state. Supported actions: insert_content "
                 "(append HTML to the document), insert_widget (insert an "
                 "interactive widget node), update_title, update_abstract. "
+                "Call it once the analysis is done and you have specific "
+                "prose to add or replace, not to think out loud. "
                 "Multiple proposals sharing a `group_id` render as a "
                 "single grouped card the user can accept/reject as a "
                 "unit (use this when emitting a coherent set of edits "
