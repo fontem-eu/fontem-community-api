@@ -619,6 +619,14 @@ class AssistantProvider(Provider):
                 gmr_api_url=os.environ.get(
                     "GMR_API_INTERNAL", "http://fontem-api",
                 ),
+                # Must be passed here. This provider constructs the client
+                # directly rather than going through from_env(), so a new
+                # constructor argument that is only wired into from_env()
+                # silently keeps its default — and the default for
+                # local_url is "no local server", which sends every
+                # keyless user to the platform Mistral key instead.
+                local_url=os.environ.get("LOCAL_LLM_URL", ""),
+                local_model=os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b"),
             )
         url = os.environ.get(
             "CLAUDE_PROXY_URL",
