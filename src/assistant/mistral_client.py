@@ -213,6 +213,16 @@ _TOOL_LABELS = {
 # Default Mistral endpoint. Overridable for tests / self-hosted gateways.
 _MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 _DEFAULT_MODEL = "mistral-small-latest"
+
+#: The cluster-local llama.cpp server (Qwen3-4B). Shared by every
+#: environment — see gitops/infra/llm-service.yaml. Empty when unset, in
+#: which case the assistant needs a user-supplied key as before.
+_LOCAL_URL = ""
+_LOCAL_MODEL = "qwen3-4b"
+#: Provider id for the built-in model. Deliberately not a vendor name:
+#: which weights we host is an operational detail, and users should not
+#: have to re-pick a provider when it changes.
+LOCAL_PROVIDER = "local"
 _DEFAULT_GMR_API = "http://fontem-api"
 # Bumped 5 → 10. Five is too tight for "investigate this multi-subsidiary
 # corporate group" prompts; ten is enough for most real questions and is
@@ -386,10 +396,19 @@ class MistralProxyClient:
         max_iterations: int = _MAX_TOOL_ITERATIONS,
         timeout: float = 120.0,
         client_factory=None,
+        local_url: str = _LOCAL_URL,
+        local_model: str = _LOCAL_MODEL,
+        local_timeout: float = 300.0,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._api_url = api_url
+        self._local_url = local_url.rstrip("/")
+        self._local_model = local_model
+        # Generation on CPU runs at single-digit tokens/sec, so a long
+        # answer legitimately takes minutes. The hosted-provider timeout
+        # would abort a turn that was working fine.
+        self._local_timeout = local_timeout
         self._gmr_api_url = gmr_api_url.rstrip("/")
         self._max_iter = max_iterations
         self._timeout = timeout
@@ -431,6 +450,57 @@ class MistralProxyClient:
         self._freshness_cache = (now, summary)
         return summary
 
+    def _route_for(
+        self, cred: dict
+    ) -> tuple[str, str, str, float] | None:
+        """Pick the endpoint for this turn: (url, api_key, model, timeout).
+
+        Three cases, in order:
+
+          1. The user picked a hosted provider and supplied a key — spend
+             theirs.
+          2. The user picked the built-in model, or picked nothing at all
+             — use the cluster-local server. No key, nobody billed.
+          3. Neither is available — return None and the caller explains
+             itself.
+
+        Case 2 is why this exists. The assistant used to be unusable
+        until you pasted an API key, which meant almost nobody used it.
+
+        Returns None rather than raising so the caller can emit a legible
+        SSE error instead of a stack trace mid-stream.
+        """
+        provider = (cred.get("provider") or "").strip().lower()
+        key = cred.get("api_key") or ""
+
+        if provider and provider != LOCAL_PROVIDER and key:
+            return (
+                self._api_url,
+                key,
+                cred.get("model") or self._model,
+                self._timeout,
+            )
+        if self._local_url:
+            # cred["model"] is ignored for the built-in: the user does not
+            # choose which weights we host, and honouring an arbitrary
+            # string here would just 404 against llama.cpp.
+            return (
+                f"{self._local_url}/v1/chat/completions",
+                "",
+                self._local_model,
+                self._local_timeout,
+            )
+        if key:
+            return (
+                self._api_url,
+                key,
+                cred.get("model") or self._model,
+                self._timeout,
+            )
+        if self._api_key:
+            return self._api_url, self._api_key, self._model, self._timeout
+        return None
+
     async def stream(self, payload: dict) -> AsyncIterator[str]:  # NOSONAR S3776: provider-loop
         """Execute a chat turn and yield SSE event blocks."""
         start = time.time()
@@ -454,9 +524,8 @@ class MistralProxyClient:
         # shared across requests, so keeping a key on the instance would
         # spend one user's credential on another user's turn.
         cred = payload.get("credential") or {}
-        api_key = cred.get("api_key") or self._api_key
-        model = cred.get("model") or self._model
-        if not api_key:
+        route = self._route_for(cred)
+        if route is None:
             yield _sse("error", {
                 "error": (
                     "No LLM provider configured. Add your own API key in "
@@ -465,6 +534,7 @@ class MistralProxyClient:
                 "code": "no_credential",
             })
             return
+        api_url, api_key, model, timeout = route
 
         yield _sse("status", {
             "phase": "connecting",
@@ -507,12 +577,13 @@ class MistralProxyClient:
                         "elapsed": round(time.time() - start, 1),
                     })
 
+                    headers = {"Content-Type": "application/json"}
+                    if api_key:
+                        headers["Authorization"] = f"Bearer {api_key}"
                     resp = await client.post(
-                        self._api_url,
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        },
+                        api_url,
+                        headers=headers,
+                        timeout=timeout,
                         json={
                             "model": model,
                             "messages": messages,
@@ -803,4 +874,6 @@ def from_env() -> "MistralProxyClient":
         model=os.environ.get("MISTRAL_MODEL", _DEFAULT_MODEL),
         api_url=os.environ.get("MISTRAL_API_URL", _MISTRAL_URL),
         gmr_api_url=os.environ.get("GMR_API_INTERNAL", _DEFAULT_GMR_API),
+        local_url=os.environ.get("LOCAL_LLM_URL", _LOCAL_URL),
+        local_model=os.environ.get("LOCAL_LLM_MODEL", _LOCAL_MODEL),
     )

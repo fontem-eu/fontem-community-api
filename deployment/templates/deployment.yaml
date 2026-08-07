@@ -56,6 +56,16 @@ spec:
               value: {{ .Values.gmrApiInternal | default "http://fontem-api" | quote }}
             - name: LLM_PROVIDER
               value: {{ .Values.llmProvider | default "mistral" | quote }}
+            # The shared llama.cpp server (Qwen3-4B), one instance for
+            # every environment — see gitops/infra/llm-service.yaml.
+            # When set, a user with no API key of their own gets this
+            # rather than an "assistant unavailable" message, which is
+            # the default path for almost everyone. Unset it and the
+            # assistant reverts to requiring a key.
+            - name: LOCAL_LLM_URL
+              value: {{ .Values.localLlmUrl | default "http://llama-server.llm-service.svc.cluster.local:8080" | quote }}
+            - name: LOCAL_LLM_MODEL
+              value: {{ .Values.localLlmModel | default "qwen3-4b" | quote }}
             - name: MISTRAL_MODEL
               value: {{ .Values.mistralModel | default "mistral-small-latest" | quote }}
             - name: MISTRAL_API_KEY
