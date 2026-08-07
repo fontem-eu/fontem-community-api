@@ -513,7 +513,6 @@ class MistralProxyClient:
         # An editing surface is registered when the caller sent a report
         # context to work on. Drives which tools the model is offered.
         has_editor = bool(payload.get("has_editor"))
-        system += navigation.system_context(nav)
         message = payload.get("message", "")
 
         if not message:
