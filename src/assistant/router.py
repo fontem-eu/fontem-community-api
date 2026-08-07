@@ -10,6 +10,7 @@ No business logic lives here.
 # Same call as src/api/routers/auth.py.
 
 from collections.abc import AsyncGenerator
+import os
 from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
@@ -280,6 +281,16 @@ async def list_credentials(
     """Which providers the caller has configured. Never the keys."""
     return {
         "supported": list(SUPPORTED_PROVIDERS),
+        # What the user gets with no key of their own. Reported by the
+        # server rather than hardcoded in the frontend so swapping the
+        # hosted weights does not need a web release. Null when no local
+        # server is configured, which is the frontend's signal to go back
+        # to saying a key is required.
+        "builtin": (
+            {"model": os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b")}
+            if os.environ.get("LOCAL_LLM_URL")
+            else None
+        ),
         "credentials": [c.as_dict() for c in await repo.list_for_user(user.id)],
     }
 
