@@ -238,6 +238,29 @@ _DEFAULT_GMR_API = "http://fontem-api"
 # corporate group" prompts; ten is enough for most real questions and is
 # still capped well below the model's own context budget.
 _MAX_TOOL_ITERATIONS = 10
+
+#: How many times a single turn may be pushed onward after the model
+#: stops mid-investigation. Measured on Qwen3-4B: handed search results
+#: and asked to continue, it chains to investigate_entity of its own
+#: accord 5 times in 21. With tool_choice="required" it does so 18 times
+#: in 21. Prompting did not move the unforced number at all.
+_MAX_FORCED_CONTINUATIONS = 2
+
+#: Tools that only yield names and ids. Stopping straight after one of
+#: these means the model has nothing concrete to cite yet.
+_SHALLOW_TOOLS = frozenset({"mcp__gmr__search_entities"})
+
+
+def _tool_names() -> frozenset[str]:
+    """Names of every registered tool, for spotting announced-but-unmade
+    calls. Derived rather than hardcoded so a new tool cannot silently
+    fall outside the check."""
+    out = {t["function"]["name"] for t in _TOOLS if "function" in t}
+    out.add(navigation.NAVIGATE_TOOL_NAME)
+    return frozenset(out)
+
+
+_TOOL_NAMES = _tool_names()
 # Cap how many proposals one chat turn can emit before we tell the user
 # "I proposed N edits — review them in order". Stays out of the way for
 # small reports, surfaces a checklist for big ones.
@@ -262,6 +285,26 @@ def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
     if nav_routes:
         tools = tools + [navigation.navigate_tool_schema()]
     return tools
+
+
+def _stalled_mid_chain(tools_used: set[str], content: str) -> bool:
+    """True when the model stopped before it had anything to cite.
+
+    Two shapes, both seen in production:
+
+      * it ran a search, which returns names and ids and nothing else,
+        and then wrote a summary of those names as if it were an answer;
+      * it announced the call it was about to make — "vou usar a função
+        mcp__gmr__search_entities" — and then emitted no call at all.
+
+    The second is detected by looking for a registered tool name in the
+    prose. That is deliberately a substring match on the identifiers
+    rather than a phrase match: the announcement arrives in whatever
+    language the user is speaking, and the tool names do not translate.
+    """
+    if any(name in content for name in _TOOL_NAMES):
+        return True
+    return bool(tools_used) and tools_used <= _SHALLOW_TOOLS
 
 
 def _sse(event: str, data: dict) -> str:
@@ -564,6 +607,11 @@ class MistralProxyClient:
         tool_cache: dict[str, str] = {}
         name_cache: dict[str, str] = {}
         proposal_count = 0
+        # Tools invoked so far this turn, and how many times we have made
+        # the model carry on after it tried to stop early.
+        tools_used: set[str] = set()
+        forced_continuations = 0
+        force_tool_choice = False
 
         try:
             async with self._client_factory() as client:
@@ -604,7 +652,13 @@ class MistralProxyClient:
                             # propose_edit without an editor, no navigate
                             # without a site map.
                             "tools": _turn_tools(nav_routes, has_editor),
-                            "tool_choice": "auto",
+                            # "required" only on a forced continuation.
+                            # Left on permanently it would keep calling
+                            # tools when there is genuinely nothing left
+                            # to look up, and never answer.
+                            "tool_choice": (
+                                "required" if force_tool_choice else "auto"
+                            ),
                         },
                     )
                     if resp.status_code != 200:
@@ -612,6 +666,10 @@ class MistralProxyClient:
                             "error": f"Mistral API {resp.status_code}: {resp.text[:200]}",
                         })
                         return
+
+                    # One-shot: this request carried it, the next must
+                    # decide for itself whether another tool is needed.
+                    force_tool_choice = False
 
                     data = resp.json()
                     usage = data.get("usage") or {}
@@ -633,7 +691,43 @@ class MistralProxyClient:
                         assistant_entry["tool_calls"] = tool_calls
                     messages.append(assistant_entry)
 
+                    # Models narrate what they are about to do before doing
+                    # it. That commentary used to be appended to history and
+                    # never shown, so a turn that took a minute looked like
+                    # a blank screen. Emit it as it happens — it is a
+                    # separate event from `chunk` so the frontend can render
+                    # it as working-out rather than as the answer.
+                    if tool_calls and content:
+                        yield _sse("thinking", {"text": content})
+
                     if finish != "tool_calls" or not tool_calls:
+                        # The model wants to stop. Sometimes it has not
+                        # done the work yet: it searches, gets a list of
+                        # names, and writes a summary of the names — or
+                        # worse, narrates the call it is about to make and
+                        # then makes nothing. Unforced it carries on 5
+                        # times in 21; asked to, 18 in 21.
+                        if (
+                            forced_continuations < _MAX_FORCED_CONTINUATIONS
+                            and _stalled_mid_chain(tools_used, content)
+                        ):
+                            forced_continuations += 1
+                            # Show the aborted reasoning rather than
+                            # discarding it — it is the most legible part
+                            # of what the assistant is doing.
+                            if content:
+                                yield _sse("thinking", {"text": content})
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "You have not finished. Call the next "
+                                    "tool now — investigate the entities "
+                                    "you named. Do not describe the call "
+                                    "and do not summarise yet."
+                                ),
+                            })
+                            force_tool_choice = True
+                            continue
                         if content:
                             # Append a proposal-budget disclosure when the
                             # model emitted many proposals so the user knows
@@ -658,6 +752,8 @@ class MistralProxyClient:
 
                     for tc in tool_calls:
                         func = tc.get("function") or {}
+                        if func.get("name"):
+                            tools_used.add(func["name"])
                         name = func.get("name", "")
                         try:
                             args = json.loads(func.get("arguments") or "{}")
