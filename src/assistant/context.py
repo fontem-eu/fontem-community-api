@@ -21,9 +21,17 @@ class Turn:
 
 @dataclass(frozen=True)
 class TurnLimits:
-    """Sliding-window limits for truncate_history."""
+    """Limits for truncate_history.
+
+    ``keep_fraction`` is what makes the prompt cacheable. See
+    truncate_history for why trimming to exactly the budget is the
+    expensive choice.
+    """
     max_turns: int = 20
     max_chars: int = 12_000
+    #: When the window overflows, cut back to this fraction of the budget
+    #: rather than to the budget itself.
+    keep_fraction: float = 0.5
 
 
 _TRUNCATION_MARKER_FMT = "\n\n[… {dropped} characters truncated …]"
@@ -48,32 +56,53 @@ def budget_context_block(block: str | None, char_budget: int) -> str:
 def truncate_history(history: list[Turn], limits: TurnLimits) -> list[Turn]:
     """Return the tail of ``history`` that fits within ``limits``.
 
-    Rules:
-      * Drops oldest turns first (sliding window).
-      * Respects both max_turns and max_chars; whichever kicks in earlier wins.
-      * If the most recent single turn alone exceeds max_chars, it is kept —
-        we never return an empty history when the caller has messages.
+    The window start is quantised to multiples of a chunk, which is what
+    makes the prompt cacheable:
+
+      * Under budget nothing is dropped, so turn N+1's history starts with
+        turn N's and the prompt only grows at the end.
+      * Over budget, the start jumps forward a whole chunk at once and
+        then stays put while the next chunk-worth of turns accumulates.
+
+    llama.cpp reuses the longest common prefix of the prompt. A window
+    that trims to exactly the budget drops one old turn per message once
+    it is full, so the history block shifts on every single turn and the
+    whole thing is re-prefilled — measured at ~800 tokens per turn, about
+    20 seconds, on every message forever. Quantising the start means a
+    trim is rare: between trims the prompt is a pure append and prefill is
+    just the new message, which llama.cpp reported as f_sim 0.98 and 61
+    tokens.
+
+    Note this must not be recomputed as "smallest tail that fits". That
+    is what a sliding window is, and it slides again the moment one more
+    turn arrives.
+
+    If the most recent single turn alone exceeds max_chars it is kept —
+    we never return an empty history when the caller has messages.
     """
     if not history:
         return []
 
-    # Start from the tail and include turns until a budget is exhausted.
-    out: list[Turn] = []
-    chars = 0
-    for turn in reversed(history):
-        if len(out) >= limits.max_turns:
-            break
-        next_chars = chars + len(turn.content)
-        if next_chars > limits.max_chars and out:
-            # Stop before we exceed the char budget, unless we haven't
-            # kept anything yet (then we must keep this single turn).
-            break
-        out.append(turn)
-        chars = next_chars
+    n = len(history)
 
-    out.reverse()
-    return out
+    def fits(drop: int, max_chars: int, max_turns: int) -> bool:
+        segment = history[drop:]
+        return (
+            sum(len(t.content) for t in segment) <= max_chars
+            and len(segment) <= max_turns
+        )
 
+    if fits(0, limits.max_chars, limits.max_turns):
+        return list(history)
+
+    # How much to discard per trim. Larger chunk, rarer trims.
+    chunk = max(1, round(limits.max_turns * (1.0 - limits.keep_fraction)))
+
+    drop = 0
+    while drop < n - 1 and not fits(drop, limits.max_chars, limits.max_turns):
+        drop += chunk
+    drop = min(drop, n - 1)
+    return list(history[drop:])
 
 def build_system_prompt(
     base_prompt: str,
