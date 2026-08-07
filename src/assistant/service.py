@@ -58,6 +58,10 @@ class ChatRequest:
     #: one — in which case the turn falls back to the platform key if one
     #: is still configured, and otherwise fails with a legible message.
     credential: tuple[str, str, str | None] | None = None
+    #: Which built-in model to use when there is no credential. A curated
+    #: id from src/assistant/local_models.py, resolved to a served name by
+    #: the proxy client — never a filename from the caller.
+    local_model_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,8 @@ class AssistantService:
             # article open.
             "has_editor": bool(req.context_block),
         }
+        if req.local_model_id:
+            payload["local_model_id"] = req.local_model_id
         if req.credential:
             # Spending the user's own key, not the platform's. Passed per
             # turn rather than held on the client instance, because the

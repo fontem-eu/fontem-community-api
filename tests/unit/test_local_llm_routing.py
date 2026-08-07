@@ -11,6 +11,7 @@ Getting it wrong is not a visible bug, it is a leak.
 # mocked HTTP stack that would test the mock.
 import pytest
 
+from src.assistant.local_models import DEFAULT_MODEL_ID, resolve
 from src.assistant.mistral_client import LOCAL_PROVIDER, MistralProxyClient
 
 LOCAL = "http://llama-server.llm-service.svc.cluster.local:8080"
@@ -31,7 +32,9 @@ def test_no_credential_uses_the_built_in_model():
     url, key, model, _ = _client()._route_for({})
     assert url.startswith(LOCAL)
     assert key == ""
-    assert model == "qwen3-4b"
+    # The name llama-server's router knows it by, resolved from the
+    # curated default id rather than taken from the caller.
+    assert model == resolve(DEFAULT_MODEL_ID).served_name
 
 
 def test_built_in_is_never_sent_an_authorization_header():
@@ -59,12 +62,24 @@ def test_explicitly_choosing_the_built_in_ignores_a_supplied_key():
 
 
 def test_built_in_ignores_a_caller_supplied_model():
-    # llama.cpp serves exactly the weights we loaded; honouring an
-    # arbitrary model string would just 404 mid-turn.
+    # A caller naming a model directly must not reach llama-server: the
+    # choice is a curated id, and anything else resolves to the default.
     _, _, model, _ = _client()._route_for(
         {"provider": LOCAL_PROVIDER, "model": "gpt-4o"}
     )
-    assert model == "qwen3-4b"
+    assert model == resolve(DEFAULT_MODEL_ID).served_name
+
+
+def test_a_chosen_model_id_selects_that_model():
+    _, _, model, _ = _client()._route_for({}, local_model_id="fast")
+    assert model == resolve("fast").served_name
+
+
+def test_an_unoffered_model_id_falls_back_rather_than_failing():
+    # A preference can outlive the option it names. Falling back beats
+    # refusing to answer because of a stale row.
+    _, _, model, _ = _client()._route_for({}, local_model_id="definitely-not-a-model")
+    assert model == resolve(DEFAULT_MODEL_ID).served_name
 
 
 def test_falls_back_to_a_user_key_when_no_local_server_is_configured():

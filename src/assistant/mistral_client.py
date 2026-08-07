@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.assistant import navigation
+from src.assistant import local_models, navigation
 
 
 # ── Tool schemas (OpenAI / Mistral function-calling format) ────────────
@@ -504,7 +504,7 @@ class MistralProxyClient:
         return summary
 
     def _route_for(
-        self, cred: dict
+        self, cred: dict, local_model_id: str | None = None
     ) -> tuple[str, str, str, float] | None:
         """Pick the endpoint for this turn: (url, api_key, model, timeout).
 
@@ -534,13 +534,14 @@ class MistralProxyClient:
                 self._timeout,
             )
         if self._local_url:
-            # cred["model"] is ignored for the built-in: the user does not
-            # choose which weights we host, and honouring an arbitrary
-            # string here would just 404 against llama.cpp.
+            # The caller picks from a curated list of ids, never a model
+            # name. local_models.resolve maps the id to what llama-server
+            # calls it and falls back to the default for anything else, so
+            # an arbitrary string cannot reach the server.
             return (
                 f"{self._local_url}/v1/chat/completions",
                 "",
-                self._local_model,
+                local_models.resolve(local_model_id).served_name,
                 self._local_timeout,
             )
         if key:
@@ -576,7 +577,7 @@ class MistralProxyClient:
         # shared across requests, so keeping a key on the instance would
         # spend one user's credential on another user's turn.
         cred = payload.get("credential") or {}
-        route = self._route_for(cred)
+        route = self._route_for(cred, payload.get("local_model_id"))
         if route is None:
             yield _sse("error", {
                 "error": (
