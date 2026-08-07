@@ -45,6 +45,11 @@ from datetime import datetime, timezone
 import httpx
 
 from src.assistant import local_models, navigation
+from src.assistant.entities import (
+    _build_summary,
+    _capture_names,
+    entity_name,
+)
 
 
 # ── Tool schemas (OpenAI / Mistral function-calling format) ────────────
@@ -387,47 +392,6 @@ def _format_freshness_summary(sources: list[dict]) -> str:
         "the user asks about scope; flag STALE sources to the user):"
     )
     return header + "\n" + "\n".join(lines)
-
-
-def _build_summary(label: str, props: dict, contract_count: int) -> str:
-    """Produce a 1-2 sentence prose précis that the model can quote."""
-    name = props.get("name") or "(unnamed)"
-    country = props.get("country") or props.get("country_iso") or "unknown country"
-    base = f"{name} is a {label} ({country})"
-    if contract_count > 0:
-        base += f" with {contract_count} EU procurement contract(s) in the graph"
-    else:
-        base += " with no EU procurement contracts in the graph"
-    return base + "."
-
-
-def _capture_names_from_dict(name_cache: dict[str, str], payload: dict) -> None:
-    """The dict-shaped branch of _capture_names. Extracted to drop the
-    cognitive-complexity score below Sonar's 15 threshold.
-    """
-    # `search_entities` shape: {"companies":[...], "authorities":[...], ...}
-    for collection in ("companies", "authorities", "persons", "lobbyists"):
-        for item in payload.get(collection) or []:
-            _capture_names(name_cache, item)
-    # `investigate_entity` shape: {"props": {...}}
-    if "props" in payload:
-        _capture_names(name_cache, payload["props"])
-    # Single entity dict
-    if not payload.get("name"):
-        return
-    name = str(payload["name"])
-    for id_field in ("gmr_id", "authority_id", "entity_id", "tr_id"):
-        if id_field in payload:
-            name_cache[str(payload[id_field])] = name
-
-
-def _capture_names(name_cache: dict[str, str], payload: dict | list) -> None:
-    """Walk a tool result and remember any (id, name) pairs we see."""
-    if isinstance(payload, dict):
-        _capture_names_from_dict(name_cache, payload)
-    elif isinstance(payload, list):
-        for item in payload:
-            _capture_names(name_cache, item)
 
 
 class MistralProxyClient:
@@ -928,6 +892,32 @@ class MistralProxyClient:
             props = profile_resp.json()
         except (ValueError, TypeError):
             props = {}
+
+        # A 200 is not proof the entity exists. fontem-api answers
+        # /companies/<anything> with a skeleton — the id echoed back and
+        # every other field null — so an id that was never in the graph
+        # comes back looking like a real, empty company.
+        #
+        # Left unchecked the assistant then reports "X is a Company
+        # (unknown country) with no EU procurement contracts in the graph"
+        # about something that does not exist. That is worse than an
+        # error: it is a confident negative finding, indistinguishable
+        # from a real one, manufactured by us and handed to the model as
+        # fact. On a platform whose whole claim is that figures trace back
+        # to a source, it is the worst failure available.
+        #
+        # A real entity always has a name. Nothing else in the skeleton
+        # distinguishes it.
+        if not entity_name(props):
+            return json.dumps({
+                "error": f"entity {entity_id} not found",
+                "detail": (
+                    "The id did not match any entity. Do not report this as "
+                    "an entity with no contracts — it is not an entity. Use "
+                    "an id returned by search_entities."
+                ),
+                "tried_labels": ["Company", "Authority"],
+            })
 
         # Contracts — endpoint is per-label.
         contracts_url = (
