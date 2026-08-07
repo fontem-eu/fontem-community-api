@@ -27,6 +27,7 @@ from src.assistant.pg_repository import PgAssistRepository
 from src.assistant.proxy_client import ClaudeProxyClient
 from src.assistant.repository import AssistRepository
 from src.assistant.credential_repository import CredentialRepository, McpTokenRepository
+from src.assistant.model_prefs import ModelPreferenceRepository
 from src.assistant.service import AssistantService, ProxyClient
 from src.infra.minio_client import MinioStorage
 from src.infra.postgres.pg_authz_audit_repo import PgAuthzAuditRepository
@@ -511,6 +512,12 @@ class AssistantProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def mcp_token_repository(self, session: AsyncSession) -> McpTokenRepository:
         return McpTokenRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def model_pref_repository(
+        self, session: AsyncSession
+    ) -> ModelPreferenceRepository:
+        return ModelPreferenceRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def assistant_service(

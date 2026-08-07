@@ -21,6 +21,8 @@ from pydantic import BaseModel, Field
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES
 from src.assistant.credential_repository import CredentialRepository, McpTokenRepository
+from src.assistant import local_models
+from src.assistant.model_prefs import ModelPreferenceRepository
 from src.assistant.credentials import (
     SUPPORTED_PROVIDERS,
     CredentialEncryptionUnavailable,
@@ -105,6 +107,7 @@ async def chat_stream(
     *,
     service: FromDishka[AssistantService],
     credentials: FromDishka[CredentialRepository],
+    model_prefs: FromDishka[ModelPreferenceRepository],
     user: Annotated[User, Depends(get_current_user)],
 ):
     """Stream an assistant reply via SSE."""
@@ -118,6 +121,11 @@ async def chat_stream(
         # still is one, rather than taking the assistant down entirely.
         credential = None
 
+    # Read per request for the same reason as the credential: the proxy
+    # client is an APP-scoped singleton, so anything user-specific has to
+    # travel with the turn rather than live on it.
+    local_model_id = await model_prefs.get(user.id)
+
     req = ChatRequest(
         user_id=user.id,
         conversation_key=body.conversation_key,
@@ -125,6 +133,7 @@ async def chat_stream(
         context_block=body.context_block,
         nav=body.nav,
         credential=credential,
+        local_model_id=local_model_id,
     )
 
     async def generator() -> AsyncGenerator[str, None]:
@@ -270,6 +279,50 @@ async def put_credential(
         # misconfiguration, not the caller's mistake.
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return summary.as_dict()
+
+
+@router.get("/models")
+@inject
+async def list_models(
+    *,
+    model_prefs: FromDishka[ModelPreferenceRepository],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    """The built-in models on offer, and which one this user picked."""
+    return {
+        "models": local_models.as_dicts(),
+        "selected": await model_prefs.get(user.id),
+    }
+
+
+class ModelChoiceBody(BaseModel):
+    """A curated id from local_models, not a model name."""
+
+    model_id: str = Field(..., max_length=64)
+
+
+@router.put(
+    "/models",
+    responses={422: {"description": "Unknown model id."}},
+)
+@inject
+async def choose_model(
+    body: ModelChoiceBody,
+    *,
+    model_prefs: FromDishka[ModelPreferenceRepository],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    """Pick a built-in model.
+
+    Rejects anything not on the list rather than storing it: a saved id we
+    do not honour would fall back at every turn and look like the setting
+    had been ignored.
+    """
+    try:
+        selected = await model_prefs.set(user.id, body.model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"selected": selected}
 
 
 @router.get("/credentials")

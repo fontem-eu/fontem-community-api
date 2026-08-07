@@ -824,6 +824,31 @@ class UserLLMCredentialModel(Base):
     )
 
 
+class AssistantModelPrefModel(Base):
+    """Which built-in model this user picked.
+
+    Its own table, not a column on user_llm_credentials: that table stores
+    secrets and this is a preference, and "using the built-in" is
+    represented by having no credential row at all — so hanging the
+    built-in's settings off a credential row would contradict itself.
+
+    `model_id` is the curated id from src/assistant/local_models.py rather
+    than a filename, so swapping the weights behind an option does not
+    invalidate everyone's choice.
+    """
+
+    __tablename__ = "assistant_model_prefs"
+
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True, nullable=False,
+    )
+    model_id: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+
+
 class McpTokenModel(Base):
     """A personal access token for an external MCP client.
 

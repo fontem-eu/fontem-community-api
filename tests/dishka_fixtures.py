@@ -14,6 +14,8 @@ from __future__ import annotations
 from dishka import Provider, Scope, provide, make_async_container
 
 from src.assistant.proxy_client import ClaudeProxyClient
+from src.assistant.local_models import DEFAULT_MODEL_ID
+from src.assistant.model_prefs import ModelPreferenceRepository
 from src.assistant.credential_repository import CredentialRepository, McpTokenRepository
 from src.assistant.repository import AssistRepository, InMemoryAssistRepository
 from src.assistant.service import AssistantService
@@ -136,6 +138,12 @@ class InMemoryProvider(Provider):
         path, which is what these fixtures should exercise.
         """
         return self._svc.get("credential_repository") or _NullCredentialRepo()
+
+    @provide(scope=Scope.REQUEST)
+    def model_pref_repo(self) -> ModelPreferenceRepository:
+        """Stub: the chat route reads the caller's model choice per turn,
+        so the container must supply one. Returns the default."""
+        return self._svc.get("model_pref_repository") or _NullModelPrefRepo()
 
     @provide(scope=Scope.REQUEST)
     def mcp_token_repo(self) -> McpTokenRepository:
@@ -287,6 +295,18 @@ class _NullCredentialRepo:
 
     async def list_for_user(self, user_id):  # noqa: ARG002
         return []
+
+
+
+class _NullModelPrefRepo:
+    """Always the default model — these fixtures do not exercise the
+    preference store."""
+
+    async def get(self, _user_id):
+        return DEFAULT_MODEL_ID
+
+    async def set(self, _user_id, model_id):
+        return model_id
 
 
 class _NullMcpTokenRepo:
