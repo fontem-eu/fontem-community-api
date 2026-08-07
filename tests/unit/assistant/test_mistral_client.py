@@ -159,10 +159,15 @@ async def test_plain_text_response_emits_one_chunk_and_usage():
 @pytest.mark.asyncio
 async def test_tool_call_round_trip_to_search_endpoint():
     # Turn 1: model asks to call search_entities.
-    # Turn 2: (after tool result is fed back) model replies with text.
+    # Turn 2: it replies with text, having only searched — that is a stall,
+    #         so the client pushes it on rather than accepting the answer.
+    # Turn 3: it investigates, and only then is allowed to answer.
     script = [
         _tc("mcp__gmr__search_entities", {"query": "Apple", "limit": 3}, call_id="c1"),
         _FakeResponse(200, '{"entities":[{"name":"Apple Inc.","ticker":"AAPL"}]}'),
+        _ai("I found some names."),
+        _tc("mcp__gmr__find_paths", {"from_id": "a", "to_id": "b"}, call_id="c2"),
+        _FakeResponse(200, '{"paths":[]}'),
         _ai("Found Apple Inc. (AAPL)."),
     ]
     fake = _FakeAsyncClient(script)
@@ -180,15 +185,30 @@ async def test_tool_call_round_trip_to_search_endpoint():
         c for c in fake.calls
         if c["method"] == "GET" and "source-freshness" not in c["url"]
     ]
-    assert len(get_calls) == 1
-    assert get_calls[0]["url"] == "http://fake-api/search"
-    assert get_calls[0]["params"] == {"q": "Apple", "limit": 3}
+    # The search itself — asserted by URL rather than by position, since
+    # the turn now continues past it rather than stopping there.
+    search_calls = [c for c in get_calls if c["url"].endswith("/search")]
+    assert len(search_calls) == 1
+    assert search_calls[0]["params"] == {"q": "Apple", "limit": 3}
 
     # A tool_use status event was emitted with the detail string
     tool_status = [d for e, d in events if e == "status" and d.get("phase") == "tool_use"]
-    assert len(tool_status) == 1
-    assert tool_status[0]["tool"] == "mcp__gmr__search_entities"
+    assert [t["tool"] for t in tool_status] == [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__find_paths",
+    ]
     assert "Apple" in tool_status[0]["detail"]
+
+    # Searching alone is a stall: the client pushed the model on instead of
+    # accepting "I found some names" as the answer.
+    posts = [c for c in fake.calls if c["method"] == "POST"]
+    assert any(c["json"].get("tool_choice") == "required" for c in posts), (
+        "a stalled turn must be continued with a forced tool call"
+    )
+    thinking = [d for e, d in events if e == "thinking"]
+    assert any("found some names" in t["text"] for t in thinking), (
+        "the abandoned reasoning should be surfaced, not discarded"
+    )
 
     # Final chunk contains the model's reply
     chunk_events = [d for e, d in events if e == "chunk"]
@@ -358,6 +378,12 @@ async def test_per_turn_tool_call_dedup():
         # NB: no scripted response for the duplicate get — if the client
         # hits the API again the script underflows and the test errors.
         _ai("Found Apple."),
+        # Having only searched, that reply is a stall, so the turn is
+        # pushed on once. Something other than a search has to happen
+        # before the answer is accepted.
+        _tc("mcp__gmr__find_paths", {"from_id": "a1", "to_id": "b2"}, "c3"),
+        _FakeResponse(200, '{"paths":[]}'),
+        _ai("Found Apple."),
     ]
     fake = _FakeAsyncClient(script)
     client = MistralProxyClient(
@@ -372,9 +398,13 @@ async def test_per_turn_tool_call_dedup():
     get_calls = [c for c in fake.calls if c["method"] == "GET"
                  and c["url"].endswith("/search")]
     assert len(get_calls) == 1
-    # Both tool_use status events still fired (so the user sees the activity)
+    # Both search tool_use events still fired (so the user sees the
+    # activity even though the second was served from cache). The
+    # find_paths call after the continuation is counted separately —
+    # what matters here is that the duplicate search was not hidden.
     tool_status = [d for e, d in events if e == "status" and d.get("phase") == "tool_use"]
-    assert len(tool_status) == 2
+    searches = [t for t in tool_status if t["tool"] == "mcp__gmr__search_entities"]
+    assert len(searches) == 2
 
 
 @pytest.mark.asyncio
