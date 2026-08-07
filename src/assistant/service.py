@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator as TypingAsyncIterator, Protocol
 
+from src.assistant import navigation
 from src.assistant.context import (
     TurnLimits,
     budget_context_block,
@@ -119,8 +120,15 @@ class AssistantService:
         budgeted_context = budget_context_block(
             req.context_block, char_budget=self._context_budget
         )
+        # The site map is built here rather than appended by the proxy
+        # client so it lands ahead of the volatile sections. It is static
+        # for the whole conversation, and anything after a section that
+        # changes gets re-prefilled every turn.
         system_prompt = build_system_prompt(
-            self._base_prompt, budgeted_context, windowed
+            self._base_prompt,
+            budgeted_context,
+            windowed,
+            site_map=navigation.system_context(req.nav),
         )
 
         # Persist the user row immediately with an estimate.

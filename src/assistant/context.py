@@ -79,23 +79,36 @@ def build_system_prompt(
     base_prompt: str,
     context_block: str,
     history: list[Turn],
+    site_map: str = "",
 ) -> str:
     """Stitch the base system prompt, caller context, and history.
 
-    Layout:
+    Layout, and the order matters:
 
         <base_prompt>
+        <site_map>            <- stable across the whole conversation
 
         Current context:
-        <context_block>
+        <context_block>       <- changes when the user navigates
 
         Previous conversation:
-        User: ...
+        User: ...             <- grows every turn
         Assistant: ...
+
+    Stable first, volatile last. llama.cpp reuses the longest common
+    prefix of the prompt, so anything placed after a section that changes
+    is re-prefilled from scratch every turn. The site map is ~966 tokens
+    of text that never changes within a conversation; it used to be
+    appended after the history, which meant the whole thing was recomputed
+    on every message. Measured on the local model: ~1850 tokens
+    re-prefilled per turn at ~40 tok/s, about 45 seconds of pure waste.
 
     Empty sections are omitted entirely (no phantom headers).
     """
     parts: list[str] = [base_prompt.rstrip()]
+
+    if site_map:
+        parts.append(site_map.strip())
 
     if context_block:
         parts.append("Current context:\n" + context_block.rstrip())
