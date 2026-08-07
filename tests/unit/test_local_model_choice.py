@@ -66,3 +66,11 @@ def test_no_secret_material_is_exposed_in_the_offered_list():
     # the choice itself.
     for m in as_dicts():
         assert set(m) == {"id", "tokens_per_second"}
+
+
+def test_the_offered_list_says_nothing_about_whether_it_applies():
+    # `active` is computed per request from the caller's credentials, not
+    # baked into the catalogue — the same list is right for everyone, the
+    # applicability is not.
+    for m in as_dicts():
+        assert "active" not in m

@@ -286,12 +286,27 @@ async def put_credential(
 async def list_models(
     *,
     model_prefs: FromDishka[ModelPreferenceRepository],
+    credentials: FromDishka[CredentialRepository],
     user: Annotated[User, Depends(get_current_user)],
 ):
-    """The built-in models on offer, and which one this user picked."""
+    """The built-in models on offer, which one this user picked, and
+    whether the choice currently has any effect.
+
+    `active` is false when the user has stored their own provider key: the
+    turn spends that instead, so offering a built-in model picker would be
+    a control that changes nothing. The caller needs to be told rather than
+    having to infer it from a separate credentials call.
+    """
+    try:
+        has_own_key = bool(await credentials.list_for_user(user.id))
+    except CredentialEncryptionUnavailable:
+        # No master key: nobody's stored key can be spent this turn, so the
+        # built-in is what runs and the picker does apply.
+        has_own_key = False
     return {
         "models": local_models.as_dicts(),
         "selected": await model_prefs.get(user.id),
+        "active": not has_own_key,
     }
 
 
