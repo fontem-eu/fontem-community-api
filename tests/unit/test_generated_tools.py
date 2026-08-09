@@ -69,13 +69,18 @@ def test_selection_prefers_the_relevant_group():
 
 
 def test_per_turn_surface_is_hard_capped():
-    """A large registry is fine; a large per-turn surface is not."""
+    """A large registry is fine; a large per-turn surface is not.
+
+    The cap applies to a SCOPED turn. An unscoped one gets only core — see
+    test_unscoped_turns_get_only_the_discovery_path — so the cap is what
+    bounds the surface once a group has widened it.
+    """
     many = tools_from_spec({"paths": {
         f"/x{i}": {"get": {"x-agent-tool": {"name": f"t{i}", "when": "w",
                                             "group": "g"}, "parameters": []}}
         for i in range(40)}})
     assert len(many) == 40
-    assert len(select(many)) == MAX_TOOLS_PER_TURN
+    assert len(select(many, groups={"g"})) == MAX_TOOLS_PER_TURN
 
 
 # --- core tools -------------------------------------------------------------
@@ -113,3 +118,24 @@ def test_cap_stretches_rather_than_dropping_core():
                            "parameters": []}} for i in range(5)}}
     picked = select(tools_from_spec(many_core), limit=2)
     assert len(picked) == 5
+
+
+def test_unscoped_turns_get_only_the_discovery_path():
+    """Offering everything broke the assistant, with a measured number.
+
+    All 11 generated tools plus the 5 hand-written ones made qwen3-4b stop
+    finishing turns: ASSIST-19 had passed in a minute and then timed out at
+    180s with the status spinner still up. A large registry is fine; a large
+    per-turn surface is not.
+    """
+    tools = tools_from_spec(CORE_SPEC)
+    assert len(tools) == 21
+    picked = select(tools)
+    assert {t["function"]["name"] for t in picked} == {"list_datasets"}
+
+
+def test_a_scoped_turn_still_widens_the_surface():
+    picked = select(tools_from_spec(CORE_SPEC), groups={"contracts"})
+    names = {t["function"]["name"] for t in picked}
+    assert "list_datasets" in names
+    assert len(names) > 1
