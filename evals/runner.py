@@ -72,7 +72,7 @@ def load_shipped():
 
 async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                      model: str, spec: dict, tools: list, system: str,
-                     nav_context) -> Trace:
+                     nav_context, trace_io: bool = False) -> Trace:
     """One prompt, one model, bounded tool loop."""
     trace = Trace(prompt_id=spec["id"], model=model)
     expect = spec.get("expect") or {}
@@ -92,6 +92,15 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
     try:
         for _ in range(MAX_ROUNDS):
             trace.rounds += 1
+            if trace_io:
+                print("=" * 70, flush=True)
+                print(f"REQUEST model={model} prompt={spec['id']} "
+                      f"round={trace.rounds}", flush=True)
+                print(f"  tools offered ({len(tools)}): "
+                      f"{[t['function']['name'] for t in tools]}", flush=True)
+                for m in messages:
+                    body = (m.get("content") or "")[:3000]
+                    print(f"  --- {m.get('role')} ---\n{body}", flush=True)
             resp = await http.post(
                 f"{base_url}/v1/chat/completions",
                 json={"model": model, "messages": messages, "tools": tools,
@@ -103,6 +112,8 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
             if resp.status_code >= 400:
                 trace.error = f"HTTP {resp.status_code}: {resp.text[:200]}"
                 break
+            if trace_io:
+                print(f"  RAW REPLY: {resp.text[:2000]}", flush=True)
             msg = resp.json()["choices"][0]["message"]
             calls = msg.get("tool_calls") or []
             if not calls:
@@ -188,9 +199,19 @@ async def main() -> int:
                         help="override the shipped system prompt (A/B testing)")
     parser.add_argument("--only", default=None,
                         help="comma-separated prompt ids to run")
+    parser.add_argument("--tools-only", default=None,
+                        help="restrict the offered tools to these names")
+    parser.add_argument("--trace", action="store_true",
+                        help="dump the exact request and raw reply per round")
     args = parser.parse_args()
 
     tools, client_cls, system, origin, nav_context = load_shipped()
+    if args.tools_only:
+        # Order-preserving on purpose: position in the tool array is a
+        # variable worth testing, not an implementation detail.
+        wanted = [t.strip() for t in args.tools_only.split(",")]
+        by_name = {t["function"]["name"]: t for t in tools}
+        tools = [by_name[n] for n in wanted if n in by_name]
     if args.system_file:
         system = pathlib.Path(args.system_file).read_text("utf-8")
         origin = f"override:{pathlib.Path(args.system_file).name}"
@@ -215,7 +236,7 @@ async def main() -> int:
             for spec in prompts:
                 trace = await run_prompt(http, executor, args.base_url,
                                          model, spec, tools, system,
-                                         nav_context)
+                                         nav_context, args.trace)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)
                 results.append({

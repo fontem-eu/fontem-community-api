@@ -287,10 +287,27 @@ _FRESHNESS_FETCH_TIMEOUT = 5.0
 
 
 def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
-    """The tool surface for one turn, scoped to the user's context."""
-    tools = navigation.scope_tools(_TOOLS, has_editor=has_editor)
+    """The tool surface for one turn, scoped to the user's context.
+
+    navigate goes FIRST, and that is load bearing rather than cosmetic.
+
+    Appending it made qwen3-4b stop calling it entirely. Same five tools,
+    same prompt, same model, measured on the eval fixture: navigate last ->
+    0 tool calls on "where do I see the maps?"; navigate first -> it calls
+    it. The model was not confused about the destination either — with
+    navigate last it answered "you can see them on the /map page", having
+    matched the route description correctly, then returned prose in 4.8s
+    instead of the 14.3s a tool-calling turn takes. It settled on text
+    almost immediately rather than deliberating and declining.
+
+    Larger models are less position-sensitive (qwen3-8b scored 100% either
+    way), which is exactly why this went unnoticed: it looks like a small
+    model being incapable rather than an array being built in the wrong
+    order. There is no error, no warning — navigation just quietly stops.
+    """
+    tools = list(navigation.scope_tools(_TOOLS, has_editor=has_editor))
     if nav_routes:
-        tools = tools + [navigation.navigate_tool_schema()]
+        return [navigation.navigate_tool_schema()] + tools
     return tools
 
 
