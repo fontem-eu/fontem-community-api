@@ -32,9 +32,27 @@ is worth far more than a turn that knows nothing.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 import httpx
+
+# Everything a best-effort registry fetch can legitimately raise, named
+# rather than swallowed behind `except Exception`. The list is short because
+# the surface is small: a transport failure, a non-2xx, a body that is not
+# the JSON we expect, or a payload whose shape has drifted.
+#
+# json.JSONDecodeError subclasses ValueError, and httpx.HTTPStatusError and
+# TimeoutException both subclass HTTPError; they are named anyway so the next
+# reader does not have to know the hierarchy to see what is handled.
+FETCH_ERRORS = (
+    httpx.HTTPError,
+    httpx.InvalidURL,
+    json.JSONDecodeError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
 
 # Long enough that the catalogue costs one fetch per pod per hour; short
 # enough that a newly registered feed becomes visible the same day.
@@ -69,7 +87,7 @@ async def fetch_catalogue(client: httpx.AsyncClient, gmr_api_url: str) -> dict:
                 "datasets": payload.get("datasets") or [],
                 "nodes": {},
             }
-    except Exception:  # pylint: disable=broad-except
+    except FETCH_ERRORS:
         # Any failure here means "try the older shape", never "fail the turn".
         pass
     return await _fetch_legacy(client, base)
@@ -187,12 +205,10 @@ class CatalogueCache:
             return self._cached[1]
         try:
             block = format_catalogue(await fetch_catalogue(client, gmr_api_url))
-        except Exception:  # pylint: disable=broad-except
-            # Deliberately broad. This block is a nicety; the user's question
-            # is not. Any exception at all — a slow dashboard endpoint, a
-            # shape change, a DNS blip — degrades to no catalogue rather than
-            # to a failed turn. Narrowing this once let a RuntimeError through
-            # in testing, which would have surfaced as a 500 on a real turn.
+        except FETCH_ERRORS:
+            # This block is a nicety; the user's question is not. A slow
+            # dashboard endpoint, a non-2xx or a drifted payload degrades to
+            # no catalogue rather than to a failed turn.
             block = ""
         self._cached = (now, block)
         return block

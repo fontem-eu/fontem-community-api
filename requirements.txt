@@ -14,6 +14,10 @@ pydantic[email]>=2.4
 loguru>=0.7
 httpx>=0.27
 pytest>=9.0.3
+# Used by the assistant eval fixture (evals/prompts.yaml) and its tests.
+# Was present only transitively, which meant the eval harness depended on
+# something nothing declared.
+PyYAML>=6.0
 pytest-asyncio>=0.24
 # starlette floor tracks OSV: <1.3.1 had a urlencoded-form DoS (limits
 # ignored) + a Windows-only StaticFiles UNC SSRF (we run Linux).

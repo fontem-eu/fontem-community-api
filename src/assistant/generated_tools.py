@@ -15,7 +15,20 @@ thing from a large per-turn surface, and only the second is dangerous.
 """
 from __future__ import annotations
 
+import json
+
 import httpx
+
+# Same named set as catalogue.FETCH_ERRORS, kept local so this module has no
+# dependency on the catalogue beyond a shared idea.
+SPEC_ERRORS = (
+    httpx.HTTPError,
+    httpx.InvalidURL,
+    json.JSONDecodeError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
 
 AGENT_TOOL_KEY = "x-agent-tool"
 SPEC_TIMEOUT = 5.0
@@ -102,7 +115,7 @@ async def fetch_tools(client: httpx.AsyncClient, api_url: str) -> list[dict]:
                                 timeout=SPEC_TIMEOUT)
         resp.raise_for_status()
         return tools_from_spec(resp.json())
-    except Exception:  # pylint: disable=broad-except
+    except SPEC_ERRORS:
         # The assistant works with its built-in tools if the spec is
         # unreachable. Losing the generated ones degrades an answer; raising
         # would lose the turn.

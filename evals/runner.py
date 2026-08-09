@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import json
 import pathlib
+import re
 import sys
 import time
 
@@ -52,6 +53,7 @@ def load_shipped():
     """Pull the real tool schemas, executor and system prompt out of the app."""
     # pylint: disable=import-outside-toplevel
     from src.assistant.mistral_client import _TOOLS, MistralProxyClient
+    from src.assistant.navigation import navigate_tool_schema
     try:
         from src.api.di import _DEFAULT_SYSTEM_PROMPT
         prompt = _DEFAULT_SYSTEM_PROMPT
@@ -60,14 +62,26 @@ def load_shipped():
         prompt = ("You are Fontem's assistant. Use the tools to ground every "
                   "claim. Never state a figure you did not read from a tool.")
         origin = f"fallback ({type(exc).__name__})"
-    return _TOOLS, MistralProxyClient, prompt, origin
+    # navigate is offered per turn in production, gated on the client having
+    # sent a site map. The eval supplies the map from the fixture, so the tool
+    # has to be offered here too — otherwise P11-P14 measure a tool the model
+    # was never given, which is a harness result, not a model result.
+    return list(_TOOLS) + [navigate_tool_schema()], MistralProxyClient, prompt, origin
 
 
 async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                      model: str, spec: dict, tools: list, system: str) -> Trace:
     """One prompt, one model, bounded tool loop."""
     trace = Trace(prompt_id=spec["id"], model=model)
-    messages = [{"role": "system", "content": system},
+    expect = spec.get("expect") or {}
+    routes = list(expect.get("known_routes") or [])
+    sys_prompt = system
+    if routes:
+        # Mirrors navigation.system_context: the model can only navigate to
+        # paths the client declared, so it has to be shown them.
+        sys_prompt = (system.rstrip() + "\n\n## Site map\n\n"
+                      + "\n".join(f"- {r}" for r in routes))
+    messages = [{"role": "system", "content": sys_prompt},
                 {"role": "user", "content": str(spec["prompt"]).strip()}]
     started = time.monotonic()
     try:
@@ -97,7 +111,21 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                     args = json.loads(raw) if isinstance(raw, str) else raw
                 except json.JSONDecodeError:
                     args = {}
-                result = await executor(http, fname, args)
+                if fname == "navigate":
+                    # Executed locally, exactly as the frontend would: the
+                    # result the model sees is whether the path was accepted.
+                    path = str(args.get("path", "") or "")
+                    known = any(
+                        re.fullmatch(
+                            re.sub(r":[^/]+", "[^/]+", r).rstrip("/") or "/",
+                            path.split("?")[0].rstrip("/") or "/")
+                        for r in routes)
+                    result = json.dumps(
+                        {"navigated": path} if known
+                        else {"error": "no such page in the site map",
+                              "path": path})
+                else:
+                    result = await executor(http, fname, args)
                 if len(result) > MAX_TOOL_RESULT_CHARS:
                     trace.truncated += 1
                     result = (result[:MAX_TOOL_RESULT_CHARS]
@@ -116,7 +144,8 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
 
 def summarise(results: list[dict]) -> str:
     """Per-model, per-category percentages. Never one aggregate number."""
-    cats = ["tool_calling", "completion", "grounding", "honesty", "language"]
+    cats = ["tool_calling", "completion", "grounding", "honesty", "language",
+            "navigation"]
     models: list[str] = []
     totals: dict = {}
     for row in results:
@@ -126,15 +155,16 @@ def summarise(results: list[dict]) -> str:
             acc = totals.setdefault((row["model"], cat), [0.0, 0.0])
             acc[0] += val["points"]
             acc[1] += val["max"]
-    head = f"\n{'model':<24}" + "".join(f"{c[:11]:>13}" for c in cats) + f"{'lat s':>9}"
+    head = (f"\n{'model':<22}" + "".join(f"{c[:10]:>12}" for c in cats)
+            + f"{'lat s':>8}")
     lines = [head, "-" * (len(head) - 1)]
     for model in models:
-        row = f"{model:<24}"
+        row = f"{model:<22}"
         for cat in cats:
             pts, mx = totals.get((model, cat), [0.0, 0.0])
-            row += f"{(100.0 * pts / mx):>12.0f}%" if mx else f"{'-':>13}"
+            row += f"{(100.0 * pts / mx):>11.0f}%" if mx else f"{'-':>12}"
         lat = [r["latency_s"] for r in results if r["model"] == model]
-        row += f"{(sum(lat) / len(lat)):>9.1f}" if lat else f"{'-':>9}"
+        row += f"{(sum(lat) / len(lat)):>8.1f}" if lat else f"{'-':>8}"
         lines.append(row)
     return "\n".join(lines)
 

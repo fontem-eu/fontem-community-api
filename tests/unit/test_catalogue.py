@@ -5,6 +5,7 @@ datasets and three health datasets. The assistant said Fontem has "no
 demographic data, only procurement" — correctly, from what it had been told.
 These tests pin the properties that make that answer impossible.
 """
+import httpx
 import pytest
 
 from src.assistant.catalogue import (
@@ -65,7 +66,7 @@ async def test_one_registry_failing_still_yields_a_block():
     class HalfBroken:
         async def get(self, url, timeout=None):  # pylint: disable=unused-argument
             if "atlas" in url:
-                raise RuntimeError("atlas down")
+                raise httpx.ConnectError("atlas down")
             return _Resp(GRAPH)
 
     cat = await fetch_catalogue(HalfBroken(), "http://api")
@@ -93,10 +94,16 @@ async def test_cache_serves_second_call_without_refetching():
 
 @pytest.mark.asyncio
 async def test_total_outage_degrades_to_empty_not_error():
-    """A slow dashboard endpoint must never fail the user's turn."""
+    """A slow dashboard endpoint must never fail the user's turn.
+
+    Raises a real httpx transport error rather than a bare RuntimeError.
+    The handlers now name what they catch, so a test that raises something
+    outside that set would be asserting against a contract we do not offer —
+    and would have hidden the fact that the set is the contract.
+    """
     class Dead:
         async def get(self, url, timeout=None):  # pylint: disable=unused-argument
-            raise RuntimeError("everything is down")
+            raise httpx.ConnectTimeout("everything is down")
 
     assert await CatalogueCache().get(Dead(), "http://api") == ""
 
