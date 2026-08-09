@@ -178,13 +178,23 @@ async def main() -> int:
         "--gmr-api",
         default="http://fontem-api.fontem-staging.svc.cluster.local")
     parser.add_argument("--out", default="/tmp/eval-results.json")
+    parser.add_argument("--system-file", default=None,
+                        help="override the shipped system prompt (A/B testing)")
+    parser.add_argument("--only", default=None,
+                        help="comma-separated prompt ids to run")
     args = parser.parse_args()
 
     tools, client_cls, system, origin = load_shipped()
+    if args.system_file:
+        system = pathlib.Path(args.system_file).read_text("utf-8")
+        origin = f"override:{pathlib.Path(args.system_file).name}"
     fixture = yaml.safe_load(
         (pathlib.Path(__file__).resolve().parent / "prompts.yaml")
         .read_text("utf-8"))
     prompts = fixture["prompts"]
+    if args.only:
+        keep = {p.strip() for p in args.only.split(",")}
+        prompts = [p for p in prompts if p["id"] in keep]
     print(f"fixture v{fixture['version']}: {len(prompts)} prompts | "
           f"{len(tools)} tools | system prompt: {origin}", flush=True)
 
