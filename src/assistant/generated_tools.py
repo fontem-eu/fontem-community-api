@@ -35,6 +35,12 @@ SPEC_TIMEOUT = 5.0
 # Beyond this the schema block starts costing more context than the answers
 # it enables. A hard cap is better than a slow drift into 20k-token turns.
 MAX_TOOLS_PER_TURN = 12
+# What an unscoped turn gets. Three (the discovery path alone) could not
+# cover the platform: a user asking about single-bidder rates or cohesion
+# grants would be told to go and find a dataset code. Sixteen broke the 4B
+# outright — it stopped finishing turns. This sits between the two, and it
+# is a number to re-measure rather than defend.
+DEFAULT_TURN_TOOLS = 8
 
 _JSON_TYPES = {"integer": "integer", "number": "number",
                "boolean": "boolean", "string": "string", "array": "array"}
