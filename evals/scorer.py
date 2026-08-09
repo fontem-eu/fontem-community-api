@@ -343,7 +343,10 @@ def _check_navigation(spec: dict, trace: Trace) -> list[Check]:
     expected = spec.get("expect") or {}
     if not expected.get("navigation"):
         return []
-    routes = [{"path": p} for p in (expected.get("known_routes") or [])]
+    # Fixture routes are now manifest-shaped dicts, matching what the client
+    # actually sends. Tolerate bare strings so an older fixture still scores.
+    routes = [r if isinstance(r, dict) else {"path": r}
+              for r in (expected.get("known_routes") or [])]
     nav_calls = [c for c in trace.calls if c.name == NAVIGATE_TOOL]
     checks: list[Check] = []
 

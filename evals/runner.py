@@ -53,7 +53,7 @@ def load_shipped():
     """Pull the real tool schemas, executor and system prompt out of the app."""
     # pylint: disable=import-outside-toplevel
     from src.assistant.mistral_client import _TOOLS, MistralProxyClient
-    from src.assistant.navigation import navigate_tool_schema
+    from src.assistant.navigation import navigate_tool_schema, system_context
     try:
         from src.api.di import _DEFAULT_SYSTEM_PROMPT
         prompt = _DEFAULT_SYSTEM_PROMPT
@@ -66,21 +66,26 @@ def load_shipped():
     # sent a site map. The eval supplies the map from the fixture, so the tool
     # has to be offered here too — otherwise P11-P14 measure a tool the model
     # was never given, which is a harness result, not a model result.
-    return list(_TOOLS) + [navigate_tool_schema()], MistralProxyClient, prompt, origin
+    return (list(_TOOLS) + [navigate_tool_schema()], MistralProxyClient,
+            prompt, origin, system_context)
 
 
 async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
-                     model: str, spec: dict, tools: list, system: str) -> Trace:
+                     model: str, spec: dict, tools: list, system: str,
+                     nav_context) -> Trace:
     """One prompt, one model, bounded tool loop."""
     trace = Trace(prompt_id=spec["id"], model=model)
     expect = spec.get("expect") or {}
     routes = list(expect.get("known_routes") or [])
     sys_prompt = system
     if routes:
-        # Mirrors navigation.system_context: the model can only navigate to
-        # paths the client declared, so it has to be shown them.
-        sys_prompt = (system.rstrip() + "\n\n## Site map\n\n"
-                      + "\n".join(f"- {r}" for r in routes))
+        # The SHIPPED builder, not a hand-rolled imitation. My version emitted
+        # bare paths under a "## Site map" heading; production emits the
+        # sentence that links the map to the tool, backticked paths, an (auth)
+        # marker and a description per route. The model was being asked to
+        # pick a page from a list that told it nothing about the pages.
+        sys_prompt = system.rstrip() + nav_context(
+            {"current": "/", "title": "Fontem", "routes": routes})
     messages = [{"role": "system", "content": sys_prompt},
                 {"role": "user", "content": str(spec["prompt"]).strip()}]
     started = time.monotonic()
@@ -117,7 +122,8 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                     path = str(args.get("path", "") or "")
                     known = any(
                         re.fullmatch(
-                            re.sub(r":[^/]+", "[^/]+", r).rstrip("/") or "/",
+                            re.sub(r":[^/]+", "[^/]+",
+                                   r.get("path", "")).rstrip("/") or "/",
                             path.split("?")[0].rstrip("/") or "/")
                         for r in routes)
                     result = json.dumps(
@@ -184,7 +190,7 @@ async def main() -> int:
                         help="comma-separated prompt ids to run")
     args = parser.parse_args()
 
-    tools, client_cls, system, origin = load_shipped()
+    tools, client_cls, system, origin, nav_context = load_shipped()
     if args.system_file:
         system = pathlib.Path(args.system_file).read_text("utf-8")
         origin = f"override:{pathlib.Path(args.system_file).name}"
@@ -208,7 +214,8 @@ async def main() -> int:
             print(f"\n=== {model} ===", flush=True)
             for spec in prompts:
                 trace = await run_prompt(http, executor, args.base_url,
-                                         model, spec, tools, system)
+                                         model, spec, tools, system,
+                                         nav_context)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)
                 results.append({

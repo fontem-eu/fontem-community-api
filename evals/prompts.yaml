@@ -1,5 +1,12 @@
 # Assistant evaluation fixture.
 #
+# Route fixtures are taken from the app's real manifest
+# (fontem-web/src/agent/routeManifest.js), paths AND descriptions. The first
+# version invented "/atlas" — a page that does not exist; the Atlas lives at
+# "/map" — and sent bare path strings with no descriptions, while production
+# sends both. Every model then "failed" to navigate to a fabricated route it
+# had been given no way to recognise. Declining was arguably correct.
+#
 # Fourteen prompts. Ten are drawn from the six real articles on the platform
 # and exercise the behaviours we have seen go wrong in production: stalling
 # mid-chain, inventing entity ids, answering from memory instead of the graph,
@@ -194,8 +201,15 @@ prompts:
     prompt: "Where do I see the maps and regional statistics?"
     expect:
       navigation: required
-      known_routes: ["/atlas", "/atlas/:dataset", "/", "/help", "/account",
-                     "/stories", "/c/:ticker/:view", "/data-quality"]
+      known_routes:
+        - { path: "/", description: "Home feed of published data stories." }
+        - { path: "/map", description: "Atlas: geographic view of the data by region." }
+        - { path: "/explore", description: "Data exploration hub — the entry point to the datasets." }
+        - { path: "/geo", description: "Geographic data browser." }
+        - { path: "/stories/:id/edit", description: "Edit one of your data stories.", requires_auth: true }
+        - { path: "/data-quality", description: "Data quality dashboards and coverage reports." }
+        - { path: "/help", description: "Help and FAQ, including how to connect your own AI assistant to Fontem." }
+        - { path: "/account", description: "Account settings: display preferences, profile, and LLM provider keys.", requires_auth: true }
       abstain: false
     why: >
       The plainest case, and the one the user most wants to work. The Atlas is
@@ -208,8 +222,15 @@ prompts:
       site?
     expect:
       navigation: required
-      known_routes: ["/atlas", "/stories", "/stories/new", "/", "/help",
-                     "/account", "/data-quality"]
+      known_routes:
+        - { path: "/", description: "Home feed of published data stories." }
+        - { path: "/map", description: "Atlas: geographic view of the data by region." }
+        - { path: "/explore", description: "Data exploration hub — the entry point to the datasets." }
+        - { path: "/geo", description: "Geographic data browser." }
+        - { path: "/stories/:id/edit", description: "Edit one of your data stories.", requires_auth: true }
+        - { path: "/data-quality", description: "Data quality dashboards and coverage reports." }
+        - { path: "/help", description: "Help and FAQ, including how to connect your own AI assistant to Fontem." }
+        - { path: "/account", description: "Account settings: display preferences, profile, and LLM provider keys.", requires_auth: true }
       abstain: false
     why: >
       Requires mapping an intent expressed in the user's words ("write up an
@@ -221,8 +242,15 @@ prompts:
     prompt: "Take me to the page showing quarterly staff turnover by department."
     expect:
       navigation: forbidden
-      known_routes: ["/atlas", "/stories", "/", "/help", "/account",
-                     "/data-quality"]
+      known_routes:
+        - { path: "/", description: "Home feed of published data stories." }
+        - { path: "/map", description: "Atlas: geographic view of the data by region." }
+        - { path: "/explore", description: "Data exploration hub — the entry point to the datasets." }
+        - { path: "/geo", description: "Geographic data browser." }
+        - { path: "/stories/:id/edit", description: "Edit one of your data stories.", requires_auth: true }
+        - { path: "/data-quality", description: "Data quality dashboards and coverage reports." }
+        - { path: "/help", description: "Help and FAQ, including how to connect your own AI assistant to Fontem." }
+        - { path: "/account", description: "Account settings: display preferences, profile, and LLM provider keys.", requires_auth: true }
       abstain: true
     why: >
       No such page, and no such data — Fontem holds neither HR nor internal
@@ -235,8 +263,15 @@ prompts:
     prompt: "What can I actually do on this site? Give me the tour."
     expect:
       navigation: optional
-      known_routes: ["/atlas", "/stories", "/", "/help", "/account",
-                     "/data-quality"]
+      known_routes:
+        - { path: "/", description: "Home feed of published data stories." }
+        - { path: "/map", description: "Atlas: geographic view of the data by region." }
+        - { path: "/explore", description: "Data exploration hub — the entry point to the datasets." }
+        - { path: "/geo", description: "Geographic data browser." }
+        - { path: "/stories/:id/edit", description: "Edit one of your data stories.", requires_auth: true }
+        - { path: "/data-quality", description: "Data quality dashboards and coverage reports." }
+        - { path: "/help", description: "Help and FAQ, including how to connect your own AI assistant to Fontem." }
+        - { path: "/account", description: "Account settings: display preferences, profile, and LLM provider keys.", requires_auth: true }
       tools_forbidden: [mcp__gmr__investigate_entity, mcp__gmr__find_paths]
       abstain: false
     why: >
