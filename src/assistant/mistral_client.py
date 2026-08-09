@@ -44,6 +44,11 @@ from datetime import datetime, timezone
 
 import httpx
 
+from src.assistant import generated_tools, legacy_tools
+from src.assistant.freshness import _format_freshness_summary
+from src.assistant.language import _language_directive
+from src.assistant.catalogue import CatalogueCache
+
 from src.assistant import local_models, navigation
 from src.assistant.entities import (
     _build_summary,
@@ -285,10 +290,27 @@ _FRESHNESS_FETCH_TIMEOUT = 5.0
 
 
 def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
-    """The tool surface for one turn, scoped to the user's context."""
-    tools = navigation.scope_tools(_TOOLS, has_editor=has_editor)
+    """The tool surface for one turn, scoped to the user's context.
+
+    navigate goes FIRST, and that is load bearing rather than cosmetic.
+
+    Appending it made qwen3-4b stop calling it entirely. Same five tools,
+    same prompt, same model, measured on the eval fixture: navigate last ->
+    0 tool calls on "where do I see the maps?"; navigate first -> it calls
+    it. The model was not confused about the destination either — with
+    navigate last it answered "you can see them on the /map page", having
+    matched the route description correctly, then returned prose in 4.8s
+    instead of the 14.3s a tool-calling turn takes. It settled on text
+    almost immediately rather than deliberating and declining.
+
+    Larger models are less position-sensitive (qwen3-8b scored 100% either
+    way), which is exactly why this went unnoticed: it looks like a small
+    model being incapable rather than an array being built in the wrong
+    order. There is no error, no warning — navigation just quietly stops.
+    """
+    tools = list(navigation.scope_tools(_TOOLS, has_editor=has_editor))
     if nav_routes:
-        tools = tools + [navigation.navigate_tool_schema()]
+        return [navigation.navigate_tool_schema()] + tools
     return tools
 
 
@@ -346,54 +368,6 @@ def _system_prompt_with_today(base: str) -> str:
     return f"{base.rstrip()}\n\nToday's date is {today}."
 
 
-def _format_coverage(cov_start: str | None, cov_end: str | None) -> str:
-    """Render a coverage window into the bullet's middle column."""
-    if cov_start and cov_end:
-        return f"{cov_start} → {cov_end}"
-    if cov_end:
-        return f"through {cov_end}"
-    return "no date range"
-
-
-def _format_freshness(age_h: float | None, stale: bool) -> str:
-    """Render an age-in-hours into a compact "loaded N <unit> ago" hint."""
-    if age_h is None:
-        base = "freshness unknown"
-    elif age_h < 48:
-        base = f"loaded {age_h:.1f}h ago"
-    elif age_h < 24 * 60:
-        base = f"loaded {age_h / 24:.0f}d ago"
-    else:
-        base = f"loaded {age_h / (24 * 7):.0f}w ago"
-    return base + ", STALE" if stale else base
-
-
-def _format_freshness_summary(sources: list[dict]) -> str:
-    """Compress a /data-quality/source-freshness response into a short
-    block the model can quote when reasoning about coverage.
-
-    Emits one bulleted line per source — coverage range when available,
-    a freshness note when stale — in deterministic alphabetical order.
-    Returns ``""`` when the input is empty (callers skip injection in
-    that case so the system prompt doesn't get a half-empty section).
-    """
-    if not sources:
-        return ""
-    lines: list[str] = []
-    for src in sorted(sources, key=lambda s: s.get("id") or ""):
-        sid = src.get("id") or ""
-        label = src.get("label") or sid or "unknown"
-        rows = src.get("record_count") or 0
-        coverage = _format_coverage(src.get("coverage_start"), src.get("coverage_end"))
-        freshness = _format_freshness(src.get("age_hours"), bool(src.get("stale")))
-        lines.append(f"- {label} ({sid}): {coverage}, {rows:,} rows, {freshness}")
-    header = (
-        "Data coverage at the time of this turn (cite these ranges when "
-        "the user asks about scope; flag STALE sources to the user):"
-    )
-    return header + "\n" + "\n".join(lines)
-
-
 class MistralProxyClient:
     """Mistral chat-completions with a bounded, deduped tool-use loop.
 
@@ -436,6 +410,30 @@ class MistralProxyClient:
         # Keyed nowhere — one client instance only ever talks to one
         # fontem-api, and the cache lives on the instance.
         self._freshness_cache: tuple[float, str] | None = None
+        # What the platform holds, generated from its own registries. Same
+        # best-effort contract as the coverage block above.
+        self._catalogue = CatalogueCache()
+        # Tool schemas derived from the API's own spec. Loaded once per
+        # process: the spec changes only on deploy, and a deploy makes a
+        # new pod.
+        self._generated: list[dict] | None = None
+
+    async def _get_generated_tools(self, client: httpx.AsyncClient) -> list[dict]:
+        """Schemas for endpoints marked x-agent-tool. Empty on any failure."""
+        if self._generated is None:
+            self._generated = await generated_tools.fetch_tools(
+                client, self._gmr_api_url)
+        return self._generated
+
+    async def _execute_generated(self, client: httpx.AsyncClient, name: str,
+                                 args: dict) -> str:
+        """Delegate to the shared executor, which needs no client state."""
+        return await generated_tools.execute(
+            client, self._gmr_api_url, self._generated or [], (name, args))
+
+    async def _get_catalogue_block(self, client: httpx.AsyncClient) -> str:
+        """What data exists, for the system prompt."""
+        return await self._catalogue.get(client, self._gmr_api_url)
 
     async def _get_freshness_summary(self, client: httpx.AsyncClient) -> str:
         """Return the formatted source-freshness block for system prompt
@@ -456,7 +454,7 @@ class MistralProxyClient:
             return self._freshness_cache[1]
         try:
             resp = await client.get(
-                f"{self._gmr_api_url}/data-quality/source-freshness",
+                f"{self._gmr_api_url}/data-quality/freshness",
                 timeout=_FRESHNESS_FETCH_TIMEOUT,
             )
             resp.raise_for_status()
@@ -586,11 +584,22 @@ class MistralProxyClient:
                 # "context-as-of-now" block. Empty string when the
                 # data-quality API is unreachable — the chat still
                 # works, just without coverage grounding.
-                freshness = await self._get_freshness_summary(client)
-                if freshness:
+                # The catalogue goes first: knowing the data EXISTS is what
+                # stops the model answering "we don't have that" about eight
+                # population datasets. Coverage ranges refine an answer the
+                # model is already willing to attempt.
+                gen_tools = await self._get_generated_tools(client)
+                language = _language_directive(payload.get("locale"))
+                if language:
                     messages[0]["content"] = (
-                        messages[0]["content"].rstrip() + "\n\n" + freshness
-                    )
+                        messages[0]["content"].rstrip() + language)
+                catalogue = await self._get_catalogue_block(client)
+                freshness = await self._get_freshness_summary(client)
+                for block in (catalogue, freshness):
+                    if block:
+                        messages[0]["content"] = (
+                            messages[0]["content"].rstrip() + "\n\n" + block
+                        )
                 completed_normally = False
                 for _iter_no in range(self._max_iter):
                     yield _sse("status", {
@@ -616,7 +625,8 @@ class MistralProxyClient:
                             # Scoped to where the user actually is: no
                             # propose_edit without an editor, no navigate
                             # without a site map.
-                            "tools": _turn_tools(nav_routes, has_editor),
+                            "tools": _turn_tools(nav_routes, has_editor)
+                            + generated_tools.select(gen_tools),
                             # "required" only on a forced continuation.
                             # Left on permanently it would keep calling
                             # tools when there is genuinely nothing left
@@ -821,39 +831,17 @@ class MistralProxyClient:
             elif name == "mcp__gmr__propose_edit":
                 # Pure notification; the frontend applies the edit with user auth.
                 return json.dumps({"proposed": True, "action": args.get("action")})
-            # Legacy tools — kept callable so old saved conversations still
-            # function. They are NOT advertised in `_TOOLS`.
-            elif name == "mcp__gmr__get_company":
-                r = await client.get(
-                    f"{self._gmr_api_url}/companies/{args.get('gmr_id', '')}",
-                )
-            elif name == "mcp__gmr__get_authority":
-                r = await client.get(
-                    f"{self._gmr_api_url}/authorities/{args.get('authority_id', '')}",
-                )
-            elif name == "mcp__gmr__get_contracts":
-                eid = args.get("entity_id", "")
-                limit = args.get("limit", 20)
-                r = await client.get(
-                    f"{self._gmr_api_url}/companies/{eid}/contracts",
-                    params={"limit": limit},
-                )
-                if r.status_code == 404:
-                    r = await client.get(
-                        f"{self._gmr_api_url}/authorities/{eid}/contracts",
-                        params={"limit": limit},
-                    )
-            elif name == "mcp__gmr__explore_graph":
-                r = await client.get(
-                    f"{self._gmr_api_url}/graph/{args.get('entity_id', '')}",
-                    params={"depth": args.get("depth", 1)},
-                )
+            elif name in legacy_tools.LEGACY_TOOLS:
+                r = await legacy_tools.fetch(
+                    client, self._gmr_api_url, name, args)
+            elif any(t["function"]["name"] == name
+                     for t in (self._generated or [])):
+                return await self._execute_generated(client, name, args)
             else:
                 return json.dumps({"error": f"Unknown tool: {name}"})
 
-            if r.status_code >= 400:
-                return json.dumps({"error": f"API {r.status_code}"})
-            return r.text
+            return (json.dumps({"error": f"API {r.status_code}"})
+                    if r.status_code >= 400 else r.text)
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
             return json.dumps({"error": str(exc)[:200]})
 

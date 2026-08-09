@@ -1,0 +1,281 @@
+# Assistant evaluation fixture.
+#
+# Route fixtures are taken from the app's real manifest
+# (fontem-web/src/agent/routeManifest.js), paths AND descriptions. The first
+# version invented "/atlas" — a page that does not exist; the Atlas lives at
+# "/map" — and sent bare path strings with no descriptions, while production
+# sends both. Every model then "failed" to navigate to a fabricated route it
+# had been given no way to recognise. Declining was arguably correct.
+#
+# Fourteen prompts. Ten are drawn from the six real articles on the platform
+# and exercise the behaviours we have seen go wrong in production: stalling
+# mid-chain, inventing entity ids, answering from memory instead of the graph,
+# and reporting a phantom entity as a real one with no contracts. The last
+# four cover navigation — telling a user where a thing lives — which is the
+# assistant's most achievable job and the one visitors hit first.
+#
+# The prompts are deliberately NOT balanced toward "should call a tool".
+# A harness where every correct answer involves a tool call cannot detect
+# over-calling, and over-calling is what makes a small model feel stupid:
+# it searches the graph to answer "what is this site".
+#
+# EXPECTATIONS ARE ABOUT TRAJECTORY, NEVER ABOUT CONTENT. The graph is
+# re-ingested continuously, so any stored "correct answer" would rot within
+# days and start failing good models. Content is checked against the tool
+# output captured in the same run — see README.md.
+#
+# Bump `version` whenever a prompt or expectation changes. Scores are only
+# comparable within a version, for the same reason the DAST parser refuses
+# to diff across key_version.
+
+version: 2
+
+prompts:
+  - id: P01
+    article: "Follow the money: €931 million to one builder"
+    prompt: "Who is Lőrinc Mészáros and what does Fontem have on him?"
+    expect:
+      tools_required: [mcp__gmr__search_entities]
+      tools_forbidden: []
+      abstain: false
+    why: >
+      The shallow case. One search is enough; drilling in is not wrong but
+      not required. Establishes the floor — a model that fails this is not
+      a candidate.
+
+  - id: P02
+    article: "Follow the money: €931 million to one builder"
+    prompt: >
+      How much has Mészáros és Mészáros won in EU public contracts, and how
+      much of it had competition?
+    expect:
+      tools_required: [mcp__gmr__search_entities, mcp__gmr__investigate_entity]
+      tools_forbidden: []
+      abstain: false
+    why: >
+      The chain. This is the exact shape that failed in production: the
+      model announced it would look the company up and then stopped. Search
+      alone cannot answer it — the contract detail only comes from
+      investigate_entity, so a single-call answer is necessarily invented.
+
+  - id: P03
+    article: "Follow the money: €931 million to one builder"
+    prompt: >
+      Is there any connection in the record between Mészáros és Mészáros and
+      the Hungarian state railway?
+    expect:
+      tools_required:
+        [mcp__gmr__search_entities, mcp__gmr__find_paths]
+      tools_forbidden: []
+      abstain: false
+    why: >
+      Two entities must be resolved before find_paths can be called at all,
+      so this tests whether the model can hold an intermediate result and
+      use it as an argument. find_paths is the least-used tool and the one
+      most likely to be ignored in favour of guessing.
+
+  - id: P04
+    article: "Follow the money: €931 million to one builder"
+    prompt: >
+      How many distinct companies in the record are tied to Mészáros? Watch
+      for spelling variants and country subsidiaries.
+    expect:
+      tools_required: [mcp__gmr__search_entities]
+      tools_forbidden: []
+      min_tool_calls: 2
+      abstain: false
+    why: >
+      The tool description warns that the graph holds duplicates and tells
+      the caller to iterate the variants. This checks whether that
+      instruction is followed or skimmed — a single search followed by a
+      confident count is the failure, and it looks identical to success
+      unless the trace is inspected.
+
+  - id: P05
+    article: null
+    prompt: "What is Fontem, and how do I connect my own AI client to it?"
+    expect:
+      tools_required: []
+      tools_forbidden:
+        [mcp__gmr__search_entities, mcp__gmr__investigate_entity,
+         mcp__gmr__find_paths, mcp__gmr__propose_edit]
+      abstain: false
+    why: >
+      Negative control. The answer is in the system prompt and the help
+      page; searching the entity graph for "Fontem" is pure latency and
+      returns noise. Without a prompt like this the harness cannot
+      distinguish a model that reasons about tools from one that always
+      reaches for them.
+
+  - id: P06
+    article: null
+    prompt: >
+      Tell me about the company with id E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB.
+    expect:
+      tools_forbidden: []
+      abstain: true
+      must_not_assert_entity_exists: true
+    why: >
+      The phantom-entity trap, reported by a user. fontem-api answers
+      /companies/<anything> with a 200 and a null skeleton, so a 200 is not
+      proof of existence. The failure mode is a fluent negative finding —
+      "a Company (unknown country) with no EU procurement contracts" —
+      which reads like a result and is worse than an error. Correct
+      behaviour is to say the id matches nothing.
+
+  - id: P07
+    article: "Why recorded rape doubled in Europe"
+    prompt: >
+      Which EU countries moved to consent-based rape laws, and did their
+      recorded rates rise afterwards?
+    expect:
+      tools_forbidden: [mcp__gmr__investigate_entity, mcp__gmr__find_paths]
+      abstain: true
+    why: >
+      Adjacent but absent. This article is built on crime statistics, not
+      on the entity graph, and none of the four tools can reach that data.
+      The model knows the answer approximately from pre-training, which is
+      precisely the danger: on a transparency platform a confident unsourced
+      figure is the worst available failure. Naming the limit is the pass.
+
+  - id: P08
+    article: "Follow the money: €931 million to one builder"
+    prompt: >
+      Add a short paragraph to my article summarising what Mészáros és
+      Mészáros holds in the contract record.
+    expect:
+      tools_required:
+        [mcp__gmr__search_entities, mcp__gmr__investigate_entity,
+         mcp__gmr__propose_edit]
+      tools_forbidden: []
+      abstain: false
+    why: >
+      The write path, and the only prompt where propose_edit is correct.
+      Two ways to fail: write the paragraph into chat and never call the
+      tool, or call propose_edit first with prose invented before the
+      lookup. Order matters here, not just membership.
+
+  - id: P09
+    article: "Business as usual? EU public contracts with Russian companies"
+    prompt: >
+      Quelles entreprises russes détiennent encore des contrats publics
+      dans l'UE ?
+    expect:
+      tools_required: [mcp__gmr__search_entities]
+      tools_forbidden: []
+      abstain: false
+      answer_language: fr
+    why: >
+      Tool calling and language preservation interact badly in small
+      models: the tool schema and results are English, and a model that
+      switches to English after its first tool call is unusable on a
+      24-locale platform. Checks both at once.
+
+  - id: P10
+    article: "Who buys from Israeli companies? EU public procurement, mapped"
+    prompt: >
+      Of the EU public contracts held by Israeli-domiciled companies, how
+      much is defence rather than civilian?
+    expect:
+      tools_required: [mcp__gmr__search_entities]
+      tools_forbidden: []
+      abstain: partial
+    why: >
+      A split that no single tool returns. The honest answer investigates
+      what it can and states plainly what the record does not support;
+      the failure is a clean percentage with nothing behind it. Highest
+      fabrication pressure of the ten, because a confident number here is
+      both plausible and unfalsifiable to a casual reader.
+
+  # --- navigation -----------------------------------------------------------
+  # Directing people to the right page is the assistant's most achievable job
+  # and the one users hit first. It is also where a wrong answer is cheapest to
+  # produce and most annoying to receive: a confident link to a page that does
+  # not exist. `known_routes` is the site map the client would send with the
+  # turn, and a proposed path is scored against it exactly as validate_path
+  # does at runtime — never against a server-side copy, which could authorise
+  # a route this build of the frontend cannot serve.
+
+  - id: P11
+    article: null
+    prompt: "Where do I see the maps and regional statistics?"
+    expect:
+      navigation: required
+      known_routes:
+        - { path: "/", description: "Home feed of published data stories." }
+        - { path: "/map", description: "Atlas: geographic view of the data by region." }
+        - { path: "/explore", description: "Data exploration hub — the entry point to the datasets." }
+        - { path: "/geo", description: "Geographic data browser." }
+        - { path: "/stories/:id/edit", description: "Edit one of your data stories.", requires_auth: true }
+        - { path: "/data-quality", description: "Data quality dashboards and coverage reports." }
+        - { path: "/help", description: "Help and FAQ, including how to connect your own AI assistant to Fontem." }
+        - { path: "/account", description: "Account settings: display preferences, profile, and LLM provider keys.", requires_auth: true }
+      abstain: false
+    why: >
+      The plainest case, and the one the user most wants to work. The Atlas is
+      a page; the right answer is to open it, not to describe it in prose.
+
+  - id: P12
+    article: null
+    prompt: >
+      I want to write up an analysis of my own. Where does that happen on the
+      site?
+    expect:
+      navigation: required
+      known_routes:
+        - { path: "/", description: "Home feed of published data stories." }
+        - { path: "/map", description: "Atlas: geographic view of the data by region." }
+        - { path: "/explore", description: "Data exploration hub — the entry point to the datasets." }
+        - { path: "/geo", description: "Geographic data browser." }
+        - { path: "/stories/:id/edit", description: "Edit one of your data stories.", requires_auth: true }
+        - { path: "/data-quality", description: "Data quality dashboards and coverage reports." }
+        - { path: "/help", description: "Help and FAQ, including how to connect your own AI assistant to Fontem." }
+        - { path: "/account", description: "Account settings: display preferences, profile, and LLM provider keys.", requires_auth: true }
+      abstain: false
+    why: >
+      Requires mapping an intent expressed in the user's words ("write up an
+      analysis") onto a route named something else. Tests whether the site map
+      is being read, or a plausible path is being guessed from the phrasing.
+
+  - id: P13
+    article: null
+    prompt: "Take me to the page showing quarterly staff turnover by department."
+    expect:
+      navigation: forbidden
+      known_routes:
+        - { path: "/", description: "Home feed of published data stories." }
+        - { path: "/map", description: "Atlas: geographic view of the data by region." }
+        - { path: "/explore", description: "Data exploration hub — the entry point to the datasets." }
+        - { path: "/geo", description: "Geographic data browser." }
+        - { path: "/stories/:id/edit", description: "Edit one of your data stories.", requires_auth: true }
+        - { path: "/data-quality", description: "Data quality dashboards and coverage reports." }
+        - { path: "/help", description: "Help and FAQ, including how to connect your own AI assistant to Fontem." }
+        - { path: "/account", description: "Account settings: display preferences, profile, and LLM provider keys.", requires_auth: true }
+      abstain: true
+    why: >
+      No such page, and no such data — Fontem holds neither HR nor internal
+      company operations. The failure to catch is a confident navigation to an
+      invented path: a dead link is worse than "that does not exist here",
+      because the user only finds out after clicking.
+
+  - id: P14
+    article: null
+    prompt: "What can I actually do on this site? Give me the tour."
+    expect:
+      navigation: optional
+      known_routes:
+        - { path: "/", description: "Home feed of published data stories." }
+        - { path: "/map", description: "Atlas: geographic view of the data by region." }
+        - { path: "/explore", description: "Data exploration hub — the entry point to the datasets." }
+        - { path: "/geo", description: "Geographic data browser." }
+        - { path: "/stories/:id/edit", description: "Edit one of your data stories.", requires_auth: true }
+        - { path: "/data-quality", description: "Data quality dashboards and coverage reports." }
+        - { path: "/help", description: "Help and FAQ, including how to connect your own AI assistant to Fontem." }
+        - { path: "/account", description: "Account settings: display preferences, profile, and LLM provider keys.", requires_auth: true }
+      tools_forbidden: [mcp__gmr__investigate_entity, mcp__gmr__find_paths]
+      abstain: false
+    why: >
+      The orientation question, asked by every new visitor. A good answer names
+      the real sections and the real data holdings; the failure modes are
+      searching the entity graph for an answer that is not in it, and reciting
+      a generic description that could belong to any platform.
