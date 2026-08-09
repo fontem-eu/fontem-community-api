@@ -141,3 +141,33 @@ async def fetch_tools(client: httpx.AsyncClient, api_url: str) -> list[dict]:
         # unreachable. Losing the generated ones degrades an answer; raising
         # would lose the turn.
         return []
+
+
+async def execute(client: httpx.AsyncClient, base_url: str,
+                  tools: list[dict], call: tuple[str, dict], *,
+                  timeout: float = 60.0) -> str:
+    """Call the endpoint behind a generated tool.
+
+    Path params are substituted and the rest go on the query string, so one
+    executor covers every annotated route without a per-tool branch — which
+    is the point of deriving schemas from the spec rather than writing them.
+    """
+    name, args = call
+    tool = next((t for t in tools if t["function"]["name"] == name), None)
+    if tool is None:
+        return json.dumps({"error": f"Unknown tool: {name}"})
+    path, params = tool["_route"]["path"], dict(args)
+    for key in list(params):
+        token = "{" + key + "}"
+        if token in path:
+            path = path.replace(token, str(params.pop(key)))
+    if "{" in path:
+        return json.dumps({"error": f"missing path parameter for {path}"})
+    try:
+        resp = await client.get(f"{base_url.rstrip('/')}{path}",
+                                params=params, timeout=timeout)
+    except SPEC_ERRORS as exc:
+        return json.dumps({"error": str(exc)[:200]})
+    if resp.status_code >= 400:
+        return json.dumps({"error": f"API {resp.status_code}"})
+    return resp.text

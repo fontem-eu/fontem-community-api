@@ -94,6 +94,10 @@ class _FakeAsyncClient:
         # source-freshness 404 survived so long.
         if "/catalogue" in url:
             return self._catalogue_response
+        if "/openapi.json" in url:
+            # Generated tool schemas. No annotated endpoints in the fake, so
+            # the assistant falls back to its hand-written surface.
+            return _FakeResponse(200, {"paths": {}})
         if "/data-quality/graph" in url or "/atlas/datasets" in url:
             # Pre-/catalogue fallback shape. Answered here so a deployment
             # that predates /catalogue does not consume scripted turns.
@@ -113,7 +117,7 @@ def _is_context_fetch(url: str) -> bool:
     """
     return any(part in url for part in
                ("freshness", "/catalogue", "/data-quality/graph",
-                "/atlas/datasets"))
+                "/atlas/datasets", "/openapi.json"))
 
 
 def _ai(content: str) -> _FakeResponse:

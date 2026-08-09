@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import pathlib
 import time
 
 import httpx
@@ -188,6 +190,28 @@ def format_catalogue(catalogue: dict) -> str:
     return header + "\n\n" + "\n".join(lines)
 
 
+# Where the precomputed block is mounted. Written by the daily CronJob and
+# by the PostSync hook, so it is identical for every turn until something
+# actually changes — which is the point: llama.cpp reuses the KV cache for a
+# stable prefix, and a block assembled per turn cannot be one.
+PREFILL_PATH = os.environ.get("CATALOGUE_PREFILL_PATH",
+                              "/etc/fontem/prefill/catalogue.txt")
+
+
+def read_prefill(path: str | None = None) -> str:
+    """The precomputed block, or "" if it is not mounted.
+
+    Read per turn rather than cached at startup. Kubernetes updates a mounted
+    ConfigMap in place, so re-reading a local file picks up a refresh without
+    a pod restart — and the read is a few microseconds against a turn that
+    takes seconds.
+    """
+    try:
+        return pathlib.Path(path or PREFILL_PATH).read_text("utf-8").strip()
+    except (OSError, ValueError):
+        return ""
+
+
 class CatalogueCache:
     """One fetch per TTL per process, shared across turns.
 
@@ -200,6 +224,13 @@ class CatalogueCache:
         self._cached: tuple[float, str] | None = None
 
     async def get(self, client: httpx.AsyncClient, gmr_api_url: str) -> str:
+        # Precomputed wins. It is the same content the fetch would produce,
+        # and using it keeps the prompt prefix byte-identical across turns.
+        # The live fetch stays as the fallback so an environment without the
+        # refresh job still gets a catalogue rather than nothing.
+        prefill = read_prefill()
+        if prefill:
+            return prefill
         now = time.monotonic()
         if self._cached is not None and now - self._cached[0] < self._ttl:
             return self._cached[1]

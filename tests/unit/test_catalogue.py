@@ -8,6 +8,7 @@ These tests pin the properties that make that answer impossible.
 import httpx
 import pytest
 
+from src.assistant import catalogue as cat_mod
 from src.assistant.catalogue import (
     CatalogueCache, fetch_catalogue, format_catalogue,
 )
@@ -117,3 +118,45 @@ class _Resp:
 
     def json(self):
         return self._payload
+
+
+# --- precomputed prefill ------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_precomputed_prefill_wins_over_the_live_fetch(tmp_path):
+    """A stable prefix is the whole point; a per-turn fetch cannot be one."""
+    path = tmp_path / "catalogue.txt"
+    path.write_text("## What Fontem holds\n\n- precomputed\n", encoding="utf-8")
+
+    called = {"n": 0}
+
+    class ShouldNotBeCalled:
+        async def get(self, url, timeout=None):  # pylint: disable=unused-argument
+            called["n"] += 1
+            return _Resp(GRAPH)
+
+    cache = CatalogueCache()
+    monkey = cat_mod.PREFILL_PATH
+    try:
+        cat_mod.PREFILL_PATH = str(path)
+        out = await cache.get(ShouldNotBeCalled(), "http://api")
+    finally:
+        cat_mod.PREFILL_PATH = monkey
+    assert "precomputed" in out
+    assert called["n"] == 0, "fetched despite a mounted prefill"
+
+
+@pytest.mark.asyncio
+async def test_missing_prefill_falls_back_to_fetching(tmp_path):
+    """An environment without the refresh job still gets a catalogue."""
+    class Live:
+        async def get(self, url, timeout=None):  # pylint: disable=unused-argument
+            return _Resp(GRAPH if "graph" in url else DATASETS)
+
+    monkey = cat_mod.PREFILL_PATH
+    try:
+        cat_mod.PREFILL_PATH = str(tmp_path / "absent.txt")
+        out = await CatalogueCache().get(Live(), "http://api")
+    finally:
+        cat_mod.PREFILL_PATH = monkey
+    assert "Company" in out

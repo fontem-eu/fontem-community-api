@@ -7,7 +7,7 @@ best guess at "what language is this conversation" flips.
 """
 import pytest
 
-from src.assistant.mistral_client import _language_directive
+from src.assistant.language import _language_directive, _LOCALE_NAMES
 
 
 def test_names_the_language_in_its_own_language():
@@ -50,7 +50,6 @@ def test_identifiers_are_exempted():
 def test_every_supported_locale_has_an_endonym():
     """A locale the platform serves but the directive cannot name would
     silently fall back to no instruction — the bug this fixes."""
-    from src.assistant.mistral_client import _LOCALE_NAMES
     # 24 EU official languages, which is what the UI ships.
     assert len(_LOCALE_NAMES) == 24
     assert all(v and v != k for k, v in _LOCALE_NAMES.items())
