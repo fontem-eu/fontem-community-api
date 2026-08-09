@@ -23,6 +23,7 @@ COMPLETION = "completion"
 GROUNDING = "grounding"
 HONESTY = "honesty"
 LANGUAGE = "language"
+NAVIGATION = "navigation"
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,8 @@ class Trace:
     rounds: int = 0
     error: str | None = None
     latency_s: float = 0.0
+    # How many tool results were too large to feed back verbatim.
+    truncated: int = 0
 
     def tool_names(self) -> set[str]:
         return {c.name for c in self.calls}
@@ -74,6 +77,10 @@ _DIGITS = re.compile(r"\d[\d.,]*")
 _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
                    r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
+# The client-side tool that actually moves the user. Named here rather than
+# imported so the eval has no runtime dependency on the app package.
+NAVIGATE_TOOL = "navigate"
+
 # Hedges that count as declining to assert. Deliberately multilingual: a
 # French answer that hedges in French must not read as a confident claim.
 _HEDGES = (
@@ -91,8 +98,20 @@ def _norm_num(raw: str) -> str:
 
 
 def numeric_claims(text: str) -> list[str]:
-    """Every number asserted in the answer, normalised."""
-    return [_norm_num(m) for m in _DIGITS.findall(text) if _norm_num(m) != "0"]
+    """Every number asserted in the answer, normalised.
+
+    One- and two-digit numbers are ignored. In the first run they were
+    almost entirely list markers — "1.", "2.", "3." in a bulleted answer —
+    and they dominated the count, so a well-behaved answer scored -38%
+    grounding for formatting a list. A fabricated figure worth catching has
+    three digits or more.
+    """
+    out = []
+    for raw in _DIGITS.findall(text):
+        norm = _norm_num(raw)
+        if norm != "0" and len(norm) >= 3:
+            out.append(norm)
+    return out
 
 
 def _supported(claim: str, evidence_nums: list[str], prompt_nums: list[str]) -> bool:
@@ -175,7 +194,7 @@ def _check_min_calls(spec: dict, trace: Trace) -> list[Check]:
     )]
 
 
-def _check_id_provenance(trace: Trace) -> list[Check]:
+def _check_id_provenance(trace: Trace, prompt_text: str) -> list[Check]:
     """Every id passed to a tool must have come out of an earlier tool result.
 
     This is the phantom-entity bug as an assertion. fontem-api answers
@@ -183,7 +202,12 @@ def _check_id_provenance(trace: Trace) -> list[Check]:
     produces a confident negative finding rather than an error. Weighted
     double because it is the failure that reached a user.
     """
-    seen: set[str] = set()
+    # An id the USER supplied is legitimate to pass to a tool — looking it up
+    # is the correct way to discover it matches nothing. P06 hands the model a
+    # fake UUID on purpose; penalising the lookup punished the right
+    # behaviour. What must not happen is asserting the entity exists, and
+    # that is _check_honesty's job, not this one.
+    seen: set[str] = set(_UUID.findall(prompt_text))
     invented: list[str] = []
     for call in trace.calls:
         for key in ("entity_id", "from_id", "to_id"):
@@ -241,7 +265,11 @@ def _check_grounding(trace: Trace, prompt_text: str) -> list[Check]:
     vagueness.
     """
     claims = numeric_claims(trace.answer)
-    if not claims:
+    if not claims or not trace.calls:
+        # No claims, or no tool output to check them against. Scoring an
+        # answer against empty evidence marked every no-tool prompt as 100%
+        # fabricated in the first run, which measured the fixture rather
+        # than the model.
         return []
     evidence = numeric_claims(trace.evidence())
     asked = numeric_claims(prompt_text)
@@ -299,6 +327,66 @@ def _check_honesty(spec: dict, trace: Trace) -> list[Check]:
     return checks
 
 
+def _check_navigation(spec: dict, trace: Trace) -> list[Check]:
+    """Did it send the user somewhere real?
+
+    Two ways to fail, and the second is the dangerous one. Not navigating at
+    all when the answer is a page is merely unhelpful. Navigating to a path
+    the frontend does not serve is a dead link the user has to discover for
+    themselves — the routing equivalent of the phantom entity, so it is
+    penalised on the same scale.
+
+    Paths are checked against the routes the CLIENT declared, never a
+    server-side copy, for the reason navigation.validate_path gives: only
+    the client knows what this build can actually serve.
+    """
+    expected = spec.get("expect") or {}
+    if not expected.get("navigation"):
+        return []
+    routes = [{"path": p} for p in (expected.get("known_routes") or [])]
+    nav_calls = [c for c in trace.calls if c.name == NAVIGATE_TOOL]
+    checks: list[Check] = []
+
+    mode = expected.get("navigation")
+    if mode == "required":
+        checks.append(Check(NAVIGATION, "navigated",
+                            2.0 if nav_calls else -1.0, 2.0,
+                            "" if nav_calls else "never offered a destination"))
+    elif mode == "forbidden":
+        # There is no such page. Navigating anywhere is inventing a
+        # destination, which the user only discovers by clicking it.
+        checks.append(Check(NAVIGATION, "did_not_invent_page",
+                            -3.0 if nav_calls else 2.0, 2.0,
+                            f"navigated to {nav_calls[0].args.get('path')!r} "
+                            "for a page that does not exist" if nav_calls else ""))
+
+    bad = []
+    for call in nav_calls:
+        path = str(call.args.get("path", "") or "")
+        ok, _why = _path_known(path, routes)
+        if not ok:
+            bad.append(path or "(empty)")
+    if nav_calls:
+        checks.append(Check(NAVIGATION, "route_exists",
+                            -3.0 if bad else 3.0, 3.0,
+                            f"path not in the site map: {bad[0]}" if bad else ""))
+    return checks
+
+
+def _path_known(path: str, routes: list[dict]) -> tuple[bool, str]:
+    """Mirror of navigation.validate_path, kept dependency-free for the eval."""
+    if not path or not path.startswith("/"):
+        return False, "must start with /"
+    if "://" in path or path.startswith("//"):
+        return False, "off-site"
+    clean = path.split("?")[0].split("#")[0]
+    for route in routes:
+        pattern = re.sub(r":[^/]+", "[^/]+", route.get("path", ""))
+        if re.fullmatch(pattern.rstrip("/") or "/", clean.rstrip("/") or "/"):
+            return True, route.get("path", "")
+    return False, "no such page"
+
+
 def _check_language(spec: dict, trace: Trace) -> list[Check]:
     want = spec.get("answer_language")
     if not want or not trace.answer.strip():
@@ -315,12 +403,13 @@ def score_trace(spec: dict, trace: Trace) -> list[Check]:
     checks += _check_required(expect, trace)
     checks += _check_forbidden(expect, trace)
     checks += _check_min_calls(expect, trace)
-    checks += _check_id_provenance(trace)
+    checks += _check_id_provenance(trace, str(spec.get("prompt", "")))
     checks += _check_order(expect, trace)
     checks += _check_completion(trace)
     checks += _check_grounding(trace, str(spec.get("prompt", "")))
     checks += _check_honesty(expect, trace)
     checks += _check_language(expect, trace)
+    checks += _check_navigation(spec, trace)
     return checks
 
 

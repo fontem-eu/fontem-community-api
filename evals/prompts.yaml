@@ -1,10 +1,11 @@
 # Assistant evaluation fixture.
 #
-# Ten prompts drawn from the six real articles on the platform, chosen so
-# that between them they exercise every behaviour we have actually seen go
-# wrong in production: stalling mid-chain, inventing entity ids, answering
-# from memory instead of the graph, and reporting a phantom entity as a
-# real one with no contracts.
+# Fourteen prompts. Ten are drawn from the six real articles on the platform
+# and exercise the behaviours we have seen go wrong in production: stalling
+# mid-chain, inventing entity ids, answering from memory instead of the graph,
+# and reporting a phantom entity as a real one with no contracts. The last
+# four cover navigation — telling a user where a thing lives — which is the
+# assistant's most achievable job and the one visitors hit first.
 #
 # The prompts are deliberately NOT balanced toward "should call a tool".
 # A harness where every correct answer involves a tool call cannot detect
@@ -20,7 +21,7 @@
 # comparable within a version, for the same reason the DAST parser refuses
 # to diff across key_version.
 
-version: 1
+version: 2
 
 prompts:
   - id: P01
@@ -178,3 +179,68 @@ prompts:
       the failure is a clean percentage with nothing behind it. Highest
       fabrication pressure of the ten, because a confident number here is
       both plausible and unfalsifiable to a casual reader.
+
+  # --- navigation -----------------------------------------------------------
+  # Directing people to the right page is the assistant's most achievable job
+  # and the one users hit first. It is also where a wrong answer is cheapest to
+  # produce and most annoying to receive: a confident link to a page that does
+  # not exist. `known_routes` is the site map the client would send with the
+  # turn, and a proposed path is scored against it exactly as validate_path
+  # does at runtime — never against a server-side copy, which could authorise
+  # a route this build of the frontend cannot serve.
+
+  - id: P11
+    article: null
+    prompt: "Where do I see the maps and regional statistics?"
+    expect:
+      navigation: required
+      known_routes: ["/atlas", "/atlas/:dataset", "/", "/help", "/account",
+                     "/stories", "/c/:ticker/:view", "/data-quality"]
+      abstain: false
+    why: >
+      The plainest case, and the one the user most wants to work. The Atlas is
+      a page; the right answer is to open it, not to describe it in prose.
+
+  - id: P12
+    article: null
+    prompt: >
+      I want to write up an analysis of my own. Where does that happen on the
+      site?
+    expect:
+      navigation: required
+      known_routes: ["/atlas", "/stories", "/stories/new", "/", "/help",
+                     "/account", "/data-quality"]
+      abstain: false
+    why: >
+      Requires mapping an intent expressed in the user's words ("write up an
+      analysis") onto a route named something else. Tests whether the site map
+      is being read, or a plausible path is being guessed from the phrasing.
+
+  - id: P13
+    article: null
+    prompt: "Take me to the page showing quarterly staff turnover by department."
+    expect:
+      navigation: forbidden
+      known_routes: ["/atlas", "/stories", "/", "/help", "/account",
+                     "/data-quality"]
+      abstain: true
+    why: >
+      No such page, and no such data — Fontem holds neither HR nor internal
+      company operations. The failure to catch is a confident navigation to an
+      invented path: a dead link is worse than "that does not exist here",
+      because the user only finds out after clicking.
+
+  - id: P14
+    article: null
+    prompt: "What can I actually do on this site? Give me the tour."
+    expect:
+      navigation: optional
+      known_routes: ["/atlas", "/stories", "/", "/help", "/account",
+                     "/data-quality"]
+      tools_forbidden: [mcp__gmr__investigate_entity, mcp__gmr__find_paths]
+      abstain: false
+    why: >
+      The orientation question, asked by every new visitor. A good answer names
+      the real sections and the real data holdings; the failure modes are
+      searching the entity graph for an answer that is not in it, and reciting
+      a generic description that could belong to any platform.

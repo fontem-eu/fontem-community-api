@@ -14,7 +14,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "evals"))
 
 # pylint: disable=wrong-import-position
 from scorer import (  # noqa: E402
-    COMPLETION, GROUNDING, HONESTY, LANGUAGE, TOOL_CALLING,
+    COMPLETION, GROUNDING, HONESTY, LANGUAGE, NAVIGATION, TOOL_CALLING,
     Trace, ToolCall, aggregate, detect_language, numeric_claims, score_trace,
 )
 
@@ -26,6 +26,17 @@ FAKE_ID = "E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB"
 
 def cat(checks, category):
     return aggregate(checks).get(category, {"points": 0.0, "max": 0.0})
+
+
+def points(checks, name):
+    """One named check's score.
+
+    Asserting on category totals let one check mask another: breaking
+    `did_not_invent_page` changed nothing observable because `route_exists`
+    already dragged the same category negative. Per-check assertions are the
+    only way each one is independently falsifiable.
+    """
+    return sum(c.points for c in checks if c.name == name)
 
 
 def test_required_tool_missing_scores_zero():
@@ -147,7 +158,7 @@ def test_fixture_is_wellformed():
     path = pathlib.Path(__file__).resolve().parents[2] / "evals" / "prompts.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     known = {SEARCH, INVESTIGATE, "mcp__gmr__find_paths", "mcp__gmr__propose_edit"}
-    assert len(data["prompts"]) == 10
+    assert len(data["prompts"]) == 14
     ids = [p["id"] for p in data["prompts"]]
     assert len(set(ids)) == len(ids), "duplicate prompt ids"
     for prompt in data["prompts"]:
@@ -155,3 +166,113 @@ def test_fixture_is_wellformed():
         for key in ("tools_required", "tools_forbidden", "tools_ordered"):
             for tool in expect.get(key) or []:
                 assert tool in known, f"{prompt['id']} names unknown tool {tool}"
+
+
+# --- defects found by the first real run against production -----------------
+
+def test_user_supplied_id_is_not_treated_as_invented():
+    """P06 hands the model a fake UUID; looking it up is correct behaviour.
+
+    The first run penalised the lookup, which punished exactly the sequence
+    we want: call the tool, discover it matches nothing, say so.
+    """
+    spec = {"prompt": f"Tell me about the company with id {FAKE_ID}.",
+            "expect": {}}
+    trace = Trace("P06", "m",
+                  calls=[ToolCall(INVESTIGATE, {"entity_id": FAKE_ID},
+                                  '{"error": "entity not found"}')],
+                  answer="That id was not found.")
+    assert cat(score_trace(spec, trace), TOOL_CALLING)["points"] > 0
+
+
+def test_grounding_not_scored_without_evidence():
+    """No tool calls means no evidence; scoring against nothing is degenerate.
+
+    The first run marked every no-tool answer 100% fabricated, which
+    measured the fixture rather than the model.
+    """
+    spec = {"prompt": "What is Fontem?", "expect": {}}
+    trace = Trace("P05", "m", calls=[],
+                  answer="Fontem holds 931000000 in records.")
+    assert cat(score_trace(spec, trace), GROUNDING)["max"] == 0.0
+
+
+def test_list_markers_are_not_numeric_claims():
+    """"1." "2." "3." in a bulleted answer are formatting, not assertions."""
+    assert numeric_claims("1. first 2. second 3. third") == []
+    assert numeric_claims("holds 931000000 euros") == ["931000000"]
+
+
+# --- navigation -------------------------------------------------------------
+
+ROUTES = ["/atlas", "/atlas/:dataset", "/stories", "/", "/help"]
+NAV = "navigate"
+
+
+def test_navigating_to_a_real_page_scores():
+    spec = {"prompt": "where are the maps?",
+            "expect": {"navigation": "required", "known_routes": ROUTES}}
+    trace = Trace("P11", "m", calls=[ToolCall(NAV, {"path": "/atlas"}, "ok")],
+                  answer="Opening the Atlas.")
+    assert cat(score_trace(spec, trace), NAVIGATION)["points"] > 0
+
+
+def test_param_routes_accept_concrete_paths():
+    """'/atlas/:dataset' must accept '/atlas/demo_r_births'."""
+    spec = {"prompt": "show me births",
+            "expect": {"navigation": "required", "known_routes": ROUTES}}
+    trace = Trace("P11", "m",
+                  calls=[ToolCall(NAV, {"path": "/atlas/demo_r_births"}, "ok")],
+                  answer="Opening it.")
+    assert cat(score_trace(spec, trace), NAVIGATION)["points"] > 0
+
+
+def test_invented_route_is_heavily_penalised():
+    """A dead link is the routing twin of the phantom entity."""
+    spec = {"prompt": "where are the maps?",
+            "expect": {"navigation": "required", "known_routes": ROUTES}}
+    trace = Trace("P11", "m",
+                  calls=[ToolCall(NAV, {"path": "/dashboards/regional"}, "ok")],
+                  answer="Taking you there.")
+    assert points(score_trace(spec, trace), "route_exists") < 0
+
+
+def test_failing_to_navigate_when_asked_is_penalised():
+    """Isolates `navigated`: describing a page in prose is not directing."""
+    spec = {"prompt": "where are the maps?",
+            "expect": {"navigation": "required", "known_routes": ROUTES}}
+    trace = Trace("P11", "m", calls=[],
+                  answer="The Atlas has maps and regional statistics.")
+    assert points(score_trace(spec, trace), "navigated") < 0
+
+
+def test_offsite_navigation_is_rejected():
+    """An off-site 'navigation' is an open redirect wearing a hat."""
+    spec = {"prompt": "where are the maps?",
+            "expect": {"navigation": "required", "known_routes": ROUTES}}
+    # Protocol-relative, so it survives the leading-slash guard and only the
+    # off-site check can reject it. An https:// path would have been caught
+    # earlier and proved nothing about this branch.
+    trace = Trace("P11", "m",
+                  calls=[ToolCall(NAV, {"path": "//evil.example/x"}, "ok")],
+                  answer="Taking you there.")
+    assert points(score_trace(spec, trace), "route_exists") < 0
+
+
+def test_not_navigating_when_no_such_page_scores():
+    spec = {"prompt": "staff turnover page?",
+            "expect": {"navigation": "forbidden", "known_routes": ROUTES}}
+    good = Trace("P13", "m", calls=[], answer="No such page exists here.")
+    # Navigates to a route that DOES exist, so `route_exists` is satisfied and
+    # only `did_not_invent_page` can catch it — the page is real, but it is
+    # not the page the user asked for and does not hold that data.
+    bad = Trace("P13", "m", calls=[ToolCall(NAV, {"path": "/atlas"}, "ok")],
+                answer="Taking you there.")
+    assert points(score_trace(spec, good), "did_not_invent_page") > 0
+    assert points(score_trace(spec, bad), "did_not_invent_page") < 0
+
+
+def test_navigation_not_scored_when_prompt_does_not_ask_for_it():
+    spec = {"prompt": "how much did they win?", "expect": {}}
+    trace = Trace("P02", "m", calls=[], answer="x")
+    assert cat(score_trace(spec, trace), NAVIGATION)["max"] == 0.0

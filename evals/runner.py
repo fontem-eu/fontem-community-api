@@ -37,6 +37,16 @@ MAX_ROUNDS = 6
 # Long enough for the 30B, which generates at ~14 tok/s.
 REQUEST_TIMEOUT = 600.0
 
+# Tool results are capped before going back into the conversation. The first
+# real run had single search results of ~90k tokens, which overflowed the
+# context and failed every model identically — the harness became the binding
+# constraint and the comparison measured nothing.
+#
+# Worth recording separately: production does NOT cap these either, and it
+# serves a smaller per-slot context than this eval. The same overflow is
+# reachable in the product.
+MAX_TOOL_RESULT_CHARS = 8000
+
 
 def load_shipped():
     """Pull the real tool schemas, executor and system prompt out of the app."""
@@ -88,6 +98,10 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                 except json.JSONDecodeError:
                     args = {}
                 result = await executor(http, fname, args)
+                if len(result) > MAX_TOOL_RESULT_CHARS:
+                    trace.truncated += 1
+                    result = (result[:MAX_TOOL_RESULT_CHARS]
+                              + f'\n[...truncated, {len(result)} chars total]')
                 trace.calls.append(ToolCall(fname, args, result))
                 messages.append({"role": "tool",
                                  "tool_call_id": call.get("id", ""),
@@ -162,6 +176,7 @@ async def main() -> int:
                     "latency_s": trace.latency_s, "rounds": trace.rounds,
                     "tools": [c.name for c in trace.calls],
                     "error": trace.error, "answer": trace.answer[:1200],
+                    "truncated_results": trace.truncated,
                     "categories": {k: {"points": v["points"], "max": v["max"],
                                        "pct": round(v["pct"], 1),
                                        "notes": v["notes"]}
