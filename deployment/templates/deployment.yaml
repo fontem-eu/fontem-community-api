@@ -150,6 +150,19 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "1"
+          # The precomputed catalogue block, written by the daily CronJob and
+          # the PostSync hook in llm-service. optional:true so a cluster
+          # without the refresh job still starts — the assistant falls back to
+          # fetching the catalogue live, which is slower but correct.
+          volumeMounts:
+            - name: prefill
+              mountPath: /etc/fontem/prefill
+              readOnly: true
+      volumes:
+        - name: prefill
+          configMap:
+            name: llm-prefill
+            optional: true
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

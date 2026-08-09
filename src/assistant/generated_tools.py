@@ -121,10 +121,21 @@ def select(tools: list[dict], groups: set[str] | None = None,
     ambiguity would make every eval result unreadable.
     """
     core = [t for t in tools if t["_route"].get("core")]
-    rest = [t for t in tools if not t["_route"].get("core")]
-    if groups:
-        rest = ([t for t in rest if t["_route"]["group"] in groups]
-                + [t for t in rest if t["_route"]["group"] not in groups])
+    if not groups:
+        # No signal about what this turn is for, so offer only the discovery
+        # path. Offering everything measurably broke the assistant: with all
+        # 11 generated tools on top of the 5 hand-written ones, qwen3-4b
+        # stopped finishing turns at all and ASSIST-19 — which had passed in
+        # a minute — timed out at 180s with the status spinner still up.
+        #
+        # This is the trade named when the registry was built, now with a
+        # number attached: a large registry is fine, a large per-turn surface
+        # is not. Core keeps the Atlas reachable; a scoped turn widens it.
+        return core
+    rest = ([t for t in tools
+             if not t["_route"].get("core") and t["_route"]["group"] in groups]
+            + [t for t in tools
+               if not t["_route"].get("core") and t["_route"]["group"] not in groups])
     # Core first so the cap eats the scoped tail, never the discovery path.
     return (core + rest)[:max(limit, len(core))]
 
