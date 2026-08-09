@@ -55,40 +55,53 @@ def _param_schema(param: dict) -> dict:
     return out
 
 
+def _operation_tool(path: str, method: str, op: dict, base_path: str) -> dict | None:
+    """One opted-in operation as a function schema, or None if it opted out."""
+    mark = op.get(AGENT_TOOL_KEY)
+    if not mark:
+        return None
+    props, required = _properties(op, set(mark.get("params") or ()))
+    return {
+        "type": "function",
+        "function": {
+            "name": mark["name"],
+            # "when" rather than "what": models select tools by matching
+            # intent, not by reading return shapes.
+            "description": f"Use when {mark['when']}.",
+            "parameters": {"type": "object", "properties": props,
+                           "required": required},
+        },
+        # Carried alongside, not inside the schema the model sees.
+        "_route": {"method": method.upper(),
+                   "path": base_path.rstrip("/") + path,
+                   "group": mark.get("group", "general")},
+    }
+
+
+def _properties(op: dict, wanted: set[str]) -> tuple[dict, list[str]]:
+    """Declared query parameters, filtered to the ones a tool should expose."""
+    props: dict = {}
+    required: list[str] = []
+    for param in op.get("parameters") or []:
+        name = param.get("name")
+        if not name or (wanted and name not in wanted):
+            continue
+        props[name] = _param_schema(param)
+        if param.get("required"):
+            required.append(name)
+    return props, required
+
+
 def tools_from_spec(spec: dict, base_path: str = "") -> list[dict]:
     """Every endpoint that opted in, as an OpenAI-format function schema."""
-    tools: list[dict] = []
-    for path, methods in (spec.get("paths") or {}).items():
-        for method, op in (methods or {}).items():
-            if not isinstance(op, dict):
-                continue
-            mark = op.get(AGENT_TOOL_KEY)
-            if not mark:
-                continue
-            wanted = set(mark.get("params") or ())
-            props, required = {}, []
-            for param in op.get("parameters") or []:
-                name = param.get("name")
-                if not name or (wanted and name not in wanted):
-                    continue
-                props[name] = _param_schema(param)
-                if param.get("required"):
-                    required.append(name)
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": mark["name"],
-                    # "when" rather than "what": models select tools by
-                    # matching intent, not by reading return shapes.
-                    "description": f"Use when {mark['when']}.",
-                    "parameters": {"type": "object", "properties": props,
-                                   "required": required},
-                },
-                # Carried alongside, not inside the schema the model sees.
-                "_route": {"method": method.upper(),
-                           "path": base_path.rstrip("/") + path,
-                           "group": mark.get("group", "general")},
-            })
+    tools = [
+        tool
+        for path, methods in (spec.get("paths") or {}).items()
+        for method, op in (methods or {}).items()
+        if isinstance(op, dict)
+        for tool in [_operation_tool(path, method, op, base_path)]
+        if tool is not None
+    ]
     return sorted(tools, key=lambda t: t["function"]["name"])
 
 
