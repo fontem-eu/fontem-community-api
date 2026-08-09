@@ -13,12 +13,15 @@ failure mode is silent: the model does not say "my list may be stale", it
 says "we don't have that". So the block is built from the same registries the
 platform uses to render its own dashboards:
 
-  * ``/data-quality/graph``   — live node-label counts for the knowledge
-    graph, so the block states what is actually loaded rather than what is
-    configured. (``/data-quality/pipeline`` carries the richer DataSource
-    registry but joins it against the events store and times out after 45s
-    in production; the catalogue needs the inventory, not the health.)
-  * ``/atlas/datasets``       — the Atlas catalogue of statistical datasets.
+  * ``/catalogue`` — every producer's own DataDescription plus the Atlas
+    dataset catalogue, in one call. Each ETL loader declares what it
+    publishes next to the code that publishes it, so the two cannot drift.
+
+Falls back to ``/data-quality/graph`` + ``/atlas/datasets`` when ``/catalogue``
+is not there yet, so this ships without waiting on the API deploy. The
+fallback is strictly worse — node counts say what is loaded but not what it
+covers or what it can answer — which is why it is a fallback and not the
+design.
 
 A feed shows up here the moment it is registered there, with no edit anywhere.
 
@@ -52,8 +55,24 @@ async def _get_json(client: httpx.AsyncClient, url: str):
 
 
 async def fetch_catalogue(client: httpx.AsyncClient, gmr_api_url: str) -> dict:
-    """Pull both registries concurrently. Either may come back empty."""
+    """Producer descriptions when available, node counts when not."""
     base = gmr_api_url.rstrip("/")
+    try:
+        payload = await _get_json(client, f"{base}/catalogue")
+        if isinstance(payload, dict) and payload.get("producers"):
+            return {
+                "producers": payload.get("producers") or [],
+                "datasets": payload.get("datasets") or [],
+                "nodes": {},
+            }
+    except Exception:  # pylint: disable=broad-except
+        # Any failure here means "try the older shape", never "fail the turn".
+        pass
+    return await _fetch_legacy(client, base)
+
+
+async def _fetch_legacy(client: httpx.AsyncClient, base: str) -> dict:
+    """Pre-/catalogue shape. Either half may come back empty."""
     graph, datasets = await asyncio.gather(
         _get_json(client, f"{base}/data-quality/graph"),
         _get_json(client, f"{base}/atlas/datasets"),
@@ -61,6 +80,7 @@ async def fetch_catalogue(client: httpx.AsyncClient, gmr_api_url: str) -> dict:
     )
     nodes = graph.get("nodes") if isinstance(graph, dict) else None
     return {
+        "producers": [],
         # Labels with a zero count are configured but unloaded. Listing them
         # would invite exactly the failure this block exists to prevent, in
         # the opposite direction: promising data we do not hold.
@@ -82,6 +102,28 @@ def _group(rows: list[dict], theme_key: str, label_key: str) -> dict[str, list[s
     return out
 
 
+def _graph_lines(producers: list, nodes: dict) -> list[str]:
+    """Producer descriptions when we have them, node counts when we do not."""
+    if producers:
+        lines = ["Sources in the knowledge graph — searchable with the "
+                 "entity tools:"]
+        for prod in producers:
+            label = prod.get("label") or prod.get("producer") or ""
+            line = f"- {label}: {prod.get('summary') or ''}"
+            # Coverage is the field that stops "0 results" being reported as
+            # "absent from the world", so it is worth its characters.
+            coverage = prod.get("coverage") or ""
+            if coverage:
+                line += f" ({coverage})"
+            lines.append(line)
+        return lines
+    if nodes:
+        return ["Knowledge graph — searchable with the entity tools:"] + [
+            f"- {label}: {count:,}"
+            for label, count in sorted(nodes.items(), key=lambda kv: -kv[1])]
+    return []
+
+
 def format_catalogue(catalogue: dict) -> str:
     """Compress both registries into a short block for the system prompt.
 
@@ -95,15 +137,12 @@ def format_catalogue(catalogue: dict) -> str:
     # to hold no matter which caller assembled the dict.
     nodes = {k: v for k, v in (catalogue.get("nodes") or {}).items()
              if isinstance(v, int) and v > 0}
+    producers = catalogue.get("producers") or []
     datasets = catalogue.get("datasets") or []
-    if not nodes and not datasets:
+    if not nodes and not datasets and not producers:
         return ""
 
-    lines: list[str] = []
-    if nodes:
-        lines.append("Knowledge graph — searchable with the entity tools:")
-        for label, count in sorted(nodes.items(), key=lambda kv: -kv[1]):
-            lines.append(f"- {label}: {count:,}")
+    lines: list[str] = _graph_lines(producers, nodes)
 
     if datasets:
         grouped = _group(datasets, "theme", "label")
@@ -144,10 +183,12 @@ class CatalogueCache:
             return self._cached[1]
         try:
             block = format_catalogue(await fetch_catalogue(client, gmr_api_url))
-        except (httpx.HTTPError, ValueError, TypeError):
-            # Best-effort, exactly like the coverage block: a turn without the
-            # catalogue is worse than a turn with it, and far better than a
-            # turn that fails because a dashboard endpoint was slow.
+        except Exception:  # pylint: disable=broad-except
+            # Deliberately broad. This block is a nicety; the user's question
+            # is not. Any exception at all — a slow dashboard endpoint, a
+            # shape change, a DNS blip — degrades to no catalogue rather than
+            # to a failed turn. Narrowing this once let a RuntimeError through
+            # in testing, which would have surfaced as a 500 on a real turn.
             block = ""
         self._cached = (now, block)
         return block

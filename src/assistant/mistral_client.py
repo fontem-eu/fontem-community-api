@@ -44,6 +44,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from src.assistant.catalogue import CatalogueCache
+
 from src.assistant import local_models, navigation
 from src.assistant.entities import (
     _build_summary,
@@ -436,6 +438,13 @@ class MistralProxyClient:
         # Keyed nowhere — one client instance only ever talks to one
         # fontem-api, and the cache lives on the instance.
         self._freshness_cache: tuple[float, str] | None = None
+        # What the platform holds, generated from its own registries. Same
+        # best-effort contract as the coverage block above.
+        self._catalogue = CatalogueCache()
+
+    async def _get_catalogue_block(self, client: httpx.AsyncClient) -> str:
+        """What data exists, for the system prompt."""
+        return await self._catalogue.get(client, self._gmr_api_url)
 
     async def _get_freshness_summary(self, client: httpx.AsyncClient) -> str:
         """Return the formatted source-freshness block for system prompt
@@ -456,7 +465,7 @@ class MistralProxyClient:
             return self._freshness_cache[1]
         try:
             resp = await client.get(
-                f"{self._gmr_api_url}/data-quality/source-freshness",
+                f"{self._gmr_api_url}/data-quality/freshness",
                 timeout=_FRESHNESS_FETCH_TIMEOUT,
             )
             resp.raise_for_status()
@@ -586,11 +595,17 @@ class MistralProxyClient:
                 # "context-as-of-now" block. Empty string when the
                 # data-quality API is unreachable — the chat still
                 # works, just without coverage grounding.
+                # The catalogue goes first: knowing the data EXISTS is what
+                # stops the model answering "we don't have that" about eight
+                # population datasets. Coverage ranges refine an answer the
+                # model is already willing to attempt.
+                catalogue = await self._get_catalogue_block(client)
                 freshness = await self._get_freshness_summary(client)
-                if freshness:
-                    messages[0]["content"] = (
-                        messages[0]["content"].rstrip() + "\n\n" + freshness
-                    )
+                for block in (catalogue, freshness):
+                    if block:
+                        messages[0]["content"] = (
+                            messages[0]["content"].rstrip() + "\n\n" + block
+                        )
                 completed_normally = False
                 for _iter_no in range(self._max_iter):
                     yield _sse("status", {
