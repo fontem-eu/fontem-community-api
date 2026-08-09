@@ -120,19 +120,21 @@ def test_cap_stretches_rather_than_dropping_core():
     assert len(picked) == 5
 
 
-def test_unscoped_turns_get_only_the_discovery_path():
-    """Offering everything broke the assistant, with a measured number.
+def test_unscoped_turns_get_a_workable_surface():
+    """Bounded on both sides, and both bounds were measured.
 
-    All 11 generated tools plus the 5 hand-written ones made qwen3-4b stop
-    finishing turns: ASSIST-19 had passed in a minute and then timed out at
-    180s with the status spinner still up. A large registry is fine; a large
-    per-turn surface is not.
+    Three tools could not cover the platform — a question about competition
+    or cohesion funding got "go find a dataset code". Sixteen broke the 4B
+    outright: ASSIST-19 passed in a minute, then timed out at 180s. An
+    earlier commit titled "widen" shipped the narrow code because both its
+    text edits missed silently — so this pins the exact number, not a range.
     """
     tools = tools_from_spec(CORE_SPEC)
     assert len(tools) == 21
     picked = select(tools)
-    assert {t["function"]["name"] for t in picked} == {"list_datasets"}
-
+    names = [t["function"]["name"] for t in picked]
+    assert "list_datasets" in names, "the discovery path is never cut"
+    assert len(picked) == 8, f"unscoped surface must be 8, got {len(picked)}"
 
 def test_a_scoped_turn_still_widens_the_surface():
     picked = select(tools_from_spec(CORE_SPEC), groups={"contracts"})
