@@ -128,16 +128,14 @@ def select(tools: list[dict], groups: set[str] | None = None,
     """
     core = [t for t in tools if t["_route"].get("core")]
     if not groups:
-        # No signal about what this turn is for, so offer only the discovery
-        # path. Offering everything measurably broke the assistant: with all
-        # 11 generated tools on top of the 5 hand-written ones, qwen3-4b
-        # stopped finishing turns at all and ASSIST-19 — which had passed in
-        # a minute — timed out at 180s with the status spinner still up.
-        #
-        # This is the trade named when the registry was built, now with a
-        # number attached: a large registry is fine, a large per-turn surface
-        # is not. Core keeps the Atlas reachable; a scoped turn widens it.
-        return core
+        # No signal about what this turn is for. Core alone proved too little
+        # — a question about single-bidder rates or cohesion funding got
+        # handed list_datasets and told to go looking. Sixteen was measurably
+        # worse: the 4B stopped finishing turns and ASSIST-19 timed out at
+        # 180s. DEFAULT_TURN_TOOLS sits between the two measured bounds,
+        # core first so the discovery path is never the part that gets cut.
+        rest = [t for t in tools if not t["_route"].get("core")]
+        return (core + rest)[:max(DEFAULT_TURN_TOOLS, len(core))]
     rest = ([t for t in tools
              if not t["_route"].get("core") and t["_route"]["group"] in groups]
             + [t for t in tools
