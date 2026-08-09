@@ -143,9 +143,23 @@ async def fetch_tools(client: httpx.AsyncClient, api_url: str) -> list[dict]:
         return []
 
 
+def _resolve_path(path: str, args: dict) -> tuple[str | None, dict]:
+    """Substitute {placeholders} from args; the remainder is the query.
+
+    Returns (None, _) when a placeholder is left unfilled, so the caller
+    reports it rather than issuing a request to a literal "{gmr_id}".
+    """
+    # Build the query from what is NOT consumed by the path, rather than
+    # mutating while iterating — same result, and nothing to get wrong.
+    consumed = {k for k in args if "{" + k + "}" in path}
+    for key in consumed:
+        path = path.replace("{" + key + "}", str(args[key]))
+    params = {k: v for k, v in args.items() if k not in consumed}
+    return (None if "{" in path else path), params
+
+
 async def execute(client: httpx.AsyncClient, base_url: str,
-                  tools: list[dict], call: tuple[str, dict], *,
-                  timeout: float = 60.0) -> str:
+                  tools: list[dict], call: tuple[str, dict]) -> str:
     """Call the endpoint behind a generated tool.
 
     Path params are substituted and the rest go on the query string, so one
@@ -156,16 +170,15 @@ async def execute(client: httpx.AsyncClient, base_url: str,
     tool = next((t for t in tools if t["function"]["name"] == name), None)
     if tool is None:
         return json.dumps({"error": f"Unknown tool: {name}"})
-    path, params = tool["_route"]["path"], dict(args)
-    for key in list(params):
-        token = "{" + key + "}"
-        if token in path:
-            path = path.replace(token, str(params.pop(key)))
-    if "{" in path:
-        return json.dumps({"error": f"missing path parameter for {path}"})
+    raw = tool["_route"]["path"]
+    path, params = _resolve_path(raw, args)
+    if path is None:
+        return json.dumps({"error": f"missing path parameter for {raw}"})
     try:
-        resp = await client.get(f"{base_url.rstrip('/')}{path}",
-                                params=params, timeout=timeout)
+        # No timeout argument: the caller's client is configured with one,
+        # and threading a second through here only creates two places for
+        # the value to disagree.
+        resp = await client.get(f"{base_url.rstrip('/')}{path}", params=params)
     except SPEC_ERRORS as exc:
         return json.dumps({"error": str(exc)[:200]})
     if resp.status_code >= 400:

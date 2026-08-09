@@ -429,8 +429,7 @@ class MistralProxyClient:
                                  args: dict) -> str:
         """Delegate to the shared executor, which needs no client state."""
         return await generated_tools.execute(
-            client, self._gmr_api_url, self._generated or [], (name, args),
-            timeout=self._timeout)
+            client, self._gmr_api_url, self._generated or [], (name, args))
 
     async def _get_catalogue_block(self, client: httpx.AsyncClient) -> str:
         """What data exists, for the system prompt."""
