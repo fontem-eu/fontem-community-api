@@ -74,7 +74,8 @@ def _operation_tool(path: str, method: str, op: dict, base_path: str) -> dict | 
         # Carried alongside, not inside the schema the model sees.
         "_route": {"method": method.upper(),
                    "path": base_path.rstrip("/") + path,
-                   "group": mark.get("group", "general")},
+                   "group": mark.get("group", "general"),
+                   "core": bool(mark.get("core", False))},
     }
 
 
@@ -107,18 +108,25 @@ def tools_from_spec(spec: dict, base_path: str = "") -> list[dict]:
 
 def select(tools: list[dict], groups: set[str] | None = None,
            limit: int = MAX_TOOLS_PER_TURN) -> list[dict]:
-    """The surface for one turn: relevant groups first, hard-capped.
+    """The surface for one turn: core always, then relevant groups, capped.
+
+    Core tools are never scoped away, and they are never the ones dropped by
+    the cap. They are the discovery path — you cannot ask for a statistic
+    without first finding its dataset code — so scoping them behind a group
+    guess would strand the model exactly where it already fails: telling the
+    user data is not here when it is.
 
     Truncation is reported by the caller rather than silent. A tool the model
     never saw looks exactly like a tool it chose not to use, and that
     ambiguity would make every eval result unreadable.
     """
+    core = [t for t in tools if t["_route"].get("core")]
+    rest = [t for t in tools if not t["_route"].get("core")]
     if groups:
-        ranked = ([t for t in tools if t["_route"]["group"] in groups]
-                  + [t for t in tools if t["_route"]["group"] not in groups])
-    else:
-        ranked = list(tools)
-    return ranked[:limit]
+        rest = ([t for t in rest if t["_route"]["group"] in groups]
+                + [t for t in rest if t["_route"]["group"] not in groups])
+    # Core first so the cap eats the scoped tail, never the discovery path.
+    return (core + rest)[:max(limit, len(core))]
 
 
 async def fetch_tools(client: httpx.AsyncClient, api_url: str) -> list[dict]:

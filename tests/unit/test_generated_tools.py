@@ -76,3 +76,40 @@ def test_per_turn_surface_is_hard_capped():
         for i in range(40)}})
     assert len(many) == 40
     assert len(select(many)) == MAX_TOOLS_PER_TURN
+
+
+# --- core tools -------------------------------------------------------------
+
+CORE_SPEC = {"paths": {
+    "/atlas/datasets": {"get": {
+        "x-agent-tool": {"name": "list_datasets", "when": "codes are needed",
+                         "group": "statistics", "core": True},
+        "parameters": []}},
+    **{f"/c{i}": {"get": {
+        "x-agent-tool": {"name": f"contracts_{i}", "when": "contracts",
+                         "group": "contracts"},
+        "parameters": []}} for i in range(20)},
+}}
+
+
+def test_core_survives_a_mismatched_group_scope():
+    """Scoping to contracts must not hide the way to find a dataset code."""
+    picked = select(tools_from_spec(CORE_SPEC), groups={"contracts"})
+    assert "list_datasets" in {t["function"]["name"] for t in picked}
+
+
+def test_core_is_never_the_tool_the_cap_drops():
+    picked = select(tools_from_spec(CORE_SPEC), groups={"contracts"}, limit=3)
+    names = {t["function"]["name"] for t in picked}
+    assert "list_datasets" in names
+    assert len(picked) == 3
+
+
+def test_cap_stretches_rather_than_dropping_core():
+    """More core tools than the cap: the cap yields, core does not."""
+    many_core = {"paths": {
+        f"/x{i}": {"get": {"x-agent-tool": {"name": f"core_{i}", "when": "w",
+                                            "group": "g", "core": True},
+                           "parameters": []}} for i in range(5)}}
+    picked = select(tools_from_spec(many_core), limit=2)
+    assert len(picked) == 5
