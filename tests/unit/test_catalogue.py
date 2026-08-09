@@ -63,7 +63,7 @@ def test_empty_registries_produce_no_block():
 async def test_one_registry_failing_still_yields_a_block():
     """Losing the Atlas must not cost us the graph, and vice versa."""
     class HalfBroken:
-        async def get(self, url, timeout=None):  # noqa: ARG002
+        async def get(self, url, timeout=None):  # pylint: disable=unused-argument
             if "atlas" in url:
                 raise RuntimeError("atlas down")
             return _Resp(GRAPH)
@@ -79,7 +79,7 @@ async def test_cache_serves_second_call_without_refetching():
     calls = {"n": 0}
 
     class Counting:
-        async def get(self, url, timeout=None):  # noqa: ARG002
+        async def get(self, url, timeout=None):  # pylint: disable=unused-argument
             calls["n"] += 1
             return _Resp(GRAPH if "graph" in url else DATASETS)
 
@@ -95,7 +95,7 @@ async def test_cache_serves_second_call_without_refetching():
 async def test_total_outage_degrades_to_empty_not_error():
     """A slow dashboard endpoint must never fail the user's turn."""
     class Dead:
-        async def get(self, url, timeout=None):  # noqa: ARG002
+        async def get(self, url, timeout=None):  # pylint: disable=unused-argument
             raise RuntimeError("everything is down")
 
     assert await CatalogueCache().get(Dead(), "http://api") == ""

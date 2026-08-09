@@ -59,7 +59,11 @@ async def fetch_catalogue(client: httpx.AsyncClient, gmr_api_url: str) -> dict:
     base = gmr_api_url.rstrip("/")
     try:
         payload = await _get_json(client, f"{base}/catalogue")
-        if isinstance(payload, dict) and payload.get("producers"):
+        # Presence of the key, not truthiness of the list. A platform that
+        # legitimately has zero described producers has still answered the
+        # question, and falling back there would fire two more requests to
+        # relearn less.
+        if isinstance(payload, dict) and "producers" in payload:
             return {
                 "producers": payload.get("producers") or [],
                 "datasets": payload.get("datasets") or [],

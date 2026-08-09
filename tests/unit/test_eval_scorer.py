@@ -12,7 +12,11 @@ import yaml
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "evals"))
 
-# pylint: disable=wrong-import-position
+# `evals` is a sibling tree, not a package, so pylint cannot resolve it
+# statically. The sys.path insert above is what makes it importable at run
+# time; keeping the eval code out of src/ is deliberate — it is a harness,
+# not shipped behaviour.
+# pylint: disable=wrong-import-position,import-error
 from scorer import (  # noqa: E402
     COMPLETION, GROUNDING, HONESTY, LANGUAGE, NAVIGATION, TOOL_CALLING,
     Trace, ToolCall, aggregate, detect_language, numeric_claims, score_trace,

@@ -51,7 +51,7 @@ class _FakeResponse:
 class _FakeAsyncClient:
     """Stand-in for ``httpx.AsyncClient`` that returns scripted responses.
 
-    The freshness endpoint (``/data-quality/source-freshness``) is hit
+    The freshness endpoint (``/data-quality/freshness``) is hit
     once at the top of every ``stream`` call. To keep the existing tests
     readable, we auto-respond with an empty sources list unless the
     test explicitly scripts a freshness response by passing
@@ -67,6 +67,11 @@ class _FakeAsyncClient:
         self._freshness_response = freshness_response or _FakeResponse(
             200, {"sources": [], "generated_at": None},
         )
+        # Empty by default: the catalogue is a nicety, and a test that does
+        # not opt into it should see the same prompt it always did.
+        self._catalogue_response = _FakeResponse(
+            200, {"producers": [], "datasets": []},
+        )
         self.calls: list[dict] = []
 
     async def __aenter__(self):
@@ -81,9 +86,34 @@ class _FakeAsyncClient:
 
     async def get(self, url, params=None, **_):
         self.calls.append({"method": "GET", "url": url, "params": params})
-        if "source-freshness" in url:
+        # Context blocks are fetched per turn and are not part of the
+        # scripted tool exchange. Matching them here keeps every test from
+        # having to script a response it does not care about — and matching
+        # on the real paths means a path regression breaks these tests
+        # rather than being silently swallowed, which is how the old
+        # source-freshness 404 survived so long.
+        if "/catalogue" in url:
+            return self._catalogue_response
+        if "/data-quality/graph" in url or "/atlas/datasets" in url:
+            # Pre-/catalogue fallback shape. Answered here so a deployment
+            # that predates /catalogue does not consume scripted turns.
+            return _FakeResponse(200, {"nodes": {}} if "graph" in url else [])
+        if "freshness" in url:
             return self._freshness_response
         return self._script.pop(0)
+
+
+
+def _is_context_fetch(url: str) -> bool:
+    """Per-turn context blocks, not the business call a test is asserting on.
+
+    Kept as one predicate so adding another context source does not mean
+    hunting down every filter that has to learn about it — which is how the
+    old source-freshness path stayed wrong in three places at once.
+    """
+    return any(part in url for part in
+               ("freshness", "/catalogue", "/data-quality/graph",
+                "/atlas/datasets"))
 
 
 def _ai(content: str) -> _FakeResponse:
@@ -183,7 +213,7 @@ async def test_tool_call_round_trip_to_search_endpoint():
     # the freshness probe that now fires at the top of every stream().
     get_calls = [
         c for c in fake.calls
-        if c["method"] == "GET" and "source-freshness" not in c["url"]
+        if c["method"] == "GET" and not _is_context_fetch(c["url"])
     ]
     # The search itself — asserted by URL rather than by position, since
     # the turn now continues past it rather than stopping there.
@@ -241,7 +271,7 @@ async def test_propose_edit_forwards_args_as_proposal():
     # notification. (The freshness probe is allowed.)
     business_gets = [
         c for c in fake.calls
-        if c["method"] == "GET" and "source-freshness" not in c["url"]
+        if c["method"] == "GET" and not _is_context_fetch(c["url"])
     ]
     assert not business_gets
 
@@ -353,7 +383,7 @@ async def test_investigate_entity_dispatches_company_then_authority():
 
     get_urls = [
         c["url"] for c in fake.calls
-        if c["method"] == "GET" and "source-freshness" not in c["url"]
+        if c["method"] == "GET" and not _is_context_fetch(c["url"])
     ]
     # Tries company first, then authority
     assert get_urls[0] == "http://fake/companies/abc-123"
@@ -626,7 +656,7 @@ async def test_freshness_summary_cached_across_turns():
 
     freshness_calls = [
         c for c in fake.calls
-        if c["method"] == "GET" and "source-freshness" in c["url"]
+        if c["method"] == "GET" and "freshness" in c["url"]
     ]
     assert len(freshness_calls) == 1
 
