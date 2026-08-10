@@ -181,6 +181,18 @@ class LangGraphProxyClient:
             yield _sse("error", {"error": "Missing message"})
             return
 
+        # A caller spending their OWN provider key must not be quietly
+        # rerouted to the platform's local model: different model, different
+        # bill, and no way for them to tell. This executor has no credential
+        # path yet, so it hands those turns back to the native client rather
+        # than pretending. Zero users are affected today (user_llm_credentials
+        # is empty in production) — this exists so that stays true the moment
+        # someone configures one.
+        if payload.get("credential"):
+            async for event in self._native.stream(payload):
+                yield event
+            return
+
         system = _system_prompt_with_today(payload.get("system", ""))
         nav = payload.get("nav") or {}
         nav_routes = nav.get("routes") or []
