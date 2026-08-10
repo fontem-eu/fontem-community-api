@@ -123,3 +123,30 @@ def test_di_selects_the_engine_from_the_environment(monkeypatch):
 
     monkeypatch.delenv(lg.ENGINE_ENV)
     assert not isinstance(AssistantProvider().proxy_client(), lg.LangGraphProxyClient)
+
+
+@pytest.mark.asyncio
+async def test_a_byok_turn_is_handed_back_to_the_native_client():
+    """Never silently downgrade someone spending their own key.
+
+    This executor has no credential path. Without this guard a user with
+    their own provider key configured would be rerouted to the platform's
+    local model — different model, different bill, and nothing in the UI
+    saying so. Zero users are affected today; the guard is what keeps that
+    true when the first one configures a key.
+    """
+    client = lg.LangGraphProxyClient(local_url="http://llm")
+    sent = []
+
+    async def fake_native_stream(payload):
+        sent.append(payload)
+        yield 'event: chunk\ndata: {"text":"from native"}\n\n'
+
+    # pylint: disable=protected-access
+    client._native.stream = fake_native_stream
+    body = "".join([e async for e in client.stream({
+        "message": "hi", "credential": ("mistral", "sk-user-key", "magistral-medium-latest"),
+    })])
+    assert "from native" in body
+    assert len(sent) == 1, "the turn never reached the native client"
+    assert "langgraph engine requires" not in body

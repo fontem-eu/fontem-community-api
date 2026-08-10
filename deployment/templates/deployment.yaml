@@ -66,6 +66,12 @@ spec:
               value: {{ .Values.localLlmUrl | default "http://llama-server.llm-service.svc.cluster.local:8080" | quote }}
             - name: LOCAL_LLM_MODEL
               value: {{ .Values.localLlmModel | default "qwen3-4b" | quote }}
+            # Which assistant executor runs the turn. Unset, or anything
+            # other than "langgraph", keeps the native tool loop — the
+            # tuned one. See src/assistant/langgraph_client.py for what
+            # the LangGraph path does and does not yet carry.
+            - name: ASSISTANT_ENGINE
+              value: {{ .Values.assistantEngine | default "" | quote }}
             - name: MISTRAL_MODEL
               value: {{ .Values.mistralModel | default "mistral-small-latest" | quote }}
             - name: MISTRAL_API_KEY
