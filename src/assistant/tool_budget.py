@@ -26,10 +26,16 @@ MAX_TOOL_RESULT_CHARS = 8_000
 #:
 #: The per-result cap alone does not bound the turn: `_MAX_TOOL_ITERATIONS`
 #: is 10, and ten 8k results overflow a 16k-token window on their own. Sized
-#: against the smallest context we serve — 16384 tokens, roughly 65k
-#: characters — which must also carry the system prompt, the catalogue
-#: block, the tool schemas and up to `TurnLimits.max_chars` of history.
-MAX_TOOL_RESULT_CHARS_PER_TURN = 24_000
+#: Sized against the smallest context we serve: 16384 tokens.
+#:
+#: 24_000 was the first estimate, derived from a 4 chars/token rule of
+#: thumb. It cut the observed overflow from 36458 tokens to 16624 — still
+#: over, by 240. The rule of thumb was the error: JSON tool output is
+#: punctuation-dense and runs closer to 3 chars/token, so the same
+#: characters buy fewer tokens than assumed. 14_000 leaves real headroom
+#: for the system prompt, the catalogue block, the tool schemas and up to
+#: `TurnLimits.max_chars` of history, measured rather than estimated.
+MAX_TOOL_RESULT_CHARS_PER_TURN = 14_000
 
 TRUNCATED_MARKER = (
     '\n\n[... truncated: {dropped} of {total} characters omitted. '
