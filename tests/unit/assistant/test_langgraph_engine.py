@@ -10,10 +10,12 @@ These tests do not exercise LangGraph itself (that is its own test suite).
 They pin the seams: the flag, the tool surface, the failure mode when the
 dependency is absent, and the SSE vocabulary.
 """
+import pathlib
+
 import pytest
 
 from src.assistant import langgraph_client as lg
-from src.assistant import tool_budget
+from src.assistant import local_models, tool_budget
 from src.assistant import navigation
 from src.assistant.mistral_client import _turn_tools
 
@@ -150,3 +152,19 @@ async def test_a_byok_turn_is_handed_back_to_the_native_client():
     assert "from native" in body
     assert len(sent) == 1, "the turn never reached the native client"
     assert "langgraph engine requires" not in body
+
+
+def test_the_model_id_is_resolved_to_the_name_the_server_serves():
+    """A router serves "qwen3-4b-q4_k_m", not "qwen3-4b".
+
+    Passing the id straight through is a 400 from llama-server, and it took
+    the assistant down in production the moment this executor was switched
+    on: the flag was correct, the env was correct, and every turn failed.
+    The native client has always resolved through local_models.
+    """
+    assert local_models.resolve("qwen3-4b").served_name == "qwen3-4b-q4_k_m"
+    assert local_models.resolve("qwen3-1.7b").served_name == "qwen3-1.7b-q4_k_m"
+    # and the executor must be reaching for that, not the bare id
+    src = pathlib.Path(lg.__file__).read_text("utf-8")
+    assert "local_models.resolve(" in src
+    assert "served_name" in src

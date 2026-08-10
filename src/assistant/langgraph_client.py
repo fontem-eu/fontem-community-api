@@ -44,7 +44,12 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from src.assistant import generated_tools, navigation, tool_budget
+from src.assistant import (
+    generated_tools,
+    local_models,
+    navigation,
+    tool_budget,
+)
 from src.assistant.mistral_client import (
     _DEFAULT_GMR_API,
     _TOOLS,
@@ -229,8 +234,17 @@ class LangGraphProxyClient:
                 tools = self._build_tools(
                     client, structured_tool, specs, nav_routes, seen, budget,
                 )
+                # What the id resolves to on the server, not the id itself.
+                # The production agent runs in router mode and serves
+                # "qwen3-4b-q4_k_m"; asking it for "qwen3-4b" is a 400,
+                # which took the assistant down the moment this executor
+                # was switched on. The native client has always gone
+                # through local_models.resolve() for exactly this.
+                served = local_models.resolve(
+                    payload.get("local_model_id") or self._local_model,
+                ).served_name
                 llm = chat_openai(
-                    model=payload.get("local_model_id") or self._local_model,
+                    model=served,
                     base_url=self._local_url.rstrip("/") + "/v1",
                     api_key="none", temperature=0.3, timeout=300.0,
                 )
