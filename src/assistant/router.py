@@ -53,6 +53,16 @@ class AssistChatBody(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_key: str = Field(..., min_length=1)
     context_block: str = ""
+    has_editor: bool | None = Field(
+        None,
+        description=(
+            "Whether the caller has an editing surface to propose into. "
+            "The client knows this — it holds the report id and the editor "
+            "state, and needs both to apply a proposal. None means an older "
+            "client that does not send it, and the server falls back to "
+            "inferring it from context_block."
+        ),
+    )
     nav: dict | None = Field(
         None,
         description=(
@@ -131,6 +141,7 @@ async def chat_stream(
         conversation_key=body.conversation_key,
         message=body.message,
         context_block=body.context_block,
+        has_editor=body.has_editor,
         nav=body.nav,
         credential=credential,
         local_model_id=local_model_id,
