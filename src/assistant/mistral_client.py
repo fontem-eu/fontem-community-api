@@ -49,7 +49,7 @@ from src.assistant.freshness import _format_freshness_summary
 from src.assistant.language import _language_directive
 from src.assistant.catalogue import CatalogueCache
 
-from src.assistant import local_models, navigation
+from src.assistant import local_models, navigation, tool_budget
 from src.assistant.entities import (
     _build_summary,
     _capture_names,
@@ -568,6 +568,10 @@ class MistralProxyClient:
         # call to .stream()), so ids that update mid-conversation are
         # never staler than one user turn.
         tool_cache: dict[str, str] = {}
+        # Spent across the whole turn, not per round: the conversation is
+        # re-sent in full on every round, so it is the running total that
+        # has to fit the context, not any single result.
+        result_budget = tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN
         name_cache: dict[str, str] = {}
         proposal_count = 0
         # Tools invoked so far this turn, and how many times we have made
@@ -776,11 +780,19 @@ class MistralProxyClient:
                             except (ValueError, TypeError):
                                 pass
 
+                        # Capped on the way into the conversation, not at
+                        # the executor and not in the cache: the executor's
+                        # full result is still what `_capture_names` reads,
+                        # and a cached repeat is appended again, so it must
+                        # be charged again.
+                        capped, result_budget = tool_budget.cap_tool_result(
+                            result, result_budget,
+                        )
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.get("id") or "",
                             "name": name,
-                            "content": result,
+                            "content": capped,
                         })
 
                 # Loop exhausted without a final response. Emit a
