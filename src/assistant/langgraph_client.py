@@ -46,6 +46,7 @@ import httpx
 
 from src.assistant import generated_tools, navigation, tool_budget
 from src.assistant.mistral_client import (
+    _DEFAULT_GMR_API,
     _TOOLS,
     _sse,
     _system_prompt_with_today,
@@ -116,7 +117,7 @@ class LangGraphProxyClient:
     """
 
     def __init__(self, *, api_key: str = "", model: str = "",
-                 gmr_api_url: str = "http://fontem-api",
+                 gmr_api_url: str = _DEFAULT_GMR_API,
                  local_url: str = "", local_model: str = "") -> None:
         self._native = MistralProxyClient(
             api_key=api_key, model=model, gmr_api_url=gmr_api_url,
@@ -230,6 +231,40 @@ class LangGraphProxyClient:
             yield _sse("error", {"error": f"{type(exc).__name__}: {exc}"})
         yield _sse("done", {})
 
+    def _announce(self, seen: list, announced: int, name_cache: dict,
+                  start: float):
+        """Emit one status per tool call the graph has run but not announced.
+
+        Returns the events and the new watermark. Split out of the stream
+        loop because announcing calls and relaying tokens are two different
+        jobs that happen to arrive on the same iterator.
+        """
+        events = []
+        while announced < len(seen):
+            name, args = seen[announced]
+            announced += 1
+            status = {
+                "phase": "tool_use", "tool": name,
+                "detail": _tool_detail(name, args, name_cache),
+                "elapsed": round(time.time() - start, 1),
+            }
+            # The frontend renders the Apply card off this field.
+            if name == "mcp__gmr__propose_edit":
+                status["proposal"] = args
+            events.append(_sse("status", status))
+        return events, announced
+
+    @staticmethod
+    def _text_of(msg) -> str:
+        """Plain text from a message, whether it is a string or content blocks."""
+        if getattr(msg, "tool_call_chunks", None):
+            return ""
+        text = getattr(msg, "content", "") or ""
+        if isinstance(text, list):
+            return "".join(b.get("text", "") for b in text
+                           if isinstance(b, dict))
+        return text
+
     async def _run(self, agent, message: str, start: float,
                    seen: list) -> AsyncIterator[str]:
         """Translate the graph's event stream into our SSE vocabulary.
@@ -250,28 +285,14 @@ class LangGraphProxyClient:
             config={"recursion_limit": MAX_ITERATIONS * 2},
         ):
             if mode == "updates":
-                # A tool node ran: announce every call we have not announced.
-                while announced < len(seen):
-                    name, args = seen[announced]
-                    announced += 1
-                    status = {
-                        "phase": "tool_use", "tool": name,
-                        "detail": _tool_detail(name, args, name_cache),
-                        "elapsed": round(time.time() - start, 1),
-                    }
-                    # The frontend renders the Apply card off this field.
-                    if name == "mcp__gmr__propose_edit":
-                        status["proposal"] = args
-                    yield _sse("status", status)
+                events, announced = self._announce(
+                    seen, announced, name_cache, start)
+                for ev in events:
+                    yield ev
                 continue
 
             msg, _meta = chunk
-            text = getattr(msg, "content", "") or ""
-            if getattr(msg, "tool_call_chunks", None) or not text:
-                continue
-            if isinstance(text, list):      # standard content blocks
-                text = "".join(b.get("text", "") for b in text
-                               if isinstance(b, dict))
+            text = self._text_of(msg)
             if not text:
                 continue
             if not streaming:
