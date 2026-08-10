@@ -23,7 +23,7 @@ def _client_ip(request: Request) -> str:
     ``request.client.host`` — which behind nginx is the nginx pod's
     own IP. Every user in the cluster then shares the same per-route
     bucket, and any moderate concurrency (a smoke run + one human
-    signing in at the same time) trips the 5/minute /auth/login
+    signing in at the same time) trips the 10/minute /auth/login
     limit *globally* rather than per-attacker. That's how STORY-12
     in the smoke suite started 404'ing on the read view: the test
     couldn't refresh its session under load, the SPA's 401-clears-

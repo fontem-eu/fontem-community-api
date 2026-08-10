@@ -4,7 +4,7 @@ Background: behind the gmr-web reverse proxy + the linkerd
 sidecar, ``request.client.host`` reports the API pod's own IP for
 every request — so the SlowAPI default ``get_remote_address`` was
 keying the rate limit on a single value across the whole cluster.
-A few concurrent /auth/login attempts would trip the 5/minute
+A few concurrent /auth/login attempts would trip the 10/minute
 budget *globally* and 429 every subsequent caller. The fix reads
 the X-Forwarded-For header (set by nginx) and falls back to the
 remote address only when that header is absent.

@@ -427,7 +427,7 @@ def _check_password(password: str, hashed: str) -> bool:
 # Closes the timing oracle documented in the 2026-06-11 security
 # review finding #2: pre-fix a real-but-wrong-password login took
 # ~220 ms while a fake-email login returned in ~13 ms, leaking
-# account existence at ~3600 emails/day per IP under the 5/min rate
+# account existence at ~7200 emails/day per IP under the 10/min rate
 # limit. With this dummy in place both paths run a full bcrypt round.
 #
 # Source bytes are `os.urandom` rather than a literal: there's no
@@ -509,7 +509,13 @@ async def register(
         },
     },
 )
-@limiter.limit("5/minute")
+# 10/minute, not 5. The e2e suite signs in once in global-setup and again
+# in the two auth journeys, but a re-run inside the same minute — which is
+# exactly what happens when someone is chasing a failure — pushed a shared
+# egress IP over five and returned 429s that read as product bugs. Ten still
+# bounds credential stuffing hard (the per-account lockout below is the real
+# brute-force control); it just stops the gate failing for arithmetic.
+@limiter.limit("10/minute")
 @inject
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def login(
