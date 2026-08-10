@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from src.assistant.context import TurnLimits
+from src.assistant import langgraph_client
 from src.assistant.mistral_client import MistralProxyClient
 from src.assistant.pg_repository import PgAssistRepository
 from src.assistant.proxy_client import ClaudeProxyClient
@@ -501,6 +502,20 @@ class AssistantProvider(Provider):
     def proxy_client(self) -> ProxyClient:
         provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
         if provider == "mistral":
+            # A second executor, same ProxyClient protocol, chosen by
+            # ASSISTANT_ENGINE. Off unless explicitly asked for, so the
+            # native loop stays the default everywhere until the two have
+            # been compared on the same battery.
+            if langgraph_client.engine_selected():
+                return langgraph_client.LangGraphProxyClient(
+                    api_key=os.environ.get("MISTRAL_API_KEY", ""),
+                    model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
+                    gmr_api_url=os.environ.get(
+                        "GMR_API_INTERNAL", "http://fontem-api",
+                    ),
+                    local_url=os.environ.get("LOCAL_LLM_URL", ""),
+                    local_model=os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b"),
+                )
             return MistralProxyClient(
                 api_key=os.environ.get("MISTRAL_API_KEY", ""),
                 model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
