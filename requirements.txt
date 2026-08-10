@@ -49,3 +49,10 @@ python-multipart>=0.0.30
 slowapi>=0.1.9
 
 # (retrigger CI to pick up sbom-generate v2 + DT NVD/OSV DB — see void42/ci-actions#6)
+
+# Second assistant executor, behind ASSISTANT_ENGINE=langgraph. Imported
+# lazily so a deployment on the native engine never pays for it, but pinned
+# here because the image has to contain it for the flag to be flippable.
+langchain>=1.3.14
+langchain-openai>=1.4.3
+langgraph>=1.2.10
