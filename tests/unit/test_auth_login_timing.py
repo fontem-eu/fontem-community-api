@@ -4,7 +4,7 @@
 Pre-fix the handler short-circuited on `user is None` before running
 bcrypt, so a missing-email login returned ~13 ms while a real-but-
 wrong-password login took ~220 ms. That ~200 ms gap, combined with
-the 5/min per-IP rate limit, let an attacker confirm ~3,600 email
+the 10/min per-IP rate limit, let an attacker confirm ~7,200 email
 registrations/day per IP — a botnet trivially parallelised that to
 full enumeration.
 
