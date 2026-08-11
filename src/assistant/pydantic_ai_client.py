@@ -202,50 +202,53 @@ class PydanticAIProxyClient:
                    start: float) -> AsyncIterator[str]:
         """Translate PydanticAI's event stream into our SSE vocabulary.
 
-        Narrow on purpose: the panel understands five event types and five
-        status phases, and emitting anything else would be a contract change
-        dressed as an implementation detail.
+        The per-event decision lives in `_translate`, flat, rather than as a
+        branch chain nested inside this loop -- same behaviour, but readable
+        without holding the loop state in your head.
         """
-        name_cache: dict[str, str] = {}
-        streaming = False
-        text_len = 0
-        usage = {"input_tokens": 0, "output_tokens": 0}
-
+        state = {"streaming": False, "text_len": 0, "name_cache": {},
+                 "usage": {"input_tokens": 0, "output_tokens": 0}}
         async with agent.run_stream_events(message) as events:
             async for ev in events:
-                kind = getattr(ev, "event_kind", "")
+                for out in self._translate(ev, state, start):
+                    yield out
 
-                if kind == "function_tool_call":
-                    yield self._tool_status(ev, name_cache, start)
-                    continue
-
-                if kind == "final_result" and not streaming:
-                    streaming = True
-                    yield _sse("status", {
-                        "phase": "streaming", "detail": "Writing response...",
-                        "elapsed": round(time.time() - start, 1)})
-                    continue
-
-                if kind == "part_delta":
-                    text = self._delta_text(ev)
-                    if text:
-                        text_len += len(text)
-                        yield _sse("chunk", {"text": text})
-                    continue
-
-                if kind == "function_tool_result":
-                    yield self._result_trace(ev, start)
-                    continue
-
-                if kind == "agent_run_result":
-                    usage = self._usage_of(ev) or usage
-
-        if not text_len:
+        if not state["text_len"]:
             yield _sse("status", {
                 "phase": "truncated",
                 "detail": "The assistant produced no output this turn.",
                 "elapsed": round(time.time() - start, 1)})
-        yield _sse("usage", usage)
+        yield _sse("usage", state["usage"])
+
+    def _translate(self, ev, state: dict, start: float) -> list[str]:
+        """SSE events for one PydanticAI event. Empty for the ones the panel
+        has no vocabulary for, which is most of them."""
+        kind = getattr(ev, "event_kind", "")
+
+        if kind == "function_tool_call":
+            return [self._tool_status(ev, state["name_cache"], start)]
+
+        if kind == "function_tool_result":
+            return [self._result_trace(ev, start)]
+
+        if kind == "agent_run_result":
+            state["usage"] = self._usage_of(ev) or state["usage"]
+            return []
+
+        if kind != "part_delta":
+            return []
+
+        text = self._delta_text(ev)
+        if not text:
+            return []
+        state["text_len"] += len(text)
+        out = [_sse("chunk", {"text": text})]
+        if not state["streaming"]:
+            state["streaming"] = True
+            out.insert(0, _sse("status", {
+                "phase": "streaming", "detail": "Writing response...",
+                "elapsed": round(time.time() - start, 1)}))
+        return out
 
     @staticmethod
     def _result_trace(ev, start: float) -> str:

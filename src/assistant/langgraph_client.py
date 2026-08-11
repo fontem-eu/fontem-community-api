@@ -295,19 +295,41 @@ class LangGraphProxyClient:
                 tname, targs, tresult, time.time() - start, raw_len=traw)))
         return out
 
+    def _on_message(self, chunk, state: dict, start: float) -> list[str]:
+        """SSE events for one streamed message chunk. Empty for the chunks
+        that carry no prose, which is most of them — tool-call fragments
+        arrive on the same stream."""
+        msg, _meta = chunk
+        text = self._text_of(msg)
+        if not text:
+            return []
+        out = []
+        if not state["streaming"]:
+            state["streaming"] = True
+            out.append(_sse("status", {"phase": "streaming",
+                                       "detail": "Writing response...",
+                                       "elapsed": round(time.time() - start, 1)}))
+        state["text_len"] += len(text)
+        out.append(_sse("chunk", {"text": text}))
+        meta = getattr(msg, "usage_metadata", None) or {}
+        if meta:
+            state["usage"]["input_tokens"] = max(
+                state["usage"]["input_tokens"], meta.get("input_tokens", 0))
+            state["usage"]["output_tokens"] += meta.get("output_tokens", 0)
+        return out
+
     async def _run(self, agent, message: str, start: float,
                    seen: list, traced: list) -> AsyncIterator[str]:
         """Translate the graph's event stream into our SSE vocabulary.
 
-        The mapping is deliberately narrow. The panel understands five event
-        types and five status phases; emitting anything else would be a
-        contract change disguised as an implementation detail.
+        Deliberately narrow: the panel understands five event types and five
+        status phases, and emitting anything else would be a contract change
+        disguised as an implementation detail. The per-chunk decision lives
+        in `_on_message`, flat, rather than nested inside this loop.
         """
-        name_cache: dict[str, str] = {}
-        announced = 0
-        streaming = False
-        text_len = 0
-        usage = {"input_tokens": 0, "output_tokens": 0}
+        state = {"announced": 0, "streaming": False, "text_len": 0,
+                 "name_cache": {},
+                 "usage": {"input_tokens": 0, "output_tokens": 0}}
 
         async for mode, chunk in agent.astream(
             {"messages": [{"role": "user", "content": message}]},
@@ -315,31 +337,16 @@ class LangGraphProxyClient:
             config={"recursion_limit": MAX_ITERATIONS * 2},
         ):
             if mode == "updates":
-                events, announced = self._announce(
-                    seen, announced, name_cache, start)
-                for ev in events:
-                    yield ev
-                for ev in self._drain_traces(traced, start):
+                events, state["announced"] = self._announce(
+                    seen, state["announced"], state["name_cache"], start)
+                for ev in events + self._drain_traces(traced, start):
                     yield ev
                 continue
+            for ev in self._on_message(chunk, state, start):
+                yield ev
 
-            msg, _meta = chunk
-            text = self._text_of(msg)
-            if not text:
-                continue
-            if not streaming:
-                streaming = True
-                yield _sse("status", {"phase": "streaming",
-                                      "detail": "Writing response...",
-                                      "elapsed": round(time.time() - start, 1)})
-            text_len += len(text)
-            yield _sse("chunk", {"text": text})
-            meta = getattr(msg, "usage_metadata", None) or {}
-            if meta:
-                usage["input_tokens"] = max(usage["input_tokens"],
-                                            meta.get("input_tokens", 0))
-                usage["output_tokens"] += meta.get("output_tokens", 0)
-
+        text_len = state["text_len"]
+        usage = state["usage"]
         if not text_len and not seen:
             yield _sse("status", {
                 "phase": "truncated",
