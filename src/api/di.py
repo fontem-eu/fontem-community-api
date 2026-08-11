@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from src.assistant.context import TurnLimits
-from src.assistant import langgraph_client
+from src.assistant import langgraph_client, pydantic_ai_client
 from src.assistant.mistral_client import (
     _DEFAULT_GMR_API,
     MistralProxyClient,
@@ -509,6 +509,16 @@ class AssistantProvider(Provider):
             # ASSISTANT_ENGINE. Off unless explicitly asked for, so the
             # native loop stays the default everywhere until the two have
             # been compared on the same battery.
+            if pydantic_ai_client.engine_selected():
+                return pydantic_ai_client.PydanticAIProxyClient(
+                    api_key=os.environ.get("MISTRAL_API_KEY", ""),
+                    model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
+                    gmr_api_url=os.environ.get(
+                        "GMR_API_INTERNAL", _DEFAULT_GMR_API,
+                    ),
+                    local_url=os.environ.get("LOCAL_LLM_URL", ""),
+                    local_model=os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b"),
+                )
             if langgraph_client.engine_selected():
                 return langgraph_client.LangGraphProxyClient(
                     api_key=os.environ.get("MISTRAL_API_KEY", ""),

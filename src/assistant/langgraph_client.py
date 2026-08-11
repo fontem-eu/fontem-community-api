@@ -50,9 +50,9 @@ from src.assistant import (
     navigation,
     tool_budget,
 )
+from src.assistant.engine_tools import turn_tool_specs
 from src.assistant.mistral_client import (
     _DEFAULT_GMR_API,
-    _TOOLS,
     _sse,
     _system_prompt_with_today,
     _tool_detail,
@@ -94,22 +94,6 @@ def _import_langchain():
     except ImportError as exc:                      # pragma: no cover - env
         raise LangGraphUnavailable(str(exc)) from exc
     return create_agent, StructuredTool, ChatOpenAI
-
-
-def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
-                nav_routes: list) -> list[dict]:
-    """The same per-turn tool surface the native loop offers.
-
-    Reuses `scope_tools` and `generated_tools.select` rather than
-    reimplementing the scoping rules — the surface is a product decision
-    (navigate first, propose_edit only with an editor, core tools always)
-    and it must not drift between engines, or a comparison between them
-    measures the tool list instead of the loop.
-    """
-    specs = list(navigation.scope_tools(_TOOLS, has_editor=has_editor))
-    if nav_routes:
-        specs = [navigation.navigate_tool_schema()] + specs
-    return specs + list(generated_tools.select(gen_tools))
 
 
 class LangGraphProxyClient:
