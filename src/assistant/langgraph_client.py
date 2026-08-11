@@ -49,6 +49,7 @@ from src.assistant import (
     local_models,
     navigation,
     tool_budget,
+    tool_trace,
 )
 from src.assistant.engine_tools import turn_tool_specs
 from src.assistant.mistral_client import (
@@ -118,7 +119,7 @@ class LangGraphProxyClient:
 
     def _build_tools(self, client: httpx.AsyncClient, structured_tool,
                      specs: list[dict], nav_routes: list, seen: list,
-                     budget: list[int]):
+                     budget: list[int], traced: list):
         """Wrap our tool schemas as LangChain tools over the shared executor.
 
         ``budget`` is a one-element list so the closures can spend a single
@@ -154,6 +155,9 @@ class LangGraphProxyClient:
                     client, _name, kwargs,
                 )
                 capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
+                # Stash for the trace event: this closure cannot yield, so
+                # the result rides along and _announce emits it.
+                traced.append((_name, kwargs, capped, len(raw)))
                 return capped
 
             tools.append(structured_tool(
@@ -215,8 +219,10 @@ class LangGraphProxyClient:
                 )
                 specs = turn_tool_specs(gen_tools, has_editor, nav_routes)
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
+                traced: list = []
                 tools = self._build_tools(
                     client, structured_tool, specs, nav_routes, seen, budget,
+                    traced,
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves
@@ -234,7 +240,7 @@ class LangGraphProxyClient:
                 )
                 agent = create_agent(model=llm, tools=tools,
                                      system_prompt=system)
-                async for event in self._run(agent, message, start, seen):
+                async for event in self._run(agent, message, start, seen, traced):
                     yield event
         except (httpx.HTTPError, ValueError, TypeError, KeyError,
                 RuntimeError) as exc:
@@ -276,7 +282,7 @@ class LangGraphProxyClient:
         return text
 
     async def _run(self, agent, message: str, start: float,
-                   seen: list) -> AsyncIterator[str]:
+                   seen: list, traced: list) -> AsyncIterator[str]:
         """Translate the graph's event stream into our SSE vocabulary.
 
         The mapping is deliberately narrow. The panel understands five event
@@ -299,6 +305,11 @@ class LangGraphProxyClient:
                     seen, announced, name_cache, start)
                 for ev in events:
                     yield ev
+                while traced:
+                    tname, targs, tresult, traw = traced.pop(0)
+                    yield _sse(tool_trace.EVENT, tool_trace.trace(
+                        tname, targs, tresult, time.time() - start,
+                        raw_len=traw))
                 continue
 
             msg, _meta = chunk

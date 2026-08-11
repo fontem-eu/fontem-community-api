@@ -39,7 +39,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from src.assistant import local_models, navigation, tool_budget
+from src.assistant import local_models, navigation, tool_budget, tool_trace
 from src.assistant.engine_tools import turn_tool_specs
 from src.assistant import generated_tools
 from src.assistant.mistral_client import (
@@ -232,6 +232,14 @@ class PydanticAIProxyClient:
                     if text:
                         text_len += len(text)
                         yield _sse("chunk", {"text": text})
+                    continue
+
+                if kind == "function_tool_result":
+                    part = getattr(ev, "part", None)
+                    yield _sse(tool_trace.EVENT, tool_trace.trace(
+                        getattr(part, "tool_name", "") or "",
+                        {}, getattr(part, "content", "") or "",
+                        time.time() - start))
                     continue
 
                 if kind == "agent_run_result":

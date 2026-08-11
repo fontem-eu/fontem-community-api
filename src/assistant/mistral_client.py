@@ -49,7 +49,7 @@ from src.assistant.freshness import _format_freshness_summary
 from src.assistant.language import _language_directive
 from src.assistant.catalogue import CatalogueCache
 
-from src.assistant import local_models, navigation, tool_budget
+from src.assistant import local_models, navigation, tool_trace, tool_budget
 from src.assistant.entities import (
     _build_summary,
     _capture_names,
@@ -788,6 +788,9 @@ class MistralProxyClient:
                         capped, result_budget = tool_budget.cap_tool_result(
                             result, result_budget,
                         )
+                        yield _sse(tool_trace.EVENT, tool_trace.trace(
+                            name, args, capped, time.time() - start,
+                            raw_len=len(result)))
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.get("id") or "",
