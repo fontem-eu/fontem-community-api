@@ -281,6 +281,20 @@ class LangGraphProxyClient:
                            if isinstance(b, dict))
         return text
 
+    @staticmethod
+    def _drain_traces(traced: list, start: float) -> list[str]:
+        """Trace events for tools that have finished since the last check.
+
+        Separate from the stream loop because the tool closures cannot
+        yield: they append here and this drains it.
+        """
+        out = []
+        while traced:
+            tname, targs, tresult, traw = traced.pop(0)
+            out.append(_sse(tool_trace.EVENT, tool_trace.trace(
+                tname, targs, tresult, time.time() - start, raw_len=traw)))
+        return out
+
     async def _run(self, agent, message: str, start: float,
                    seen: list, traced: list) -> AsyncIterator[str]:
         """Translate the graph's event stream into our SSE vocabulary.
@@ -305,11 +319,8 @@ class LangGraphProxyClient:
                     seen, announced, name_cache, start)
                 for ev in events:
                     yield ev
-                while traced:
-                    tname, targs, tresult, traw = traced.pop(0)
-                    yield _sse(tool_trace.EVENT, tool_trace.trace(
-                        tname, targs, tresult, time.time() - start,
-                        raw_len=traw))
+                for ev in self._drain_traces(traced, start):
+                    yield ev
                 continue
 
             msg, _meta = chunk

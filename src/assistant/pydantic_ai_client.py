@@ -227,19 +227,14 @@ class PydanticAIProxyClient:
                     continue
 
                 if kind == "part_delta":
-                    text = getattr(getattr(ev, "delta", None),
-                                   "content_delta", None)
+                    text = self._delta_text(ev)
                     if text:
                         text_len += len(text)
                         yield _sse("chunk", {"text": text})
                     continue
 
                 if kind == "function_tool_result":
-                    part = getattr(ev, "part", None)
-                    yield _sse(tool_trace.EVENT, tool_trace.trace(
-                        getattr(part, "tool_name", "") or "",
-                        {}, getattr(part, "content", "") or "",
-                        time.time() - start))
+                    yield self._result_trace(ev, start)
                     continue
 
                 if kind == "agent_run_result":
@@ -251,6 +246,20 @@ class PydanticAIProxyClient:
                 "detail": "The assistant produced no output this turn.",
                 "elapsed": round(time.time() - start, 1)})
         yield _sse("usage", usage)
+
+    @staticmethod
+    def _result_trace(ev, start: float) -> str:
+        """A tool_result event built from a finished tool call."""
+        part = getattr(ev, "part", None)
+        return _sse(tool_trace.EVENT, tool_trace.trace(
+            getattr(part, "tool_name", "") or "",
+            {}, getattr(part, "content", "") or "", time.time() - start))
+
+    @staticmethod
+    def _delta_text(ev) -> str:
+        """Prose from a delta, empty for the tool-argument deltas that share
+        the same event kind."""
+        return getattr(getattr(ev, "delta", None), "content_delta", None) or ""
 
     @staticmethod
     def _tool_status(ev, name_cache: dict, start: float) -> str:
