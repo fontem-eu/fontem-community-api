@@ -49,6 +49,7 @@ from src.assistant import (
     local_models,
     navigation,
     tool_budget,
+    tool_trace,
 )
 from src.assistant.engine_tools import turn_tool_specs
 from src.assistant.mistral_client import (
@@ -118,7 +119,7 @@ class LangGraphProxyClient:
 
     def _build_tools(self, client: httpx.AsyncClient, structured_tool,
                      specs: list[dict], nav_routes: list, seen: list,
-                     budget: list[int]):
+                     budget: list[int], traced: list):
         """Wrap our tool schemas as LangChain tools over the shared executor.
 
         ``budget`` is a one-element list so the closures can spend a single
@@ -154,6 +155,9 @@ class LangGraphProxyClient:
                     client, _name, kwargs,
                 )
                 capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
+                # Stash for the trace event: this closure cannot yield, so
+                # the result rides along and _announce emits it.
+                traced.append((_name, kwargs, capped, len(raw)))
                 return capped
 
             tools.append(structured_tool(
@@ -215,8 +219,10 @@ class LangGraphProxyClient:
                 )
                 specs = turn_tool_specs(gen_tools, has_editor, nav_routes)
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
+                traced: list = []
                 tools = self._build_tools(
                     client, structured_tool, specs, nav_routes, seen, budget,
+                    traced,
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves
@@ -234,7 +240,7 @@ class LangGraphProxyClient:
                 )
                 agent = create_agent(model=llm, tools=tools,
                                      system_prompt=system)
-                async for event in self._run(agent, message, start, seen):
+                async for event in self._run(agent, message, start, seen, traced):
                     yield event
         except (httpx.HTTPError, ValueError, TypeError, KeyError,
                 RuntimeError) as exc:
@@ -275,19 +281,55 @@ class LangGraphProxyClient:
                            if isinstance(b, dict))
         return text
 
+    @staticmethod
+    def _drain_traces(traced: list, start: float) -> list[str]:
+        """Trace events for tools that have finished since the last check.
+
+        Separate from the stream loop because the tool closures cannot
+        yield: they append here and this drains it.
+        """
+        out = []
+        while traced:
+            tname, targs, tresult, traw = traced.pop(0)
+            out.append(_sse(tool_trace.EVENT, tool_trace.trace(
+                tname, targs, tresult, time.time() - start, raw_len=traw)))
+        return out
+
+    def _on_message(self, chunk, state: dict, start: float) -> list[str]:
+        """SSE events for one streamed message chunk. Empty for the chunks
+        that carry no prose, which is most of them — tool-call fragments
+        arrive on the same stream."""
+        msg, _meta = chunk
+        text = self._text_of(msg)
+        if not text:
+            return []
+        out = []
+        if not state["streaming"]:
+            state["streaming"] = True
+            out.append(_sse("status", {"phase": "streaming",
+                                       "detail": "Writing response...",
+                                       "elapsed": round(time.time() - start, 1)}))
+        state["text_len"] += len(text)
+        out.append(_sse("chunk", {"text": text}))
+        meta = getattr(msg, "usage_metadata", None) or {}
+        if meta:
+            state["usage"]["input_tokens"] = max(
+                state["usage"]["input_tokens"], meta.get("input_tokens", 0))
+            state["usage"]["output_tokens"] += meta.get("output_tokens", 0)
+        return out
+
     async def _run(self, agent, message: str, start: float,
-                   seen: list) -> AsyncIterator[str]:
+                   seen: list, traced: list) -> AsyncIterator[str]:
         """Translate the graph's event stream into our SSE vocabulary.
 
-        The mapping is deliberately narrow. The panel understands five event
-        types and five status phases; emitting anything else would be a
-        contract change disguised as an implementation detail.
+        Deliberately narrow: the panel understands five event types and five
+        status phases, and emitting anything else would be a contract change
+        disguised as an implementation detail. The per-chunk decision lives
+        in `_on_message`, flat, rather than nested inside this loop.
         """
-        name_cache: dict[str, str] = {}
-        announced = 0
-        streaming = False
-        text_len = 0
-        usage = {"input_tokens": 0, "output_tokens": 0}
+        state = {"announced": 0, "streaming": False, "text_len": 0,
+                 "name_cache": {},
+                 "usage": {"input_tokens": 0, "output_tokens": 0}}
 
         async for mode, chunk in agent.astream(
             {"messages": [{"role": "user", "content": message}]},
@@ -295,29 +337,16 @@ class LangGraphProxyClient:
             config={"recursion_limit": MAX_ITERATIONS * 2},
         ):
             if mode == "updates":
-                events, announced = self._announce(
-                    seen, announced, name_cache, start)
-                for ev in events:
+                events, state["announced"] = self._announce(
+                    seen, state["announced"], state["name_cache"], start)
+                for ev in events + self._drain_traces(traced, start):
                     yield ev
                 continue
+            for ev in self._on_message(chunk, state, start):
+                yield ev
 
-            msg, _meta = chunk
-            text = self._text_of(msg)
-            if not text:
-                continue
-            if not streaming:
-                streaming = True
-                yield _sse("status", {"phase": "streaming",
-                                      "detail": "Writing response...",
-                                      "elapsed": round(time.time() - start, 1)})
-            text_len += len(text)
-            yield _sse("chunk", {"text": text})
-            meta = getattr(msg, "usage_metadata", None) or {}
-            if meta:
-                usage["input_tokens"] = max(usage["input_tokens"],
-                                            meta.get("input_tokens", 0))
-                usage["output_tokens"] += meta.get("output_tokens", 0)
-
+        text_len = state["text_len"]
+        usage = state["usage"]
         if not text_len and not seen:
             yield _sse("status", {
                 "phase": "truncated",
