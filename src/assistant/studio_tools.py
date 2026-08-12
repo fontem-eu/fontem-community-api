@@ -59,12 +59,8 @@ STUDIO_TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__studio_list_projects",
             "description": (
-                "List the user's Data Studio projects: id, name, and how "
-                "many queries and plots each holds. Call this FIRST when the "
-                "user mentions the Studio, a chart or an analysis — adding "
-                "to the project they already have is almost always what they "
-                "meant, and creating a second one with the same purpose is "
-                "the most common way to get this wrong."
+                "Lists the user's Data Studio projects: id, name, and how "
+                "many source queries and plots each holds."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -74,12 +70,9 @@ STUDIO_TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__studio_get_project",
             "description": (
-                "Read one project in full: its queries (id, name, language, "
-                "text) and its plots (id, name, chart spec). Query text is "
-                "abbreviated in the listing; pass `query_id` to get that one "
-                "in full. Read the project before editing anything in it — "
-                "the ids you need are here, and so is whether the query you "
-                "were about to write already exists."
+                "Returns one project in full: its source queries (id, name, "
+                "language, text) and its plots (id, name, chart spec). Query "
+                "text is abbreviated; `query_id` returns that one whole."
             ),
             "parameters": {
                 "type": "object",
@@ -102,10 +95,9 @@ STUDIO_TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__studio_create_project",
             "description": (
-                "Create a Data Studio project — the container for an "
+                "Creates a Data Studio project — the container for an "
                 "analysis, holding source queries and the plots built from "
-                "them. Only when no existing project fits: check "
-                "studio_list_projects first."
+                "them."
             ),
             "parameters": {
                 "type": "object",
@@ -149,15 +141,13 @@ STUDIO_TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__studio_add_query",
             "description": (
-                "Add a source query to a project. A source produces a table "
-                "of rows that plots then combine. Choose `lang` by which "
-                "store holds the data: 'cypher' for the knowledge graph "
-                "(companies, contracts, ownership), 'sql' for the statistics "
+                "Adds a source query to a project. A source produces a "
+                "table of rows that plots combine. `lang` selects the store "
+                "the query runs against: 'cypher' is the knowledge graph "
+                "(companies, contracts, ownership), 'sql' is the statistics "
                 "warehouse (Eurostat observations by region and year), "
-                "'sparql' for the RDF store (ontology and transitive "
-                "ownership queries). They are not interchangeable — write "
-                "the query in the language you named. Read the store's "
-                "documentation article first if you have not this turn."
+                "'sparql' is the RDF store (ontology and transitive "
+                "ownership). Each store speaks only its own language."
             ),
             "parameters": {
                 "type": "object",
@@ -194,10 +184,8 @@ STUDIO_TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__studio_update_query",
             "description": (
-                "Change an existing source query — its name, language or "
-                "text. Prefer this over adding a near-duplicate when the "
-                "user is refining a query they already have. Omitted fields "
-                "are left as they are."
+                "Changes an existing source query's name, language or "
+                "text. Omitted fields are left unchanged."
             ),
             "parameters": {
                 "type": "object",
@@ -220,11 +208,11 @@ STUDIO_TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__studio_add_plot",
             "description": (
-                "Add a plot: name one or more source queries, optionally "
-                "combine them with a DuckDB SQL transform that runs in the "
-                "browser, and chart the result. The transform is ALWAYS "
-                "DuckDB SQL regardless of which language produced the "
-                "sources — each source arrives as a table named after it."
+                "Adds a plot: one or more source queries, an optional "
+                "DuckDB SQL transform that runs in the browser, and the "
+                "chart settings. The transform is DuckDB SQL whatever "
+                "language produced the sources; each source arrives in it "
+                "as a table named after the source."
             ),
             "parameters": {
                 "type": "object",
@@ -242,9 +230,8 @@ STUDIO_TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__studio_update_plot",
             "description": (
-                "Change an existing plot's name or chart spec. Use this to "
-                "adjust a chart the user already has rather than adding "
-                "another. Omitted fields are left as they are."
+                "Changes an existing plot's name or chart spec. Omitted "
+                "fields are left unchanged."
             ),
             "parameters": {
                 "type": "object",

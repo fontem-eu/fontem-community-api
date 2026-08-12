@@ -69,14 +69,12 @@ _TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__search_entities",
             "description": (
-                "Search for companies, authorities, persons, or lobbyists "
-                "by name, ticker, or keyword. Use this first when the user "
-                "mentions an entity. Returns up to `limit` matches across "
-                "all entity types — pick one and call investigate_entity "
-                "to drill in. The graph holds duplicates: country "
-                "subsidiaries, spellings, punctuation. For counts and "
-                "totals, search the variants and iterate every hit rather "
-                "than reporting the first."
+                "Finds companies, authorities, persons and lobbyists by "
+                "name, ticker or keyword. Returns up to `limit` matches "
+                "across all entity types, each with its id, name, country "
+                "and label. The graph contains duplicate entities — country "
+                "subsidiaries, spelling and punctuation variants — so "
+                "several results may be the same organisation."
             ),
             "parameters": {
                 "type": "object",
@@ -93,13 +91,12 @@ _TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__investigate_entity",
             "description": (
-                "Get the full investigation packet for an entity: its props, "
-                "its EU procurement contracts, and its graph neighbourhood. "
-                "Works for Companies, Authorities, Lobbyists, and Persons — "
-                "the tool dispatches by label internally so the caller does "
-                "NOT need to know which type the id belongs to. Use this "
-                "after `search_entities`. The response carries a `summary` "
-                "field with a short prose précis suitable for direct quoting."
+                "Returns everything held about one entity: its properties, "
+                "its EU procurement contracts and its graph neighbourhood. "
+                "Works for Companies, Authorities, Lobbyists and Persons — "
+                "it dispatches by label internally, so the caller does not "
+                "need to know which type an id belongs to. The response "
+                "carries a `summary` field holding a short prose précis."
             ),
             "parameters": {
                 "type": "object",
@@ -150,17 +147,13 @@ _TOOLS: list[dict] = [
         "function": {
             "name": "mcp__gmr__propose_edit",
             "description": (
-                "Propose an edit to the user's report. The frontend renders "
-                "the proposal as an Apply/Reject card — the tool itself "
-                "does NOT mutate state. Supported actions: insert_content "
-                "(append HTML to the document), insert_widget (insert an "
-                "interactive widget node), update_title, update_abstract. "
-                "Call it once the analysis is done and you have specific "
-                "prose to add or replace, not to think out loud. "
-                "Multiple proposals sharing a `group_id` render as a "
-                "single grouped card the user can accept/reject as a "
-                "unit (use this when emitting a coherent set of edits "
-                "for one logical report unit)."
+                "Proposes an edit to the user's report. Renders as an "
+                "Apply/Reject card in the panel; the tool does not mutate "
+                "the document itself. Actions: insert_content appends HTML "
+                "to the document, insert_widget inserts an interactive "
+                "widget node, update_title and update_abstract replace "
+                "those fields. Proposals sharing a `group_id` render as one "
+                "card the user accepts or rejects as a unit."
             ),
             "parameters": {
                 "type": "object",
