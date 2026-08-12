@@ -264,22 +264,6 @@ STUDIO_TOOLS: list[dict] = [
 ]
 
 
-#: Names the frontend must recognise to execute an action. Kept here rather
-#: than duplicated in the panel so the two cannot drift; a parity test pins
-#: it against the JS list.
+#: The tool names the executor dispatches on. Nothing in the browser needs
+#: to recognise these any more — they run server-side.
 STUDIO_ACTIONS = tuple(t["function"]["name"] for t in STUDIO_TOOLS)
-
-
-def scope_studio(tools: list[dict], *, has_studio: bool) -> list[dict]:
-    """Offer the Studio tools only where they can actually be executed.
-
-    Same rule as `propose_edit` and for the same reason: a tool whose result
-    nothing can apply produces a proposal the user cannot accept, and the
-    model has no way to know why. `has_studio` is the client's own answer —
-    it knows whether the Studio is reachable for this user — rather than
-    something inferred here, which is the mistake that cost a day on
-    `has_editor`.
-    """
-    if has_studio:
-        return list(tools) + list(STUDIO_TOOLS)
-    return list(tools)

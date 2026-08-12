@@ -59,12 +59,23 @@ OFFERED_GENERATED = ("get_doc",)
 
 
 def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
-                    nav_routes: list, has_studio: bool = False) -> list[dict]:
-    """Tool schemas for one turn, in the order the model should see them."""
+                    nav_routes: list) -> list[dict]:
+    """Tool schemas for one turn, in the order the model should see them.
+
+    The Studio tools are unconditional. They run server-side against the
+    asking user's own account, so there is nothing to be "open" — and
+    requiring an open project was backwards: the agent has a tool to create
+    one, and gating on the UI meant it could not use it until the user had
+    already done the thing they were asking for.
+
+    `propose_edit` stays gated, because it genuinely needs a surface to
+    propose into. That is the difference: approval and application are UI
+    concerns, reading and writing the user's own projects are not.
+    """
     builtins = [t for t in _builtin_tools()
                 if t["function"]["name"] in OFFERED_BUILTINS]
     specs = list(navigation.scope_tools(builtins, has_editor=has_editor))
-    specs = studio_tools.scope_studio(specs, has_studio=has_studio)
+    specs = specs + list(studio_tools.STUDIO_TOOLS)
     if nav_routes:
         specs = [navigation.navigate_tool_schema()] + specs
     docs = [t for t in gen_tools
