@@ -53,6 +53,14 @@ class AssistChatBody(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_key: str = Field(..., min_length=1)
     context_block: str = ""
+    has_studio: bool | None = Field(
+        None,
+        description=(
+            "Whether the Data Studio is reachable for this caller. Gates the "
+            "studio tools, which the browser executes with the user's own "
+            "session — the server has no identity to create a project with."
+        ),
+    )
     has_editor: bool | None = Field(
         None,
         description=(
@@ -142,6 +150,7 @@ async def chat_stream(
         message=body.message,
         context_block=body.context_block,
         has_editor=body.has_editor,
+        has_studio=body.has_studio,
         nav=body.nav,
         credential=credential,
         local_model_id=local_model_id,

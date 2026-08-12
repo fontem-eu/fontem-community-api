@@ -39,7 +39,9 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from src.assistant import local_models, navigation, tool_budget, tool_trace
+from src.assistant import (
+    local_models, navigation, studio_tools, tool_budget, tool_trace,
+)
 from src.assistant.engine_tools import turn_tool_specs
 from src.assistant import generated_tools
 from src.assistant.mistral_client import (
@@ -166,6 +168,7 @@ class PydanticAIProxyClient:
         nav = payload.get("nav") or {}
         nav_routes = nav.get("routes") or []
         has_editor = bool(payload.get("has_editor"))
+        has_studio = bool(payload.get("has_studio"))
 
         yield _sse("status", {"phase": "connecting",
                               "detail": "Starting assistant...", "elapsed": 0})
@@ -174,7 +177,8 @@ class PydanticAIProxyClient:
                 gen_tools = await generated_tools.fetch_tools(
                     client, self._gmr_api_url,
                 )
-                specs = turn_tool_specs(gen_tools, has_editor, nav_routes)
+                specs = turn_tool_specs(gen_tools, has_editor, nav_routes,
+                                        has_studio)
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 tools = self._build_tools(
                     client, tool_cls, specs, nav_routes, budget,
@@ -283,6 +287,8 @@ class PydanticAIProxyClient:
         }
         if name == "mcp__gmr__propose_edit":
             status["proposal"] = args
+        elif name in studio_tools.STUDIO_ACTIONS:
+            status["studio_action"] = {"action": name, "args": args}
         return _sse("status", status)
 
     @staticmethod

@@ -49,7 +49,9 @@ from src.assistant.freshness import _format_freshness_summary
 from src.assistant.language import _language_directive
 from src.assistant.catalogue import CatalogueCache
 
-from src.assistant import local_models, navigation, tool_trace, tool_budget
+from src.assistant import (
+    local_models, navigation, studio_tools, tool_trace, tool_budget,
+)
 from src.assistant.entities import (
     _build_summary,
     _capture_names,
@@ -289,7 +291,8 @@ _FRESHNESS_TTL_SECONDS = 300
 _FRESHNESS_FETCH_TIMEOUT = 5.0
 
 
-def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
+def _turn_tools(nav_routes: list, has_editor: bool,
+                has_studio: bool = False) -> list[dict]:
     """The tool surface for one turn, scoped to the user's context.
 
     navigate goes FIRST, and that is load bearing rather than cosmetic.
@@ -309,6 +312,7 @@ def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
     order. There is no error, no warning — navigation just quietly stops.
     """
     tools = list(navigation.scope_tools(_TOOLS, has_editor=has_editor))
+    tools = studio_tools.scope_studio(tools, has_studio=has_studio)
     if nav_routes:
         return [navigation.navigate_tool_schema()] + tools
     return tools
@@ -529,6 +533,7 @@ class MistralProxyClient:
         # An editing surface is registered when the caller sent a report
         # context to work on. Drives which tools the model is offered.
         has_editor = bool(payload.get("has_editor"))
+        has_studio = bool(payload.get("has_studio"))
         message = payload.get("message", "")
 
         if not message:
@@ -629,7 +634,7 @@ class MistralProxyClient:
                             # Scoped to where the user actually is: no
                             # propose_edit without an editor, no navigate
                             # without a site map.
-                            "tools": _turn_tools(nav_routes, has_editor)
+                            "tools": _turn_tools(nav_routes, has_editor, has_studio)
                             + generated_tools.select(gen_tools),
                             # "required" only on a forced continuation.
                             # Left on permanently it would keep calling
@@ -751,6 +756,13 @@ class MistralProxyClient:
                         # Forward propose_edit args so the frontend renders the card.
                         if name == "mcp__gmr__propose_edit":
                             status["proposal"] = args
+                        elif name in studio_tools.STUDIO_ACTIONS:
+                            # Executed by the panel with the user's own
+                            # session; the server has no identity to write
+                            # a project with.
+                            status["studio_action"] = {
+                                "action": name, "args": args,
+                            }
                         yield _sse("status", status)
 
                         # Per-turn tool-call dedup. Identical (name, args)
