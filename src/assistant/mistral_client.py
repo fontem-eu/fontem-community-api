@@ -870,6 +870,51 @@ class MistralProxyClient:
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
             return json.dumps({"error": str(exc)[:200]})
 
+    #: The labels an id may resolve to, and the endpoint that serves each.
+    #: Order is dispatch order — companies are the common case.
+    _PROFILE_ENDPOINTS = (("Company", "companies"), ("Authority", "authorities"))
+
+    async def _resolve_profile(
+        self, client: httpx.AsyncClient, entity_id: str,
+    ) -> tuple[str, dict]:
+        """Find which label an id belongs to. ("", {}) when it belongs to none.
+
+        Dispatch is on the NAME, not on the status code.
+
+        A 200 is not proof the entity exists. fontem-api answers
+        /companies/<anything> AND /authorities/<anything> with a skeleton —
+        the id echoed back and every other field null — so an id that was
+        never in the graph comes back looking like a real, empty company.
+
+        Left unchecked the assistant then reports "X is a Company (unknown
+        country) with no EU procurement contracts in the graph" about
+        something that does not exist. That is worse than an error: it is a
+        confident negative finding, indistinguishable from a real one,
+        manufactured by us and handed to the model as fact. On a platform
+        whose whole claim is that figures trace back to a source, it is the
+        worst failure available.
+
+        The skeleton is also why a `404 -> try Authority` fallthrough cannot
+        work: /companies never 404s, so the Authority leg was unreachable
+        and EVERY authority was diagnosed as a nonexistent company. Metro
+        Mondego — 1 contract, €986,546 — came back as "no known entity".
+
+        So each endpoint is tried in turn and the first that yields a name
+        wins: a real entity always has one, and nothing else in the
+        skeleton distinguishes it.
+        """
+        for label, path in self._PROFILE_ENDPOINTS:
+            resp = await client.get(f"{self._gmr_api_url}/{path}/{entity_id}")
+            if resp.status_code >= 400:
+                continue
+            try:
+                body = resp.json()
+            except (ValueError, TypeError):
+                continue
+            if isinstance(body, dict) and entity_name(body):
+                return label, body
+        return "", {}
+
     async def _investigate(
         self,
         client: httpx.AsyncClient,
@@ -885,43 +930,9 @@ class MistralProxyClient:
         included in the response so the model knows what it's looking at.
         """
         depth = max(1, min(depth, 3))
-        # Try Company first — most-common path for procurement awardees.
-        label = "Company"
-        profile_resp = await client.get(
-            f"{self._gmr_api_url}/companies/{entity_id}",
-        )
-        if profile_resp.status_code == 404:
-            label = "Authority"
-            profile_resp = await client.get(
-                f"{self._gmr_api_url}/authorities/{entity_id}",
-            )
-        if profile_resp.status_code >= 400:
-            return json.dumps({
-                "error": f"entity {entity_id} not found",
-                "tried_labels": ["Company", "Authority"],
-            })
+        label, props = await self._resolve_profile(client, entity_id)
 
-        try:
-            props = profile_resp.json()
-        except (ValueError, TypeError):
-            props = {}
-
-        # A 200 is not proof the entity exists. fontem-api answers
-        # /companies/<anything> with a skeleton — the id echoed back and
-        # every other field null — so an id that was never in the graph
-        # comes back looking like a real, empty company.
-        #
-        # Left unchecked the assistant then reports "X is a Company
-        # (unknown country) with no EU procurement contracts in the graph"
-        # about something that does not exist. That is worse than an
-        # error: it is a confident negative finding, indistinguishable
-        # from a real one, manufactured by us and handed to the model as
-        # fact. On a platform whose whole claim is that figures trace back
-        # to a source, it is the worst failure available.
-        #
-        # A real entity always has a name. Nothing else in the skeleton
-        # distinguishes it.
-        if not entity_name(props):
+        if not label:
             return json.dumps({
                 "error": f"entity {entity_id} not found",
                 "detail": (
