@@ -38,6 +38,8 @@ quantised window is the better tool here and stays in charge upstream.
 """
 from __future__ import annotations
 
+import json
+
 import os
 import time
 from collections.abc import AsyncIterator
@@ -120,7 +122,7 @@ class LangGraphProxyClient:
 
     def _build_tools(self, client: httpx.AsyncClient, structured_tool,
                      specs: list[dict], nav_routes: list, seen: list,
-                     budget: list[int], traced: list):
+                     budget: list[int], traced: list, studio):
         """Wrap our tool schemas as LangChain tools over the shared executor.
 
         ``budget`` is a one-element list so the closures can spend a single
@@ -136,6 +138,9 @@ class LangGraphProxyClient:
 
             def run(_name=name, **kwargs):
                 seen.append((_name, kwargs))
+                # The Studio ops are async and this bridge is not; every
+                # Studio tool is registered with `coroutine=arun`, so this
+                # path is never the one that serves them.
                 if _name == navigation.NAVIGATE_TOOL_NAME:
                     result, _emit = navigation.navigate_result(
                         kwargs.get("path", ""), nav_routes,
@@ -147,6 +152,15 @@ class LangGraphProxyClient:
 
             async def arun(_name=name, **kwargs):
                 seen.append((_name, kwargs))
+                if _name in studio_tools.STUDIO_ACTIONS:
+                    # Server-side, as the asking user. The service checks
+                    # access on every call, so this cannot reach a project
+                    # the user could not open themselves.
+                    if studio is None:
+                        return json.dumps({
+                            "error": "the Data Studio is not available "
+                                     "for this turn"})
+                    return await studio.execute(_name, kwargs)
                 if _name == navigation.NAVIGATE_TOOL_NAME:
                     result, _emit = navigation.navigate_result(
                         kwargs.get("path", ""), nav_routes,
@@ -225,7 +239,7 @@ class LangGraphProxyClient:
                 traced: list = []
                 tools = self._build_tools(
                     client, structured_tool, specs, nav_routes, seen, budget,
-                    traced,
+                    traced, payload.get("studio_ops"),
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves

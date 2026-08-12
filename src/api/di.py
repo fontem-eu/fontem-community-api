@@ -567,10 +567,16 @@ class AssistantProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def assistant_service(
         self, repo: AssistRepository, proxy: ProxyClient,
+        projects: DataProjectService,
     ) -> AssistantService:
         return AssistantService(
             repo=repo,
             proxy_client=proxy,
+            # The Studio tools run server-side as the asking user. The
+            # service enforces access per call, so the agent inherits
+            # exactly the user's permissions — which is also why this is a
+            # request-scoped dependency and not an app-scoped one.
+            project_service=projects,
             base_system_prompt=_DEFAULT_SYSTEM_PROMPT,
             turn_limits=_TURN_LIMITS,
             context_char_budget=_CONTEXT_CHAR_BUDGET,

@@ -29,18 +29,83 @@ QUERY_LANGS = ("cypher", "sql", "sparql")
 #: Chart types the plot renderer understands.
 CHART_TYPES = ("line", "bar", "area", "scatter", "map", "table")
 
+PROJECT_ID_PARAM = {
+    "type": "string",
+    "description": "Project id, from studio_list_projects.",
+}
+
+PLOT_SPEC_PARAM = {
+    "type": "object",
+    "description": (
+        "Chart definition. `sources`: query ids to load. `transform`: "
+        "optional DuckDB SQL over those sources, run in the browser. "
+        "`chart`: one of line, bar, area, scatter, map, table. `x`/`y`: "
+        "column names in the transformed result. `series`: optional column "
+        "to split lines or bar groups by."
+    ),
+    "properties": {
+        "sources": {"type": "array", "items": {"type": "string"}},
+        "transform": {"type": "string"},
+        "chart": {"type": "string", "enum": list(CHART_TYPES)},
+        "x": {"type": "string"},
+        "y": {"type": "string"},
+        "series": {"type": "string"},
+    },
+}
+
 STUDIO_TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__gmr__studio_list_projects",
+            "description": (
+                "List the user's Data Studio projects: id, name, and how "
+                "many queries and plots each holds. Call this FIRST when the "
+                "user mentions the Studio, a chart or an analysis — adding "
+                "to the project they already have is almost always what they "
+                "meant, and creating a second one with the same purpose is "
+                "the most common way to get this wrong."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__gmr__studio_get_project",
+            "description": (
+                "Read one project in full: its queries (id, name, language, "
+                "text) and its plots (id, name, chart spec). Query text is "
+                "abbreviated in the listing; pass `query_id` to get that one "
+                "in full. Read the project before editing anything in it — "
+                "the ids you need are here, and so is whether the query you "
+                "were about to write already exists."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": PROJECT_ID_PARAM,
+                    "query_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Return this query's text in full "
+                            "instead of abbreviated."
+                        ),
+                    },
+                },
+                "required": ["project_id"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
             "name": "mcp__gmr__studio_create_project",
             "description": (
                 "Create a Data Studio project — the container for an "
-                "analysis. A project holds source queries and the plots "
-                "built from them. Call this first when the user asks for a "
-                "chart or an exploration and there is no project open yet; "
-                "if one is already open its id is in the studio context and "
-                "you should add to it instead of starting another."
+                "analysis, holding source queries and the plots built from "
+                "them. Only when no existing project fits: check "
+                "studio_list_projects first."
             ),
             "parameters": {
                 "type": "object",
@@ -55,9 +120,8 @@ STUDIO_TOOLS: list[dict] = [
                     "investigation_id": {
                         "type": "string",
                         "description": (
-                            "Optional. Attach the project to an existing "
-                            "investigation so it appears alongside its "
-                            "articles."
+                            "Optional. Attach to an investigation so the "
+                            "project sits alongside its articles."
                         ),
                     },
                 },
@@ -68,29 +132,41 @@ STUDIO_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "mcp__gmr__studio_rename_project",
+            "description": "Rename a Data Studio project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": PROJECT_ID_PARAM,
+                    "name": {"type": "string"},
+                },
+                "required": ["project_id", "name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "mcp__gmr__studio_add_query",
             "description": (
-                "Add a source query to a Data Studio project. A source "
-                "produces a table of rows that plots then combine. Pick "
-                "`lang` by which store holds the data: 'cypher' for the "
-                "knowledge graph (companies, contracts, ownership), 'sql' "
-                "for the statistics warehouse (Eurostat observations by "
-                "region and year), 'sparql' for the RDF store (ontology "
-                "queries, transitive ownership chains). Write the query in "
-                "that language — they are not interchangeable."
+                "Add a source query to a project. A source produces a table "
+                "of rows that plots then combine. Choose `lang` by which "
+                "store holds the data: 'cypher' for the knowledge graph "
+                "(companies, contracts, ownership), 'sql' for the statistics "
+                "warehouse (Eurostat observations by region and year), "
+                "'sparql' for the RDF store (ontology and transitive "
+                "ownership queries). They are not interchangeable — write "
+                "the query in the language you named. Read the store's "
+                "documentation article first if you have not this turn."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "project_id": {
-                        "type": "string",
-                        "description": "Project to add the source to.",
-                    },
+                    "project_id": PROJECT_ID_PARAM,
                     "name": {
                         "type": "string",
                         "description": (
-                            "Short name for the source; plots reference it, "
-                            "so make it descriptive."
+                            "Short descriptive name; plots refer to it."
                         ),
                     },
                     "lang": {
@@ -104,8 +180,8 @@ STUDIO_TOOLS: list[dict] = [
                     "query": {
                         "type": "string",
                         "description": (
-                            "The query text, in the language named by "
-                            "`lang`. Max 8000 characters."
+                            "Query text in the language named by `lang`. "
+                            "Max 8000 characters."
                         ),
                     },
                 },
@@ -116,49 +192,77 @@ STUDIO_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
-            "name": "mcp__gmr__studio_add_plot",
+            "name": "mcp__gmr__studio_update_query",
             "description": (
-                "Add a plot to a Data Studio project. A plot names one or "
-                "more source queries, optionally combines them with a "
-                "DuckDB SQL transform that runs in the browser, and charts "
-                "the result. The transform is always DuckDB SQL regardless "
-                "of which language produced the sources — each source is "
-                "available as a table named after the source."
+                "Change an existing source query — its name, language or "
+                "text. Prefer this over adding a near-duplicate when the "
+                "user is refining a query they already have. Omitted fields "
+                "are left as they are."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "project_id": {"type": "string"},
-                    "name": {
+                    "project_id": PROJECT_ID_PARAM,
+                    "query_id": {
                         "type": "string",
-                        "description": "Title shown above the chart.",
+                        "description": "From studio_get_project.",
                     },
-                    "spec": {
-                        "type": "object",
-                        "description": (
-                            "Chart definition. Keys: `sources` (list of "
-                            "query ids to load), `transform` (optional "
-                            "DuckDB SQL over those sources), `chart` (one "
-                            "of line, bar, area, scatter, map, table), `x` "
-                            "and `y` (column names from the transformed "
-                            "result), `series` (optional column to split "
-                            "lines by)."
-                        ),
-                        "properties": {
-                            "sources": {"type": "array", "items": {"type": "string"}},
-                            "transform": {"type": "string"},
-                            "chart": {"type": "string", "enum": list(CHART_TYPES)},
-                            "x": {"type": "string"},
-                            "y": {"type": "string"},
-                            "series": {"type": "string"},
-                        },
-                    },
+                    "name": {"type": "string"},
+                    "lang": {"type": "string", "enum": list(QUERY_LANGS)},
+                    "query": {"type": "string"},
+                },
+                "required": ["project_id", "query_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__gmr__studio_add_plot",
+            "description": (
+                "Add a plot: name one or more source queries, optionally "
+                "combine them with a DuckDB SQL transform that runs in the "
+                "browser, and chart the result. The transform is ALWAYS "
+                "DuckDB SQL regardless of which language produced the "
+                "sources — each source arrives as a table named after it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": PROJECT_ID_PARAM,
+                    "name": {"type": "string", "description": "Chart title."},
+                    "spec": PLOT_SPEC_PARAM,
                 },
                 "required": ["project_id", "name", "spec"],
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__gmr__studio_update_plot",
+            "description": (
+                "Change an existing plot's name or chart spec. Use this to "
+                "adjust a chart the user already has rather than adding "
+                "another. Omitted fields are left as they are."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": PROJECT_ID_PARAM,
+                    "plot_id": {
+                        "type": "string",
+                        "description": "From studio_get_project.",
+                    },
+                    "name": {"type": "string"},
+                    "spec": PLOT_SPEC_PARAM,
+                },
+                "required": ["project_id", "plot_id"],
+            },
+        },
+    },
 ]
+
 
 #: Names the frontend must recognise to execute an action. Kept here rather
 #: than duplicated in the panel so the two cannot drift; a parity test pins

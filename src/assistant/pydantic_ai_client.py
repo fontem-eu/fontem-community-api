@@ -103,7 +103,7 @@ class PydanticAIProxyClient:
         self._local_model = local_model
 
     def _build_tools(self, client: httpx.AsyncClient, tool_cls,
-                     specs: list[dict], nav_routes: list, budget: list[int]):
+                     specs: list[dict], nav_routes: list, budget: list[int], studio):
         """Wrap our JSON-schema tools over the shared executor.
 
         ``Tool.from_schema`` takes the schema as-is, so the model sees exactly
@@ -116,6 +116,15 @@ class PydanticAIProxyClient:
             name = fn["name"]
 
             async def run(_name=name, **kwargs):
+                if _name in studio_tools.STUDIO_ACTIONS:
+                    # Server-side, as the asking user. The service checks
+                    # access on every call, so this cannot reach a project
+                    # the user could not open themselves.
+                    if studio is None:
+                        return json.dumps({
+                            "error": "the Data Studio is not available "
+                                     "for this turn"})
+                    return await studio.execute(_name, kwargs)
                 if _name == navigation.NAVIGATE_TOOL_NAME:
                     # Runs in the browser, not here. The model is told
                     # whether the path was accepted.
@@ -182,6 +191,7 @@ class PydanticAIProxyClient:
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 tools = self._build_tools(
                     client, tool_cls, specs, nav_routes, budget,
+                    payload.get("studio_ops"),
                 )
                 # The name the SERVER serves, not the id we store. The
                 # production agent runs in router mode and answers to

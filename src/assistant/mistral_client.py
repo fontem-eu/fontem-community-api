@@ -311,7 +311,14 @@ def _turn_tools(nav_routes: list, has_editor: bool,
     model being incapable rather than an array being built in the wrong
     order. There is no error, no warning — navigation just quietly stops.
     """
-    tools = list(navigation.scope_tools(_TOOLS, has_editor=has_editor))
+    # One definition of what is offered, shared with the framework engines
+    # via engine_tools.OFFERED_BUILTINS. _TOOLS stays the full set — the
+    # executor still serves saved conversations that call find_paths and the
+    # retired getters — but the model is shown the short list.
+    # pylint: disable=import-outside-toplevel
+    from src.assistant.engine_tools import OFFERED_BUILTINS
+    offered = [t for t in _TOOLS if t["function"]["name"] in OFFERED_BUILTINS]
+    tools = list(navigation.scope_tools(offered, has_editor=has_editor))
     tools = studio_tools.scope_studio(tools, has_studio=has_studio)
     if nav_routes:
         return [navigation.navigate_tool_schema()] + tools
