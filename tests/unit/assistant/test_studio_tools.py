@@ -33,7 +33,7 @@ def _names(specs):
 def test_the_offered_surface_is_deliberately_small():
     """A wide surface of near-misses is worse than a narrow one: it costs
     tokens every turn and gives a small model more ways to pick wrong."""
-    got = _names(turn_tool_specs(GENERATED, True, ROUTES, has_studio=True))
+    got = _names(turn_tool_specs(GENERATED, True, ROUTES))
     assert got == [
         "navigate",
         "mcp__gmr__search_entities",
@@ -54,7 +54,7 @@ def test_the_offered_surface_is_deliberately_small():
 def test_the_narrow_generated_endpoints_are_gone():
     """Eleven of these could not between them answer 'which contracts
     involve Israeli companies' while crowding the array."""
-    got = _names(turn_tool_specs(GENERATED, True, ROUTES, has_studio=True))
+    got = _names(turn_tool_specs(GENERATED, True, ROUTES))
     for dropped in ("get_series", "list_datasets", "contract_sectors",
                     "single_bidder_rate"):
         assert dropped not in got
@@ -66,19 +66,34 @@ def test_find_paths_is_no_longer_advertised():
     being chosen over search_entities for questions search answers."""
     assert "mcp__gmr__find_paths" not in OFFERED_BUILTINS
     assert "mcp__gmr__find_paths" not in _names(
-        turn_tool_specs(GENERATED, True, ROUTES, has_studio=True))
+        turn_tool_specs(GENERATED, True, ROUTES))
 
 
-def test_studio_tools_are_withheld_where_the_studio_is_not_available():
-    without = _names(turn_tool_specs(GENERATED, True, ROUTES, has_studio=False))
+def test_studio_tools_need_no_open_project():
+    """They act on the user's own projects through the service, which checks
+    access per call, so there is no state the caller has to be "in".
+
+    Gating them on an open Studio was backwards: the agent has a tool to
+    create a project, and the gate stopped it using that tool until the user
+    had already done the thing they were asking for. The only genuinely
+    UI-bound tool is propose_edit, which needs a surface to propose into.
+    """
+    without_editor = _names(turn_tool_specs(GENERATED, False, ROUTES))
     for name in studio_tools.STUDIO_ACTIONS:
-        assert name not in without
+        assert name in without_editor, f"{name} withheld with no editor open"
+    assert "mcp__gmr__propose_edit" not in without_editor
+
+
+def test_the_only_ui_gated_tool_is_the_one_that_needs_a_surface():
+    with_editor = _names(turn_tool_specs(GENERATED, True, ROUTES))
+    without = _names(turn_tool_specs(GENERATED, False, ROUTES))
+    assert set(with_editor) - set(without) == {"mcp__gmr__propose_edit"}
 
 
 def test_reading_comes_before_writing_in_the_array():
     """Order is a hint the model reads. list and get precede create, because
     adding to the project the user already has is almost always the intent."""
-    got = _names(turn_tool_specs(GENERATED, True, ROUTES, has_studio=True))
+    got = _names(turn_tool_specs(GENERATED, True, ROUTES))
     assert got.index("mcp__gmr__studio_list_projects") < got.index(
         "mcp__gmr__studio_create_project")
     assert got.index("mcp__gmr__studio_get_project") < got.index(

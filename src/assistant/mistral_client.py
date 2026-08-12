@@ -291,8 +291,7 @@ _FRESHNESS_TTL_SECONDS = 300
 _FRESHNESS_FETCH_TIMEOUT = 5.0
 
 
-def _turn_tools(nav_routes: list, has_editor: bool,
-                has_studio: bool = False) -> list[dict]:
+def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
     """The tool surface for one turn, scoped to the user's context.
 
     navigate goes FIRST, and that is load bearing rather than cosmetic.
@@ -319,7 +318,7 @@ def _turn_tools(nav_routes: list, has_editor: bool,
     from src.assistant.engine_tools import OFFERED_BUILTINS
     offered = [t for t in _TOOLS if t["function"]["name"] in OFFERED_BUILTINS]
     tools = list(navigation.scope_tools(offered, has_editor=has_editor))
-    tools = studio_tools.scope_studio(tools, has_studio=has_studio)
+    tools = tools + list(studio_tools.STUDIO_TOOLS)
     if nav_routes:
         return [navigation.navigate_tool_schema()] + tools
     return tools
@@ -540,7 +539,6 @@ class MistralProxyClient:
         # An editing surface is registered when the caller sent a report
         # context to work on. Drives which tools the model is offered.
         has_editor = bool(payload.get("has_editor"))
-        has_studio = bool(payload.get("has_studio"))
         message = payload.get("message", "")
 
         if not message:
@@ -641,7 +639,7 @@ class MistralProxyClient:
                             # Scoped to where the user actually is: no
                             # propose_edit without an editor, no navigate
                             # without a site map.
-                            "tools": _turn_tools(nav_routes, has_editor, has_studio)
+                            "tools": _turn_tools(nav_routes, has_editor)
                             + generated_tools.select(gen_tools),
                             # "required" only on a forced continuation.
                             # Left on permanently it would keep calling
