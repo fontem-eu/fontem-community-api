@@ -48,6 +48,7 @@ from src.assistant import (
     generated_tools,
     local_models,
     navigation,
+    studio_tools,
     tool_budget,
     tool_trace,
 )
@@ -190,6 +191,7 @@ class LangGraphProxyClient:
         nav = payload.get("nav") or {}
         nav_routes = nav.get("routes") or []
         has_editor = bool(payload.get("has_editor"))
+        has_studio = bool(payload.get("has_studio"))
 
         # Cheap preconditions before the expensive import: a turn that
         # cannot run should say why in the terms the operator can act on,
@@ -217,7 +219,8 @@ class LangGraphProxyClient:
                 gen_tools = await generated_tools.fetch_tools(
                     client, self._gmr_api_url,
                 )
-                specs = turn_tool_specs(gen_tools, has_editor, nav_routes)
+                specs = turn_tool_specs(gen_tools, has_editor, nav_routes,
+                                        has_studio)
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 traced: list = []
                 tools = self._build_tools(
@@ -267,6 +270,8 @@ class LangGraphProxyClient:
             # The frontend renders the Apply card off this field.
             if name == "mcp__gmr__propose_edit":
                 status["proposal"] = args
+            elif name in studio_tools.STUDIO_ACTIONS:
+                status["studio_action"] = {"action": name, "args": args}
             events.append(_sse("status", status))
         return events, announced
 

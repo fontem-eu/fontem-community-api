@@ -19,7 +19,7 @@ to have more than one.
 """
 from __future__ import annotations
 
-from src.assistant import generated_tools, navigation
+from src.assistant import generated_tools, navigation, studio_tools
 
 
 def _builtin_tools() -> list[dict]:
@@ -31,9 +31,10 @@ def _builtin_tools() -> list[dict]:
 
 
 def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
-                    nav_routes: list) -> list[dict]:
+                    nav_routes: list, has_studio: bool = False) -> list[dict]:
     """Tool schemas for one turn, in the order the model should see them."""
     specs = list(navigation.scope_tools(_builtin_tools(), has_editor=has_editor))
+    specs = studio_tools.scope_studio(specs, has_studio=has_studio)
     if nav_routes:
         specs = [navigation.navigate_tool_schema()] + specs
     return specs + list(generated_tools.select(gen_tools))
