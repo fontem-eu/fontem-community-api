@@ -136,27 +136,67 @@ def test_the_schemas_are_json_serialisable():
 
 
 # ── execution ──────────────────────────────────────────────────
-class _FakeService:
-    """Stands in for DataProjectService, recording the user it was called as."""
+class _Recorder:
+    """Stands in for DataProjectService, recording exactly what it was given.
+
+    These tests are about the tools, not the model: whether an argument the
+    model supplies arrives at the service unchanged, and whether a partial
+    update stays partial. Neither is visible from the schema, and both are
+    the kind of thing that fails silently — a dropped `lang` becomes a
+    Cypher query run against Postgres.
+    """
 
     def __init__(self):
         self.calls = []
 
+    def _rec(self, _op, **kw):
+        # Leading underscore deliberately: several operations pass a `name`
+        # keyword, and a parameter called `name` here collides with it.
+        self.calls.append((_op, kw))
+
     async def list_projects(self, user_id):
-        self.calls.append(("list_projects", user_id))
-        return [_P("p1", "Procurement", queries=[_Q("q1", "x" * 5000)])]
+        self._rec("list_projects", user_id=user_id)
+        return [_P("p1", "Procurement",
+                   queries=[_Q("q1", "x" * 5000)], plots=[_Pl("pl1", "Chart")])]
 
     async def get_project(self, user_id, project_id):
-        self.calls.append(("get_project", user_id, project_id))
-        return _P(project_id, "Procurement", queries=[_Q("q1", "y" * 5000)])
+        self._rec("get_project", user_id=user_id, project_id=project_id)
+        return _P(project_id, "Procurement",
+                  queries=[_Q("q1", "y" * 5000)], plots=[_Pl("pl1", "Chart")])
 
     async def create_project(self, user_id, name, investigation_id=None):
-        self.calls.append(("create_project", user_id, name, investigation_id))
+        self._rec("create_project", user_id=user_id, name=name,
+                  investigation_id=investigation_id)
         return _P("new", name)
 
+    async def rename_project(self, user_id, project_id, name):
+        self._rec("rename_project", user_id=user_id,
+                  project_id=project_id, name=name)
+        return _P(project_id, name)
+
     async def add_query(self, user_id, project_id, name, lang, query):
-        self.calls.append(("add_query", user_id, project_id, lang))
+        self._rec("add_query", user_id=user_id, project_id=project_id,
+                  name=name, lang=lang, query=query)
         return _Q("q2", query, name=name, lang=lang)
+
+    async def update_query(self, user_id, project_id, query_id, name, lang, query):
+        self._rec("update_query", user_id=user_id, project_id=project_id,
+                  query_id=query_id, name=name, lang=lang, query=query)
+        return _Q(query_id, query or "kept", name=name or "kept",
+                  lang=lang or "cypher")
+
+    async def add_plot(self, user_id, project_id, name, spec):
+        self._rec("add_plot", user_id=user_id, project_id=project_id,
+                  name=name, spec=spec)
+        return _Pl("pl2", name, spec)
+
+    async def update_plot(self, user_id, project_id, plot_id, name, spec):
+        self._rec("update_plot", user_id=user_id, project_id=project_id,
+                  plot_id=plot_id, name=name, spec=spec)
+        return _Pl(plot_id, name or "kept", spec or {})
+
+    def last(self, name):
+        return next(kw for called, kw in reversed(self.calls) if called == name)
 
 
 class _P:
@@ -172,41 +212,189 @@ class _Q:
         self.id, self.query, self.name, self.lang = qid, query, name, lang
 
 
+class _Pl:
+    def __init__(self, pid, name, spec=None):
+        self.id, self.name, self.spec = pid, name, spec or {}
+
+
+async def _run(svc, tool, args):
+    """Execute one tool and return its parsed result."""
+    return json.loads(await StudioOps(svc, "user-42").execute(
+        f"mcp__gmr__studio_{tool}", args))
+
+
+# ── one test per operation ─────────────────────────────────────
 @pytest.mark.asyncio
-async def test_operations_run_as_the_asking_user():
+async def test_every_operation_runs_as_the_asking_user():
     """The service checks access per call, so the agent inherits exactly the
-    user's permissions — but only if the id is actually threaded through."""
-    svc = _FakeService()
+    user's permissions — but only if the id is threaded through every one."""
+    svc = _Recorder()
     ops = StudioOps(svc, "user-42")
-    await ops.execute("mcp__gmr__studio_list_projects", {})
-    await ops.execute("mcp__gmr__studio_create_project", {"name": "New"})
-    assert all(call[1] == "user-42" for call in svc.calls)
+    for tool, args in (
+        ("list_projects", {}),
+        ("get_project", {"project_id": "p1"}),
+        ("create_project", {"name": "N"}),
+        ("rename_project", {"project_id": "p1", "name": "N"}),
+        ("add_query", {"project_id": "p1", "name": "Q", "lang": "sql", "query": "SELECT 1"}),
+        ("update_query", {"project_id": "p1", "query_id": "q1", "name": "R"}),
+        ("add_plot", {"project_id": "p1", "name": "P", "spec": {"chart": "bar"}}),
+        ("update_plot", {"project_id": "p1", "plot_id": "pl1", "name": "P2"}),
+    ):
+        await ops.execute(f"mcp__gmr__studio_{tool}", args)
+    assert len(svc.calls) == 8, "an operation never reached the service"
+    assert {kw["user_id"] for _n, kw in svc.calls} == {"user-42"}
 
 
 @pytest.mark.asyncio
-async def test_listing_abbreviates_query_text():
-    """A project with ten 8000-character queries would otherwise spend a
-    whole turn's budget on one call."""
-    ops = StudioOps(_FakeService(), "u")
-    out = json.loads(await ops.execute(
-        "mcp__gmr__studio_get_project", {"project_id": "p1"}))
+async def test_list_projects_reports_counts_not_contents():
+    """A listing that inlined every query would spend the turn's budget
+    before the model had chosen a project."""
+    out = await _run(_Recorder(), "list_projects", {})
+    project = out["projects"][0]
+    assert project["queries"] == 1 and project["plots"] == 1
+    assert project["id"] == "p1"
+
+
+@pytest.mark.asyncio
+async def test_get_project_returns_the_ids_the_next_call_needs():
+    """Every edit is addressed by id. A read that omits them makes the write
+    tools unreachable."""
+    out = await _run(_Recorder(), "get_project", {"project_id": "p1"})
+    assert out["queries"][0]["id"] == "q1"
+    assert out["plots"][0]["id"] == "pl1"
+    assert out["queries"][0]["lang"] == "cypher"
+
+
+@pytest.mark.asyncio
+async def test_get_project_abbreviates_query_text_but_says_so():
+    out = await _run(_Recorder(), "get_project", {"project_id": "p1"})
     text = out["queries"][0]["query"]
     assert len(text) < 600
-    assert "truncated" in text
+    assert "truncated" in text and "by id" in text
 
 
 @pytest.mark.asyncio
-async def test_one_query_can_be_read_in_full_by_id():
-    ops = StudioOps(_FakeService(), "u")
-    out = json.loads(await ops.execute(
-        "mcp__gmr__studio_get_project", {"project_id": "p1", "query_id": "q1"}))
+async def test_get_project_returns_one_query_in_full_on_request():
+    out = await _run(_Recorder(), "get_project",
+                     {"project_id": "p1", "query_id": "q1"})
     assert len(out["queries"][0]["query"]) == 5000
 
 
 @pytest.mark.asyncio
+async def test_create_project_passes_the_name_and_omits_an_empty_investigation():
+    """An empty string is not an investigation id. Forwarding "" would attach
+    the project to nothing and fail the lookup."""
+    svc = _Recorder()
+    await _run(svc, "create_project", {"name": "Hungary bids"})
+    assert svc.last("create_project")["name"] == "Hungary bids"
+    assert svc.last("create_project")["investigation_id"] is None
+
+    await _run(svc, "create_project",
+               {"name": "N", "investigation_id": "inv-7"})
+    assert svc.last("create_project")["investigation_id"] == "inv-7"
+
+
+@pytest.mark.asyncio
+async def test_rename_project_passes_both_ids():
+    svc = _Recorder()
+    out = await _run(svc, "rename_project", {"project_id": "p1", "name": "Better"})
+    assert svc.last("rename_project") == {
+        "user_id": "user-42", "project_id": "p1", "name": "Better"}
+    assert out["name"] == "Better"
+
+
+@pytest.mark.asyncio
+async def test_add_query_forwards_the_language_verbatim():
+    """A dropped `lang` is a Cypher query run against Postgres — an error the
+    model cannot read its way out of, because it wrote valid Cypher."""
+    svc = _Recorder()
+    out = await _run(svc, "add_query", {
+        "project_id": "p1", "name": "Offences",
+        "lang": "sql", "query": "SELECT * FROM observation LIMIT 5"})
+    call = svc.last("add_query")
+    assert call["lang"] == "sql"
+    assert call["query"] == "SELECT * FROM observation LIMIT 5"
+    assert call["name"] == "Offences"
+    assert out["id"] == "q2"
+
+
+@pytest.mark.asyncio
+async def test_add_query_returns_the_text_in_full():
+    """The model just wrote it; abbreviating its own query back at it is
+    noise, and the id is what the next call needs."""
+    out = await _run(_Recorder(), "add_query", {
+        "project_id": "p1", "name": "Q", "lang": "cypher", "query": "z" * 5000})
+    assert len(out["query"]) == 5000
+
+
+@pytest.mark.asyncio
+async def test_update_query_leaves_omitted_fields_alone():
+    """Partial update semantics. Sending None for `query` must mean "keep
+    it", not "blank it" — the service distinguishes the two and the tool has
+    to preserve that distinction."""
+    svc = _Recorder()
+    await _run(svc, "update_query", {
+        "project_id": "p1", "query_id": "q1", "name": "Renamed"})
+    call = svc.last("update_query")
+    assert call["name"] == "Renamed"
+    assert call["query"] is None, "an omitted query would have been blanked"
+    assert call["lang"] is None
+
+
+@pytest.mark.asyncio
+async def test_add_plot_forwards_the_spec_intact():
+    """The spec is the whole chart. A flattened or dropped key is a plot that
+    renders empty with no error anywhere."""
+    spec = {"sources": ["q1", "q2"], "transform": "SELECT * FROM q1",
+            "chart": "line", "x": "year", "y": "value", "series": "country"}
+    svc = _Recorder()
+    out = await _run(svc, "add_plot",
+                     {"project_id": "p1", "name": "Trend", "spec": spec})
+    assert svc.last("add_plot")["spec"] == spec
+    assert out["spec"] == spec
+    assert out["id"] == "pl2"
+
+
+@pytest.mark.asyncio
+async def test_add_plot_without_a_spec_sends_an_empty_dict_not_none():
+    svc = _Recorder()
+    await _run(svc, "add_plot", {"project_id": "p1", "name": "Empty"})
+    assert svc.last("add_plot")["spec"] == {}
+
+
+@pytest.mark.asyncio
+async def test_update_plot_leaves_omitted_fields_alone():
+    svc = _Recorder()
+    await _run(svc, "update_plot",
+               {"project_id": "p1", "plot_id": "pl1", "name": "Renamed"})
+    call = svc.last("update_plot")
+    assert call["name"] == "Renamed"
+    assert call["spec"] is None, "an omitted spec would have wiped the chart"
+
+
+@pytest.mark.asyncio
+async def test_every_operation_returns_parseable_json():
+    """The result goes straight into the conversation. A non-serialisable
+    object would raise inside the tool loop and kill the turn."""
+    svc = _Recorder()
+    ops = StudioOps(svc, "u")
+    for tool, args in (
+        ("list_projects", {}), ("get_project", {"project_id": "p1"}),
+        ("create_project", {"name": "N"}),
+        ("rename_project", {"project_id": "p1", "name": "N"}),
+        ("add_query", {"project_id": "p1", "name": "Q", "lang": "sql", "query": "S"}),
+        ("update_query", {"project_id": "p1", "query_id": "q1"}),
+        ("add_plot", {"project_id": "p1", "name": "P", "spec": {}}),
+        ("update_plot", {"project_id": "p1", "plot_id": "pl1"}),
+    ):
+        raw = await ops.execute(f"mcp__gmr__studio_{tool}", args)
+        assert isinstance(json.loads(raw), dict), tool
+
+
+@pytest.mark.asyncio
 async def test_a_failure_returns_an_error_the_model_can_act_on():
-    """A raised exception aborts the turn mid-stream. The model can fix a
-    bad id if it is told; it can do nothing with a dropped connection."""
+    """A raised exception aborts the turn mid-stream. The model can fix a bad
+    id if told; it can do nothing with a dropped connection."""
     class Boom:
         async def get_project(self, *_a, **_k):
             raise PermissionError("not your project")
@@ -218,8 +406,16 @@ async def test_a_failure_returns_an_error_the_model_can_act_on():
 
 
 @pytest.mark.asyncio
+async def test_an_unexpected_argument_does_not_crash_the_turn():
+    """Models invent parameters. Swallowing one is better than failing the
+    turn over it, and the schema is what steers them."""
+    out = await _run(_Recorder(), "list_projects", {"nonsense": 1})
+    assert "projects" in out
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_tool_is_reported_not_raised():
-    out = json.loads(await StudioOps(_FakeService(), "u").execute("nope", {}))
+    out = json.loads(await StudioOps(_Recorder(), "u").execute("nope", {}))
     assert "unknown studio tool" in out["error"]
 
 
