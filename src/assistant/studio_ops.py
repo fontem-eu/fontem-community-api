@@ -1,0 +1,154 @@
+"""Data Studio operations, executed server-side as the asking user.
+
+The first cut of these tools emitted proposals for the browser to perform,
+on the reasoning that the tool executor has no user identity. That was true
+of the *generated* tools — they GET fontem-api anonymously — but not of this
+service, which is holding the user's id for the whole turn and can call the
+Studio service directly.
+
+Direct is better here. The service enforces access on every call, so the
+agent inherits exactly the permissions the user has and no more; there is no
+round trip through the browser to lose; and reading is possible at all,
+which a propose-only design could never offer — an agent that cannot list
+what already exists writes a second project rather than adding to the first.
+
+Approval stays a UI concern. Nothing here is destructive: no delete, and
+edits are addressed by id, so the worst a confused turn does is add a query
+nobody asked for.
+
+Results are shaped for a model, not for a UI. Ids are included because the
+next call needs them, timestamps are dropped because nothing does, and query
+text is truncated in listings — a project with ten 8000-character queries
+would otherwise spend a whole turn's budget on one call.
+"""
+from __future__ import annotations
+
+import json
+from typing import Any
+
+#: Query text is long and rarely needed in full when listing. Reading one
+#: query in full is what get_project's `query_id` filter is for.
+_QUERY_PREVIEW_CHARS = 400
+
+
+class StudioOps:
+    """The Studio surface, bound to one user for one turn."""
+
+    def __init__(self, service: Any, user_id: str) -> None:
+        self._svc = service
+        self._user = user_id
+
+    # ── shaping ────────────────────────────────────────────────
+    @staticmethod
+    def _query_dict(q: Any, *, full: bool) -> dict:
+        text = getattr(q, "query", "") or ""
+        return {
+            "id": getattr(q, "id", None),
+            "name": getattr(q, "name", ""),
+            "lang": getattr(q, "lang", ""),
+            "query": text if full or len(text) <= _QUERY_PREVIEW_CHARS
+                     else text[:_QUERY_PREVIEW_CHARS] + " …[truncated, ask for this query by id]",
+        }
+
+    @staticmethod
+    def _plot_dict(p: Any) -> dict:
+        return {
+            "id": getattr(p, "id", None),
+            "name": getattr(p, "name", ""),
+            "spec": getattr(p, "spec", {}) or {},
+        }
+
+    def _project_dict(self, p: Any, *, deep: bool, full_query: str | None = None) -> dict:
+        out = {
+            "id": getattr(p, "id", None),
+            "name": getattr(p, "name", ""),
+            "investigation_id": getattr(p, "investigation_id", None),
+        }
+        if deep:
+            out["queries"] = [
+                self._query_dict(q, full=(full_query is not None
+                                          and getattr(q, "id", None) == full_query))
+                for q in getattr(p, "queries", []) or []
+            ]
+            out["plots"] = [self._plot_dict(x) for x in getattr(p, "plots", []) or []]
+        else:
+            out["queries"] = len(getattr(p, "queries", []) or [])
+            out["plots"] = len(getattr(p, "plots", []) or [])
+        return out
+
+    # ── operations ─────────────────────────────────────────────
+    async def list_projects(self, **_) -> dict:
+        projects = await self._svc.list_projects(self._user)
+        return {"projects": [self._project_dict(p, deep=False) for p in projects]}
+
+    async def get_project(self, project_id: str = "", query_id: str = "", **_) -> dict:
+        project = await self._svc.get_project(self._user, project_id)
+        return self._project_dict(project, deep=True, full_query=query_id or None)
+
+    async def create_project(self, name: str = "", investigation_id: str = "", **_) -> dict:
+        project = await self._svc.create_project(
+            self._user, name, investigation_id or None)
+        return self._project_dict(project, deep=False)
+
+    async def rename_project(self, project_id: str = "", name: str = "", **_) -> dict:
+        project = await self._svc.rename_project(self._user, project_id, name)
+        return self._project_dict(project, deep=False)
+
+    async def add_query(self, project_id: str = "", name: str = "",
+                        lang: str = "cypher", query: str = "", **_) -> dict:
+        created = await self._svc.add_query(
+            self._user, project_id, name, lang, query)
+        return self._query_dict(created, full=True)
+
+    async def update_query(self, project_id: str = "", query_id: str = "",
+                           name: str | None = None, lang: str | None = None,
+                           query: str | None = None, **_) -> dict:
+        updated = await self._svc.update_query(
+            self._user, project_id, query_id, name, lang, query)
+        return self._query_dict(updated, full=True)
+
+    async def add_plot(self, project_id: str = "", name: str = "",
+                       spec: dict | None = None, **_) -> dict:
+        created = await self._svc.add_plot(self._user, project_id, name, spec or {})
+        return self._plot_dict(created)
+
+    async def update_plot(self, project_id: str = "", plot_id: str = "",
+                          name: str | None = None, spec: dict | None = None, **_) -> dict:
+        updated = await self._svc.update_plot(
+            self._user, project_id, plot_id, name, spec)
+        return self._plot_dict(updated)
+
+    # ── dispatch ───────────────────────────────────────────────
+    #: Tool name -> method. No delete: an agent that can remove a user's work
+    #: is a different risk conversation, and nothing here needs it.
+    OPS = {
+        "mcp__gmr__studio_list_projects": "list_projects",
+        "mcp__gmr__studio_get_project": "get_project",
+        "mcp__gmr__studio_create_project": "create_project",
+        "mcp__gmr__studio_rename_project": "rename_project",
+        "mcp__gmr__studio_add_query": "add_query",
+        "mcp__gmr__studio_update_query": "update_query",
+        "mcp__gmr__studio_add_plot": "add_plot",
+        "mcp__gmr__studio_update_plot": "update_plot",
+    }
+
+    async def execute(self, name: str, args: dict) -> str:
+        """Run one Studio tool. Always returns a JSON string, never raises.
+
+        A raised exception here would abort the turn mid-stream; the model
+        can act on an error it can read — usually by fixing an id — and
+        cannot act on a dropped connection.
+        """
+        method = self.OPS.get(name)
+        if method is None:
+            return json.dumps({"error": f"unknown studio tool: {name}"})
+        try:
+            result = await getattr(self, method)(**(args or {}))
+            return json.dumps(result, default=str)
+        except Exception as exc:  # pylint: disable=broad-except
+            # Includes the service's own permission and not-found errors,
+            # which are exactly what the model needs to see.
+            return json.dumps({
+                "error": f"{type(exc).__name__}: {exc}",
+                "tool": name,
+            }, default=str)

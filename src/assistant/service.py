@@ -104,12 +104,14 @@ class AssistantService:
         base_system_prompt: str,
         turn_limits: TurnLimits,
         context_char_budget: int,
+        project_service=None,
     ) -> None:
         self._repo = repo
         self._proxy = proxy_client
         self._base_prompt = base_system_prompt
         self._turn_limits = turn_limits
         self._context_budget = context_char_budget
+        self._projects = project_service
 
     # ─────────── Turn handling ────────────
 
@@ -187,6 +189,13 @@ class AssistantService:
                            else bool(req.has_editor)),
             "has_studio": bool(req.has_studio),
         }
+        if self._projects is not None and req.has_studio:
+            # An object, not JSON: these clients run in-process, and the
+            # alternative is re-authenticating the user over HTTP to this
+            # same service. Bound to this user for this turn only.
+            from src.assistant.studio_ops import StudioOps
+            payload["studio_ops"] = StudioOps(self._projects, req.user_id)
+
         if req.local_model_id:
             payload["local_model_id"] = req.local_model_id
         if req.credential:
