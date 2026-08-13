@@ -75,8 +75,12 @@ class AssistMessageModel(Base):
 
     __tablename__ = "assist_messages"
     __table_args__ = (
+        # 'tool' joined the vocabulary when tool calls became conversation
+        # rows. The constraint is the reason that has to be a migration and
+        # not just a code change: it lives only in the database, so every
+        # in-memory test passed while production rejected the row.
         CheckConstraint(
-            "role IN ('user', 'assistant')",
+            "role IN ('user', 'assistant', 'tool')",
             name="ck_assist_msg_role",
         ),
         Index("ix_assist_msg_user_created", "user_id", "created_at"),

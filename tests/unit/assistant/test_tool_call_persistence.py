@@ -190,3 +190,36 @@ def test_an_absent_usage_event_leaves_the_estimate_alone():
     _run(_turn(svc))
     user_row = [m for m in _messages(repo) if m.role == "user"][0]
     assert user_row.tokens_in and user_row.tokens_in > 0
+
+
+# ── the database's opinion ─────────────────────────────────────
+#
+# The in-memory repository has no constraints, so it accepts any role the
+# code invents. Postgres does not: `ck_assist_msg_role` allowed only 'user'
+# and 'assistant', and the first real turn in testing died on it — taking
+# the whole turn with it, because the failed flush poisoned the transaction
+# the rest of the turn was writing in. 1064 tests were green at the time.
+#
+# These read the constraint off the model, which is what the migration
+# mirrors, so a new role has to be declared in both places or fail here.
+
+def _allowed_roles() -> set[str]:
+    import re  # pylint: disable=import-outside-toplevel
+    from sqlalchemy import CheckConstraint  # pylint: disable=import-outside-toplevel
+    from src.assistant.models import AssistMessageModel  # pylint: disable=import-outside-toplevel
+
+    for c in AssistMessageModel.__table__.constraints:
+        if isinstance(c, CheckConstraint) and c.name == "ck_assist_msg_role":
+            return set(re.findall(r"'([a-z]+)'", str(c.sqltext)))
+    raise AssertionError("ck_assist_msg_role is gone; the database still has it")
+
+
+def test_the_roles_the_service_writes_are_all_permitted():
+    # Every role that reaches append_message anywhere in the turn.
+    assert {"user", "assistant", "tool"} <= _allowed_roles()
+
+
+def test_an_invented_role_would_still_be_rejected():
+    # The constraint is worth keeping narrow: it is what stops a typo
+    # becoming a row nothing knows how to render.
+    assert "banana" not in _allowed_roles()
