@@ -282,7 +282,6 @@ class LangGraphProxyClient:
                 tools = self._build_tools(
                     client, structured_tool, specs, nav_routes, seen, budget,
                     traced, payload.get("studio_ops"), pending_nav, name_cache,
-                    payload.get("audit"),
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves

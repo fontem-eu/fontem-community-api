@@ -32,7 +32,6 @@ What stayed is everything that was never the framework's business:
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import time
@@ -50,6 +49,7 @@ from src.assistant import (
     local_models, navigation, studio_tools, tool_budget, tool_trace,
 )
 from src.assistant.entities import _build_summary, _capture_names, entity_name
+from src.services import audit_context
 
 
 # ── Tool schemas (OpenAI / Mistral function-calling format) ────────────
@@ -547,8 +547,12 @@ class ToolRuntime:
         # not merely to the turn. Scoped, so the id comes off again when the
         # call ends — a later write belongs to the turn, not to whichever
         # tool happened to run last.
-        scope = (audit.tool_call(call_id, name) if audit is not None
-                 else contextlib.nullcontext())
+        # Ambient by default: the context is a contextvar set by whoever is
+        # driving, so the executor does not have to carry it. The parameter
+        # stays for tests that want to hand in their own — and it must not
+        # travel in the payload dict, which some proxy clients serialise to
+        # JSON and which a module does not survive.
+        scope = (audit or audit_context).tool_call(call_id, name)
         with scope:
             return await self._dispatch_inner(
                 client, name, args, studio=studio, nav_routes=nav_routes,

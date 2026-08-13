@@ -209,7 +209,6 @@ class AssistantService:
                 message_id=None,
             )
         )
-        payload["audit"] = audit_context
 
         if self._projects is not None:
             # An object, not JSON: these clients run in-process, and the

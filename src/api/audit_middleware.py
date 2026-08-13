@@ -105,9 +105,28 @@ def install(app, activity_factory) -> None:
 
         # Only successful changes. A 403 or a 422 changed nothing, and a log
         # that cannot tell those apart from real edits is not evidence.
-        if actor and 200 <= response.status_code < 300 and not ctx.written:
+        if (actor and 200 <= response.status_code < 300 and not ctx.written
+                and not _is_stream(response)):
             await _record_generic(request, response, ctx, activity_factory)
         return response
+
+
+def _is_stream(response) -> bool:
+    """Is the body still being produced after call_next returned?
+
+    For a streaming response it is. `call_next` hands back as soon as the
+    headers are ready, so anything written here runs CONCURRENTLY with the
+    generator that is still producing the body — and both use the same
+    database session. That is not a theoretical race: it took the assistant
+    down in testing with "Session is already flushing", because the audit
+    write and the turn flushed the same session at the same time.
+
+    Streams are also the case that needs the fallback least. The assistant
+    turn records its own tool calls from inside the generator, with the
+    conversation and tool-call provenance the middleware could never know.
+    """
+    ctype = (response.headers.get("content-type") or "").lower()
+    return "text/event-stream" in ctype
 
 
 async def _record_generic(request, response, ctx, activity_factory) -> None:
