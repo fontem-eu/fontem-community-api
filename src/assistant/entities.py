@@ -1,6 +1,6 @@
 """Reading entity payloads from fontem-api.
 
-Split out of mistral_client so that module stays under the line limit,
+Split out of the tool runtime so that module stays under the line limit,
 but these belong together anyway: every function here is about the
 shapes fontem-api returns and the traps in them.
 """
@@ -45,10 +45,15 @@ def _capture_names_from_dict(name_cache: dict[str, str], payload: dict) -> None:
     # `investigate_entity` shape: {"props": {...}}
     if "props" in payload:
         _capture_names(name_cache, payload["props"])
-    # Single entity dict
-    if not payload.get("name"):
+    # Single entity dict. Read the name through entity_name rather than
+    # payload["name"]: search results use `name`, but /companies returns
+    # `company_name` and /authorities `authority_name`, so an
+    # investigate_entity result recorded nothing and its id kept rendering
+    # as a UUID in the status line. Same per-endpoint key trap that made
+    # every summary say "(unnamed)".
+    name = entity_name(payload)
+    if not name:
         return
-    name = str(payload["name"])
     for id_field in ("gmr_id", "authority_id", "entity_id", "tr_id"):
         if id_field in payload:
             name_cache[str(payload[id_field])] = name

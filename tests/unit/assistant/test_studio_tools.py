@@ -420,8 +420,16 @@ async def test_an_unknown_tool_is_reported_not_raised():
 
 
 def test_every_engine_routes_studio_calls_to_the_ops():
-    """Not to the HTTP executor, which is anonymous and read-only."""
+    """Not to the HTTP executor, which is anonymous and read-only.
+
+    The routing moved into ToolRuntime.dispatch when the hand-written
+    executor was decommissioned — one implementation both engines call —
+    so the assertion follows it there rather than grepping each engine for
+    a call it now delegates.
+    """
+    runtime = pathlib.Path("src/assistant/tool_runtime.py").read_text("utf-8")
+    assert "studio.execute(" in runtime, "the shared dispatch does not use the ops"
     for mod in ("langgraph_client", "pydantic_ai_client"):
         src = pathlib.Path(f"src/assistant/{mod}.py").read_text("utf-8")
-        assert "studio.execute(" in src, f"{mod} does not use the ops"
         assert "studio_ops" in src, f"{mod} never receives them"
+        assert "dispatch(" in src, f"{mod} does not route through the runtime"

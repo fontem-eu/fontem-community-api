@@ -1,62 +1,53 @@
 # pylint: disable=too-many-arguments,too-many-positional-arguments
-# pylint: disable=too-many-locals,too-many-statements,too-few-public-methods
-# pylint: disable=too-many-instance-attributes,too-many-branches
-"""Mistral chat-completions client, exposed as a ``ProxyClient``.
+# pylint: disable=too-many-locals,too-few-public-methods
+"""The assistant's tool surface: schemas, execution, and result shaping.
 
-Drop-in replacement for ``ClaudeProxyClient``.  The service layer only
-knows about the ``stream(payload) -> async iter of SSE blocks`` shape, so
-swapping the underlying provider is a matter of wiring a different
-implementation here.
+No model lives here and no loop runs here. Both executors — PydanticAI and
+LangGraph — delegate to :class:`ToolRuntime`, so a tool behaves identically
+whichever is driving.
 
-Tool surface (the assistant revamp landed here):
-  * ``investigate_entity`` is the canonical entity-detail tool — one call
-    returns label + props + contracts + graph neighbourhood. Replaces the
-    earlier four narrow getters which mistral occasionally picked the
-    wrong one of.
-  * ``search_entities``, ``find_paths``, ``propose_edit`` remain.
-  * The legacy four narrow getters (``get_company`` / ``get_authority`` /
+This module used to be the third executor: a hand-written Mistral
+chat-completions loop with its own tool dispatch, dedup, stall detection and
+forced continuation. That loop is gone. It was the only path carrying forced
+continuation on a stalled chain, which is a real capability lost — recorded
+here rather than in a changelog nobody reads, because the frameworks do not
+reproduce it and a turn that gives up mid-plan now simply gives up.
+
+What stayed is everything that was never the framework's business:
+
+  * ``investigate_entity`` — the canonical entity-detail tool. One call
+    returns label + props + contracts + graph neighbourhood, and it resolves
+    the label by NAME rather than status code, because fontem-api answers
+    /companies/<anything> and /authorities/<anything> with a 200 skeleton.
+  * ``search_entities`` and ``propose_edit``.
+  * The legacy narrow getters (``get_company`` / ``get_authority`` /
     ``get_contracts`` / ``explore_graph``) stay implemented in
-    :py:meth:`_execute_tool` so old saved conversations keep working,
-    but they are NOT advertised in :data:`_TOOLS` — the model only sees
-    the canonical surface.
-
-Key behaviours:
-  * The system prompt is augmented every turn with the **current date**
-    so the model can reason about whether dates returned by tools are
-    past / present / future.
-  * Tool-call dedup: within one turn, identical ``(name, args)`` calls
-    short-circuit to the cached result, so a model that asks the same
-    thing twice doesn't pay (in latency or tokens) for it.
-  * Per-turn entity-name cache: when a tool surfaces an id → name, that
-    mapping is used to substitute human-readable labels into the
-    ``status`` events the frontend renders.
-  * On loop exhaustion, emit a ``status`` event with ``phase=truncated``
-    (not ``error``) so the frontend can render a "ran out of budget"
-    notice instead of a hard failure.
+    :py:meth:`execute_tool` so old saved conversations keep replaying, but
+    they are NOT advertised in :data:`_TOOLS` — the model only sees the
+    canonical surface.
+  * The current date, appended to the system prompt every turn, so the model
+    can tell whether a date a tool returned is past or future.
+  * The per-turn entity-name cache that turns ids into readable labels in
+    the ``status`` events the panel renders.
 """
 from __future__ import annotations
 
 import json
 import os
 import time
-from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
 
 from src.assistant import generated_tools, legacy_tools
 from src.assistant.freshness import _format_freshness_summary
-from src.assistant.language import _language_directive
 from src.assistant.catalogue import CatalogueCache
 
 from src.assistant import (
-    local_models, navigation, studio_tools, tool_trace, tool_budget,
+    local_models, navigation, studio_tools, tool_budget,
 )
-from src.assistant.entities import (
-    _build_summary,
-    _capture_names,
-    entity_name,
-)
+from src.assistant.entities import _build_summary, _capture_names, entity_name
 
 
 # ── Tool schemas (OpenAI / Mistral function-calling format) ────────────
@@ -238,6 +229,88 @@ _LOCAL_MODEL = "qwen3-4b"
 #: which weights we host is an operational detail, and users should not
 #: have to re-pick a provider when it changes.
 LOCAL_PROVIDER = "local"
+
+#: Where a bring-your-own-key turn is sent, per provider.
+#:
+#: The hand-written loop that used to live in this module sent EVERY
+#: provider's key to Mistral's URL, so an OpenAI key could only ever come
+#: back 401. Both of these speak the OpenAI chat-completions protocol at
+#: these bases, so routing them correctly costs one dict. Anthropic is
+#: absent deliberately: it is offered in the UI but does not speak this
+#: protocol, and the executors reject it with a legible message rather than
+#: sending a key somewhere it cannot work.
+PROVIDER_BASE_URLS = {
+    "mistral": "https://api.mistral.ai/v1",
+    "openai": "https://api.openai.com/v1",
+}
+
+
+@dataclass(frozen=True)
+class Route:
+    """Where one turn is sent, and on whose key."""
+
+    base_url: str
+    api_key: str
+    model: str
+    local: bool
+    timeout: float
+
+
+def resolve_route(
+    cred: dict | None,
+    *,
+    local_url: str,
+    local_model_id: str | None,
+    default_model: str,
+) -> tuple[Route | None, str]:
+    """Pick the endpoint for a turn. Returns (route, error) — one or the other.
+
+    This is the piece worth testing directly: it decides whether a request
+    carries a user's secret to a third party or stays inside the cluster.
+    Getting it wrong is not a visible bug, it is a leak.
+
+    Order:
+      1. The caller supplied a key for a hosted provider — spend theirs.
+      2. Otherwise the cluster-local server, with NO key attached.
+      3. Neither — an error the caller can render, not an exception
+         mid-stream.
+
+    Case 2 is why this exists: the assistant used to be unusable until you
+    pasted an API key, which meant almost nobody used it.
+    """
+    cred = cred or {}
+    provider = (cred.get("provider") or "").strip().lower()
+    key = cred.get("api_key") or ""
+
+    if provider and provider != LOCAL_PROVIDER and key:
+        base = PROVIDER_BASE_URLS.get(provider)
+        if base is None:
+            return None, (
+                f"provider {provider!r} is not supported by this engine; "
+                "remove the key to use the built-in model"
+            )
+        # Their key, their provider, their bill. A hosted provider answers in
+        # seconds; the local one generates on CPU and legitimately takes
+        # minutes, which is why the timeouts differ by an order of magnitude.
+        return Route(base, key, cred.get("model") or default_model,
+                     local=False, timeout=120.0), ""
+
+    if local_url:
+        # The caller picks from a curated list of ids, never a model name.
+        # local_models.resolve maps the id to what llama-server calls it and
+        # falls back to the default for anything else, so an arbitrary string
+        # cannot reach the server. No key: a cluster-local server must never
+        # be handed a secret.
+        return Route(local_url.rstrip("/") + "/v1", "",
+                     local_models.resolve(local_model_id).served_name,
+                     local=True, timeout=300.0), ""
+
+    return None, "no model is available: set LOCAL_LLM_URL or supply a key"
+
+
+#: Cluster-internal service address. Plain http on purpose: this never
+#: leaves the cluster, the hop is inside the service mesh, and there is no
+#: TLS terminator in front of it to speak to.
 _DEFAULT_GMR_API = "http://fontem-api"
 # Bumped 5 → 10. Five is too tight for "investigate this multi-subsidiary
 # corporate group" prompts; ten is enough for most real questions and is
@@ -317,26 +390,6 @@ def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
     return tools
 
 
-def _stalled_mid_chain(tools_used: set[str], content: str) -> bool:
-    """True when the model stopped before it had anything to cite.
-
-    Two shapes, both seen in production:
-
-      * it ran a search, which returns names and ids and nothing else,
-        and then wrote a summary of those names as if it were an answer;
-      * it announced the call it was about to make — "vou usar a função
-        mcp__gmr__search_entities" — and then emitted no call at all.
-
-    The second is detected by looking for a registered tool name in the
-    prose. That is deliberately a substring match on the identifiers
-    rather than a phrase match: the announcement arrives in whatever
-    language the user is speaking, and the tool names do not translate.
-    """
-    if any(name in content for name in _TOOL_NAMES):
-        return True
-    return bool(tools_used) and tools_used <= _SHALLOW_TOOLS
-
-
 def _sse(event: str, data: dict) -> str:
     """Serialize an SSE event block (one per ``yield``)."""
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
@@ -371,41 +424,25 @@ def _system_prompt_with_today(base: str) -> str:
     return f"{base.rstrip()}\n\nToday's date is {today}."
 
 
-class MistralProxyClient:
-    """Mistral chat-completions with a bounded, deduped tool-use loop.
+class ToolRuntime:
+    """Executes the assistant's tools. Owns no loop and talks to no model.
 
-    Emits SSE events: ``status`` / ``chunk`` / ``usage`` / ``error`` /
-    ``done`` (the last is appended by the router). Frontend consumes
-    this unchanged.
+    Both executors delegate here, so a tool behaves identically whichever
+    one is driving: same schemas, same fontem-api calls, same result
+    shapes, same 200-skeleton trap avoided in exactly one place.
 
-    See the module docstring for the full revamp summary.
+    This is what remains of the hand-written provider loop that used to
+    live in this module — the loop went, the tool surface stayed, because
+    the tools were never the framework's business.
     """
 
     def __init__(
         self,
-        api_key: str,
-        model: str = _DEFAULT_MODEL,
-        api_url: str = _MISTRAL_URL,
         gmr_api_url: str = _DEFAULT_GMR_API,
-        max_iterations: int = _MAX_TOOL_ITERATIONS,
         timeout: float = 120.0,
         client_factory=None,
-        local_url: str = _LOCAL_URL,
-        local_model: str = _LOCAL_MODEL,
-        local_timeout: float = 300.0,
     ) -> None:
-        self._api_key = api_key
-        self._model = model
-        self._api_url = api_url
-        self._local_url = local_url.rstrip("/")
-        self._local_model = local_model
-        # Generation on CPU runs at single-digit tokens/sec, so a long
-        # answer legitimately takes minutes. The hosted-provider timeout
-        # would abort a turn that was working fine.
-        self._local_timeout = local_timeout
         self._gmr_api_url = gmr_api_url.rstrip("/")
-        self._max_iter = max_iterations
-        self._timeout = timeout
         self._client_factory = client_factory or (
             lambda: httpx.AsyncClient(timeout=timeout)
         )
@@ -468,366 +505,56 @@ class MistralProxyClient:
         self._freshness_cache = (now, summary)
         return summary
 
-    def _route_for(
-        self, cred: dict, local_model_id: str | None = None
-    ) -> tuple[str, str, str, float] | None:
-        """Pick the endpoint for this turn: (url, api_key, model, timeout).
+    async def dispatch(
+        self, client, name: str, args: dict, *,
+        studio, nav_routes: list, pending_nav: list,
+        budget: list[int], name_cache: dict,
+    ) -> tuple[str, int]:
+        """Run one tool call. Returns (what the model sees, raw result length).
 
-        Three cases, in order:
+        Both executors call this, so a tool behaves identically whichever is
+        driving — and the three special cases below stop being copy-pasted
+        into two closures that then drift.
 
-          1. The user picked a hosted provider and supplied a key — spend
-             theirs.
-          2. The user picked the built-in model, or picked nothing at all
-             — use the cluster-local server. No key, nobody billed.
-          3. Neither is available — return None and the caller explains
-             itself.
-
-        Case 2 is why this exists. The assistant used to be unusable
-        until you pasted an API key, which meant almost nobody used it.
-
-        Returns None rather than raising so the caller can emit a legible
-        SSE error instead of a stack trace mid-stream.
+        A raw length of 0 means "nothing came back from fontem-api": the
+        Studio and navigate paths answer locally and are not worth a trace
+        bubble.
         """
-        provider = (cred.get("provider") or "").strip().lower()
-        key = cred.get("api_key") or ""
+        if name in studio_tools.STUDIO_ACTIONS:
+            # Server-side, as the asking user. The service checks access on
+            # every call, so this cannot reach a project the user could not
+            # open themselves.
+            if studio is None:
+                return json.dumps({
+                    "error": "the Data Studio is not available for this turn",
+                }), 0
+            return await studio.execute(name, args), 0
 
-        if provider and provider != LOCAL_PROVIDER and key:
-            return (
-                self._api_url,
-                key,
-                cred.get("model") or self._model,
-                self._timeout,
+        if name == navigation.NAVIGATE_TOOL_NAME:
+            # Runs in the browser, not here. The result is only the model's
+            # receipt; the panel moves because of the `navigate` SSE event,
+            # and the closures cannot yield one — so the emit rides along in
+            # `pending_nav` and the stream loop sends it. Dropping it is what
+            # made the assistant claim to navigate while the page stayed put.
+            result, emit = navigation.navigate_result(
+                args.get("path", ""), nav_routes,
             )
-        if self._local_url:
-            # The caller picks from a curated list of ids, never a model
-            # name. local_models.resolve maps the id to what llama-server
-            # calls it and falls back to the default for anything else, so
-            # an arbitrary string cannot reach the server.
-            return (
-                f"{self._local_url}/v1/chat/completions",
-                "",
-                local_models.resolve(local_model_id).served_name,
-                self._local_timeout,
-            )
-        if key:
-            return (
-                self._api_url,
-                key,
-                cred.get("model") or self._model,
-                self._timeout,
-            )
-        if self._api_key:
-            return self._api_url, self._api_key, self._model, self._timeout
-        return None
+            if emit:
+                pending_nav.append(emit)
+            return result, 0
 
-    async def stream(self, payload: dict) -> AsyncIterator[str]:  # NOSONAR S3776: provider-loop
-        """Execute a chat turn and yield SSE event blocks."""
-        start = time.time()
-        system = _system_prompt_with_today(payload.get("system", ""))
-        # Where the user is, and what pages exist. The manifest is generated
-        # by the frontend from its own router and sent with the turn, so it
-        # cannot disagree with what this build of the app actually serves.
-        nav = payload.get("nav") or {}
-        nav_routes = nav.get("routes") or []
-        # An editing surface is registered when the caller sent a report
-        # context to work on. Drives which tools the model is offered.
-        has_editor = bool(payload.get("has_editor"))
-        message = payload.get("message", "")
-
-        if not message:
-            yield _sse("error", {"error": "Missing message"})
-            return
-        # The caller's own key wins over the platform key. Read per turn
-        # and never stored on self: this client is an APP-scoped singleton
-        # shared across requests, so keeping a key on the instance would
-        # spend one user's credential on another user's turn.
-        cred = payload.get("credential") or {}
-        route = self._route_for(cred, payload.get("local_model_id"))
-        if route is None:
-            yield _sse("error", {
-                "error": (
-                    "No LLM provider configured. Add your own API key in "
-                    "Account settings to use the assistant."
-                ),
-                "code": "no_credential",
-            })
-            return
-        api_url, api_key, model, timeout = route
-
-        yield _sse("status", {
-            "phase": "connecting",
-            "detail": "Starting assistant...",
-            "elapsed": 0,
-        })
-
-        messages: list[dict] = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": message},
-        ]
-
-        input_tokens = 0
-        output_tokens = 0
-        # Per-turn caches. Keys live for ONE chat turn only (ie. one
-        # call to .stream()), so ids that update mid-conversation are
-        # never staler than one user turn.
-        tool_cache: dict[str, str] = {}
-        # Spent across the whole turn, not per round: the conversation is
-        # re-sent in full on every round, so it is the running total that
-        # has to fit the context, not any single result.
-        result_budget = tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN
-        name_cache: dict[str, str] = {}
-        proposal_count = 0
-        # Tools invoked so far this turn, and how many times we have made
-        # the model carry on after it tried to stop early.
-        tools_used: set[str] = set()
-        forced_continuations = 0
-        force_tool_choice = False
-
+        raw = await self.execute_tool(client, name, args)
+        # Keep the id->name mapping fresh from every result, so the status
+        # line says "Investigating Siemens Energy AG/ADR" rather than a UUID.
+        # Read from the FULL result, before the budget cap truncates it.
         try:
-            async with self._client_factory() as client:
-                # Fetch coverage summary once per turn (cached across
-                # turns for `_FRESHNESS_TTL_SECONDS`). Inject AFTER the
-                # date line so the model sees them as a single
-                # "context-as-of-now" block. Empty string when the
-                # data-quality API is unreachable — the chat still
-                # works, just without coverage grounding.
-                # The catalogue goes first: knowing the data EXISTS is what
-                # stops the model answering "we don't have that" about eight
-                # population datasets. Coverage ranges refine an answer the
-                # model is already willing to attempt.
-                gen_tools = await self._get_generated_tools(client)
-                language = _language_directive(payload.get("locale"))
-                if language:
-                    messages[0]["content"] = (
-                        messages[0]["content"].rstrip() + language)
-                catalogue = await self._get_catalogue_block(client)
-                freshness = await self._get_freshness_summary(client)
-                for block in (catalogue, freshness):
-                    if block:
-                        messages[0]["content"] = (
-                            messages[0]["content"].rstrip() + "\n\n" + block
-                        )
-                completed_normally = False
-                for _iter_no in range(self._max_iter):
-                    yield _sse("status", {
-                        "phase": "thinking",
-                        "detail": "Processing your request...",
-                        "elapsed": round(time.time() - start, 1),
-                    })
+            _capture_names(name_cache, json.loads(raw))
+        except (ValueError, TypeError):
+            pass
+        capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
+        return capped, len(raw)
 
-                    headers = {"Content-Type": "application/json"}
-                    if api_key:
-                        headers["Authorization"] = f"Bearer {api_key}"
-                    resp = await client.post(
-                        api_url,
-                        headers=headers,
-                        timeout=timeout,
-                        json={
-                            "model": model,
-                            "messages": messages,
-                            # navigate is offered only when the client sent a
-                            # site map. Advertising a tool whose every call we
-                            # would have to reject teaches the model to
-                            # distrust its own tools.
-                            # Scoped to where the user actually is: no
-                            # propose_edit without an editor, no navigate
-                            # without a site map.
-                            "tools": _turn_tools(nav_routes, has_editor)
-                            + generated_tools.select(gen_tools),
-                            # "required" only on a forced continuation.
-                            # Left on permanently it would keep calling
-                            # tools when there is genuinely nothing left
-                            # to look up, and never answer.
-                            "tool_choice": (
-                                "required" if force_tool_choice else "auto"
-                            ),
-                        },
-                    )
-                    if resp.status_code != 200:
-                        yield _sse("error", {
-                            "error": f"Mistral API {resp.status_code}: {resp.text[:200]}",
-                        })
-                        return
-
-                    # One-shot: this request carried it, the next must
-                    # decide for itself whether another tool is needed.
-                    force_tool_choice = False
-
-                    data = resp.json()
-                    usage = data.get("usage") or {}
-                    input_tokens += int(usage.get("prompt_tokens", 0) or 0)
-                    output_tokens += int(usage.get("completion_tokens", 0) or 0)
-
-                    choice = (data.get("choices") or [{}])[0]
-                    msg = choice.get("message") or {}
-                    finish = choice.get("finish_reason", "stop")
-                    content = msg.get("content") or ""
-                    tool_calls = msg.get("tool_calls") or []
-
-                    # Echo the assistant turn into history for the next round.
-                    assistant_entry: dict = {
-                        "role": "assistant",
-                        "content": content,
-                    }
-                    if tool_calls:
-                        assistant_entry["tool_calls"] = tool_calls
-                    messages.append(assistant_entry)
-
-                    # Models narrate what they are about to do before doing
-                    # it. That commentary used to be appended to history and
-                    # never shown, so a turn that took a minute looked like
-                    # a blank screen. Emit it as it happens — it is a
-                    # separate event from `chunk` so the frontend can render
-                    # it as working-out rather than as the answer.
-                    if tool_calls and content:
-                        yield _sse("thinking", {"text": content})
-
-                    if finish != "tool_calls" or not tool_calls:
-                        # The model wants to stop. Sometimes it has not
-                        # done the work yet: it searches, gets a list of
-                        # names, and writes a summary of the names — or
-                        # worse, narrates the call it is about to make and
-                        # then makes nothing. Unforced it carries on 5
-                        # times in 21; asked to, 18 in 21.
-                        if (
-                            forced_continuations < _MAX_FORCED_CONTINUATIONS
-                            and _stalled_mid_chain(tools_used, content)
-                        ):
-                            forced_continuations += 1
-                            # Show the aborted reasoning rather than
-                            # discarding it — it is the most legible part
-                            # of what the assistant is doing.
-                            if content:
-                                yield _sse("thinking", {"text": content})
-                            messages.append({
-                                "role": "user",
-                                "content": (
-                                    "You have not finished. Call the next "
-                                    "tool now — investigate the entities "
-                                    "you named. Do not describe the call "
-                                    "and do not summarise yet."
-                                ),
-                            })
-                            force_tool_choice = True
-                            continue
-                        if content:
-                            # Append a proposal-budget disclosure when the
-                            # model emitted many proposals so the user knows
-                            # to review them in order.
-                            if proposal_count > _PROPOSAL_BUDGET_DISCLOSE:
-                                content += (
-                                    f"\n\n_(I proposed {proposal_count} edits — "
-                                    "review them in order in your editor.)_"
-                                )
-                            yield _sse("status", {
-                                "phase": "streaming",
-                                "detail": "Writing response...",
-                                "elapsed": round(time.time() - start, 1),
-                            })
-                            yield _sse("chunk", {"text": content})
-                        yield _sse("usage", {
-                            "input_tokens": input_tokens,
-                            "output_tokens": output_tokens,
-                        })
-                        completed_normally = True
-                        return
-
-                    for tc in tool_calls:
-                        func = tc.get("function") or {}
-                        if func.get("name"):
-                            tools_used.add(func["name"])
-                        name = func.get("name", "")
-                        try:
-                            args = json.loads(func.get("arguments") or "{}")
-                        except (ValueError, TypeError):
-                            args = {}
-
-                        if name == "mcp__gmr__propose_edit":
-                            proposal_count += 1
-
-                        status: dict = {
-                            "phase": "tool_use",
-                            "tool": name,
-                            "detail": _tool_detail(name, args, name_cache),
-                            "elapsed": round(time.time() - start, 1),
-                        }
-                        # Forward propose_edit args so the frontend renders the card.
-                        if name == "mcp__gmr__propose_edit":
-                            status["proposal"] = args
-                        elif name in studio_tools.STUDIO_ACTIONS:
-                            # Executed by the panel with the user's own
-                            # session; the server has no identity to write
-                            # a project with.
-                            status["studio_action"] = {
-                                "action": name, "args": args,
-                            }
-                        yield _sse("status", status)
-
-                        # Per-turn tool-call dedup. Identical (name, args)
-                        # calls return the cached result instead of paying
-                        # the round-trip again.
-                        cache_key = name + "|" + json.dumps(args, sort_keys=True)
-                        if name == navigation.NAVIGATE_TOOL_NAME:
-                            # Runs in the browser, not here: emit the
-                            # instruction and tell the model it landed.
-                            # Deliberately NOT cached — asking to go
-                            # somewhere twice in a turn should move the user
-                            # twice, and a cached "ok" would strand them on
-                            # the first page.
-                            result, emit = navigation.navigate_result(
-                                args.get("path", ""), nav_routes,
-                            )
-                            if emit:
-                                yield _sse("navigate", emit)
-                        elif cache_key in tool_cache:
-                            result = tool_cache[cache_key]
-                        else:
-                            result = await self._execute_tool(client, name, args)
-                            tool_cache[cache_key] = result
-                            # Keep our id→name mapping fresh from every result.
-                            try:
-                                _capture_names(name_cache, json.loads(result))
-                            except (ValueError, TypeError):
-                                pass
-
-                        # Capped on the way into the conversation, not at
-                        # the executor and not in the cache: the executor's
-                        # full result is still what `_capture_names` reads,
-                        # and a cached repeat is appended again, so it must
-                        # be charged again.
-                        capped, result_budget = tool_budget.cap_tool_result(
-                            result, result_budget,
-                        )
-                        yield _sse(tool_trace.EVENT, tool_trace.trace(
-                            name, args, capped, time.time() - start,
-                            raw_len=len(result)))
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.get("id") or "",
-                            "name": name,
-                            "content": capped,
-                        })
-
-                # Loop exhausted without a final response. Emit a
-                # `truncated` status (not error) so the frontend can render
-                # a "ran out of budget" notice and offer to retry.
-                if not completed_normally:
-                    yield _sse("status", {
-                        "phase": "truncated",
-                        "detail": (
-                            f"Reached max tool iterations ({self._max_iter}). "
-                            "Try a more focused question."
-                        ),
-                        "elapsed": round(time.time() - start, 1),
-                    })
-                    yield _sse("usage", {
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                    })
-        except (httpx.ConnectError, httpx.TimeoutException) as exc:
-            yield _sse("error", {"error": str(exc)[:200]})
-
-    async def _execute_tool(
+    async def execute_tool(
         self, client: httpx.AsyncClient, name: str, args: dict,
     ) -> str:
         """Dispatch a tool call to the GMR API and return its body as text."""
@@ -987,13 +714,8 @@ class MistralProxyClient:
         })
 
 
-def from_env() -> "MistralProxyClient":
-    """Build a client from the standard env vars."""
-    return MistralProxyClient(
-        api_key=os.environ.get("MISTRAL_API_KEY", ""),
-        model=os.environ.get("MISTRAL_MODEL", _DEFAULT_MODEL),
-        api_url=os.environ.get("MISTRAL_API_URL", _MISTRAL_URL),
+def from_env() -> "ToolRuntime":
+    """Build a runtime from the standard env vars."""
+    return ToolRuntime(
         gmr_api_url=os.environ.get("GMR_API_INTERNAL", _DEFAULT_GMR_API),
-        local_url=os.environ.get("LOCAL_LLM_URL", _LOCAL_URL),
-        local_model=os.environ.get("LOCAL_LLM_MODEL", _LOCAL_MODEL),
     )

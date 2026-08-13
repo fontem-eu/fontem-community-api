@@ -25,8 +25,8 @@ substituted the raw id.
 import asyncio
 import json
 
-from src.assistant.mistral_client import (
-    MistralProxyClient,
+from src.assistant.tool_runtime import (
+    ToolRuntime,
     _build_summary,
     entity_name,
 )
@@ -119,7 +119,7 @@ class _FakeClient:
 
 
 async def _investigate_with(profile):
-    client = MistralProxyClient(api_key="k", gmr_api_url="http://fake")
+    client = ToolRuntime(gmr_api_url="http://fake")
     return json.loads(await client._investigate(_FakeClient(profile), "some-id"))
 
 
@@ -204,7 +204,7 @@ class _ByPathClient:
 
 
 def _investigate_paths(**kw):
-    client = MistralProxyClient(api_key="k", gmr_api_url="http://fake")
+    client = ToolRuntime(gmr_api_url="http://fake")
     fake = _ByPathClient(**kw)
     out = json.loads(_run(client._investigate(fake, "some-id")))
     return out, fake
@@ -286,7 +286,7 @@ def test_unparseable_json_on_companies_does_not_abort_the_search():
                 return _UnparseableResp()
             return await super().get(url, params=params)
 
-    client = MistralProxyClient(api_key="k", gmr_api_url="http://fake")
+    client = ToolRuntime(gmr_api_url="http://fake")
     fake = _Broken(authority=METRO_MONDEGO)
     out = json.loads(_run(client._investigate(fake, "some-id")))
     assert out["label"] == "Authority"

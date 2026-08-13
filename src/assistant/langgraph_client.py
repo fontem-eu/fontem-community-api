@@ -3,7 +3,7 @@
 """A second assistant executor, built on LangGraph's agent loop.
 
 Sits behind ``ASSISTANT_ENGINE=langgraph`` and satisfies the same
-``ProxyClient`` protocol as :class:`MistralProxyClient`: ``stream(payload)``
+``ProxyClient`` protocol as the PydanticAI executor: ``stream(payload)``
 yields whole SSE event blocks. Nothing above it — the service, the router,
 the frontend — can tell which engine ran the turn. That is the point: the two
 are swappable, so they can be compared on the same battery instead of argued
@@ -38,7 +38,6 @@ quantised window is the better tool here and stays in charge upstream.
 """
 from __future__ import annotations
 
-import json
 
 import os
 import time
@@ -48,20 +47,21 @@ import httpx
 
 from src.assistant import (
     generated_tools,
-    local_models,
     navigation,
     studio_tools,
     tool_budget,
     tool_trace,
 )
 from src.assistant.engine_tools import turn_tool_specs
-from src.assistant.mistral_client import (
+from src.assistant.tool_runtime import (
     _DEFAULT_GMR_API,
     _sse,
     _system_prompt_with_today,
     _tool_detail,
-    MistralProxyClient,
+    resolve_route,
+    ToolRuntime,
 )
+from src.assistant.language import _language_directive
 
 #: Matches the native loop, so a comparison measures the engine and not a
 #: different iteration budget.
@@ -118,19 +118,21 @@ def _import_langchain():
 class LangGraphProxyClient:
     """ProxyClient built on ``create_agent``.
 
-    Shares the tool executor with :class:`MistralProxyClient` by delegation
+    Shares the tool surface with the other executor via :class:`ToolRuntime`
     rather than inheritance: the executor is the part with the fontem-api
     contract in it, including the guard that turns the API's null skeleton
     into an explicit "not found", and there must be exactly one of those.
     """
 
-    def __init__(self, *, api_key: str = "", model: str = "",
+    def __init__(self, *, model: str = "",
                  gmr_api_url: str = _DEFAULT_GMR_API,
                  local_url: str = "", local_model: str = "") -> None:
-        self._native = MistralProxyClient(
-            api_key=api_key, model=model, gmr_api_url=gmr_api_url,
-            local_url=local_url, local_model=local_model,
-        )
+        self._tools = ToolRuntime(gmr_api_url=gmr_api_url)
+        # No platform key: a turn either carries the caller's own
+        # credential or is answered by the cluster-local model. The
+        # decommissioned loop ended with "else spend the platform
+        # key", which moved the bill without telling anybody.
+        self._model = model
         self._gmr_api_url = gmr_api_url
         self._local_url = local_url
         self._local_model = local_model
@@ -152,7 +154,7 @@ class LangGraphProxyClient:
     def _build_tools(self, client: httpx.AsyncClient, structured_tool,
                      specs: list[dict], nav_routes: list, seen: list,
                      budget: list[int], traced: list, studio,
-                     pending_nav: list):
+                     pending_nav: list, name_cache: dict):
         """Wrap our tool schemas as LangChain tools over the shared executor.
 
         ``budget`` is a one-element list so the closures can spend a single
@@ -168,9 +170,9 @@ class LangGraphProxyClient:
 
             def run(_name=name, **kwargs):
                 seen.append((_name, kwargs))
-                # The Studio ops are async and this bridge is not; every
-                # Studio tool is registered with `coroutine=arun`, so this
-                # path is never the one that serves them.
+                # The Studio ops and every fontem-api tool are async and this
+                # bridge is not; they are registered with `coroutine=arun`, so
+                # this path only ever serves navigate — which answers locally.
                 if _name == navigation.NAVIGATE_TOOL_NAME:
                     return self._navigate(
                         kwargs.get("path", ""), nav_routes, pending_nav)
@@ -180,25 +182,18 @@ class LangGraphProxyClient:
 
             async def arun(_name=name, **kwargs):
                 seen.append((_name, kwargs))
-                if _name in studio_tools.STUDIO_ACTIONS:
-                    # Server-side, as the asking user. The service checks
-                    # access on every call, so this cannot reach a project
-                    # the user could not open themselves.
-                    if studio is None:
-                        return json.dumps({
-                            "error": "the Data Studio is not available "
-                                     "for this turn"})
-                    return await studio.execute(_name, kwargs)
-                if _name == navigation.NAVIGATE_TOOL_NAME:
-                    return self._navigate(
-                        kwargs.get("path", ""), nav_routes, pending_nav)
-                raw = await self._native._execute_tool(  # pylint: disable=protected-access
+                capped, raw_len = await self._tools.dispatch(
                     client, _name, kwargs,
+                    studio=studio, nav_routes=nav_routes,
+                    pending_nav=pending_nav, budget=budget,
+                    name_cache=name_cache,
                 )
-                capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
-                # Stash for the trace event: this closure cannot yield, so
-                # the result rides along and _announce emits it.
-                traced.append((_name, kwargs, capped, len(raw)))
+                # Stash for the trace event: this closure cannot yield, so the
+                # result rides along and _announce emits it. Studio and
+                # navigate answer locally (raw_len 0) and get no bubble, which
+                # is what they did before.
+                if raw_len:
+                    traced.append((_name, kwargs, capped, raw_len))
                 return capped
 
             tools.append(structured_tool(
@@ -222,12 +217,27 @@ class LangGraphProxyClient:
         # than pretending. Zero users are affected today (user_llm_credentials
         # is empty in production) — this exists so that stays true the moment
         # someone configures one.
-        if payload.get("credential"):
-            async for event in self._native.stream(payload):
-                yield event
+        # Their key, their provider, their bill. This used to be handed to
+        # the hand-written loop, which is gone — and which sent every
+        # provider's key to Mistral's URL regardless, so an OpenAI key could
+        # only ever come back 401.
+        route, route_error = resolve_route(
+            payload.get("credential"),
+            local_url=self._local_url,
+            local_model_id=payload.get("local_model_id") or self._local_model,
+            default_model=self._model,
+        )
+        if route is None:
+            yield _sse("error", {"error": route_error})
+            yield _sse("done", {})
             return
 
         system = _system_prompt_with_today(payload.get("system", ""))
+        # Answer in the user's language. The hand-written loop did this and
+        # neither framework executor ever did.
+        language = _language_directive(payload.get("locale"))
+        if language:
+            system = system.rstrip() + language
         nav = payload.get("nav") or {}
         nav_routes = nav.get("routes") or []
         has_editor = bool(payload.get("has_editor"))
@@ -236,12 +246,6 @@ class LangGraphProxyClient:
         # cannot run should say why in the terms the operator can act on,
         # and "LOCAL_LLM_URL is unset" is more useful than an import error
         # that is merely the next thing to fail.
-        if not self._local_url:
-            yield _sse("error", {
-                "error": "langgraph engine requires LOCAL_LLM_URL"})
-            yield _sse("done", {})
-            return
-
         try:
             create_agent, structured_tool, chat_openai = _import_langchain()
         except LangGraphUnavailable as exc:
@@ -263,9 +267,12 @@ class LangGraphProxyClient:
                 traced: list = []
                 # Navigate emits queue here; the tool closures cannot yield.
                 pending_nav: list = []
+                # One dict, shared by the tool closures that fill it and the
+                # status events that read it.
+                name_cache: dict[str, str] = {}
                 tools = self._build_tools(
                     client, structured_tool, specs, nav_routes, seen, budget,
-                    traced, payload.get("studio_ops"), pending_nav,
+                    traced, payload.get("studio_ops"), pending_nav, name_cache,
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves
@@ -273,18 +280,19 @@ class LangGraphProxyClient:
                 # which took the assistant down the moment this executor
                 # was switched on. The native client has always gone
                 # through local_models.resolve() for exactly this.
-                served = local_models.resolve(
-                    payload.get("local_model_id") or self._local_model,
-                ).served_name
                 llm = chat_openai(
-                    model=served,
-                    base_url=self._local_url.rstrip("/") + "/v1",
-                    api_key="none", temperature=0.3, timeout=300.0,
+                    model=route.model,
+                    base_url=route.base_url,
+                    # "none" rather than "": the OpenAI client refuses to
+                    # construct without one, and the local server ignores it.
+                    api_key=route.api_key or "none",
+                    temperature=0.3, timeout=route.timeout,
                 )
                 agent = create_agent(model=llm, tools=tools,
                                      system_prompt=system)
                 async for event in self._run(
                     agent, message, start, seen, traced, pending_nav,
+                    name_cache,
                 ):
                     yield event
         except (httpx.HTTPError, ValueError, TypeError, KeyError,
@@ -366,8 +374,8 @@ class LangGraphProxyClient:
         return out
 
     async def _run(self, agent, message: str, start: float, seen: list,
-                   traced: list,
-                   pending_nav: list | None = None) -> AsyncIterator[str]:
+                   traced: list, pending_nav: list | None = None,
+                   name_cache: dict | None = None) -> AsyncIterator[str]:
         """Translate the graph's event stream into our SSE vocabulary.
 
         Deliberately narrow: the panel understands five event types and five
@@ -376,7 +384,7 @@ class LangGraphProxyClient:
         in `_on_message`, flat, rather than nested inside this loop.
         """
         state = {"announced": 0, "streaming": False, "text_len": 0,
-                 "name_cache": {},
+                 "name_cache": name_cache if name_cache is not None else {},
                  "usage": {"input_tokens": 0, "output_tokens": 0}}
 
         async for mode, chunk in agent.astream(

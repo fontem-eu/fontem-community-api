@@ -16,7 +16,7 @@ import pytest
 from src.assistant import local_models, tool_budget
 from src.assistant import pydantic_ai_client as pai
 from src.assistant.engine_tools import turn_tool_specs
-from src.assistant.mistral_client import _turn_tools
+from src.assistant.tool_runtime import _turn_tools, resolve_route
 
 ROUTES = [{"path": "/map", "description": "Atlas"}]
 
@@ -50,11 +50,24 @@ def test_the_model_id_is_resolved_to_the_served_name():
     The prod agent runs in router mode and serves "qwen3-4b-q4_k_m";
     LOCAL_LLM_MODEL holds the id. Passing the id through is a 400 on every
     single turn — the flag right, the env right, and nothing working.
+
+    Asserted through resolve_route rather than by grepping this executor's
+    source: the resolution moved there when the hand-written loop was
+    decommissioned, and both executors now get it from the same place.
     """
     assert local_models.resolve("qwen3-4b").served_name == "qwen3-4b-q4_k_m"
+    route, err = resolve_route(
+        {}, local_url="http://llm", local_model_id="qwen3-4b",
+        default_model="unused",
+    )
+    assert err == ""
+    assert route.model == "qwen3-4b-q4_k_m", (
+        "the served name must reach the server, not the id we store"
+    )
+    # And this executor must take the model from the route, not re-derive it.
     src = pathlib.Path(pai.__file__).read_text("utf-8")
-    assert "local_models.resolve(" in src
-    assert "served_name" in src
+    assert "resolve_route(" in src
+    assert "route.model" in src
 
 
 def test_the_tool_budget_is_the_shared_one():
@@ -91,22 +104,25 @@ async def test_a_missing_dependency_degrades_to_an_error_event(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_byok_turn_is_handed_back_to_the_native_client():
-    """Never silently downgrade someone spending their own key."""
-    client = pai.PydanticAIProxyClient(local_url="http://llm")
-    seen = []
+async def test_a_byok_turn_is_served_here_not_handed_to_a_loop_that_is_gone():
+    """Never silently downgrade someone spending their own key.
 
-    async def fake_native_stream(payload):
-        seen.append(payload)
-        yield 'event: chunk\ndata: {"text":"from native"}\n\n'
-
-    # pylint: disable=protected-access
-    client._native.stream = fake_native_stream
-    body = "".join([e async for e in client.stream({
-        "message": "hi", "credential": ("mistral", "sk-user", "magistral-medium-latest"),
-    })])
-    assert "from native" in body
-    assert len(seen) == 1
+    This used to delegate to the hand-written executor. That executor was
+    decommissioned — and it sent every provider's key to Mistral's URL, so
+    an OpenAI key could only ever come back 401. The turn is routed here
+    now, and routing is asserted directly in test_turn_routing.py.
+    """
+    client = pai.PydanticAIProxyClient(local_url="http://llm", model="platform-default")
+    route, err = resolve_route(
+        {"provider": "mistral", "api_key": "sk-user", "model": "magistral-medium-latest"},
+        local_url="http://llm", local_model_id=None, default_model="platform-default",
+    )
+    assert err == ""
+    assert route.local is False, "a BYOK turn must not be answered by the local model"
+    assert route.api_key == "sk-user"
+    assert route.model == "magistral-medium-latest"
+    # And the executor no longer keeps a loop to hand anything to.
+    assert not hasattr(client, "_native")
 
 
 def test_a_propose_edit_call_carries_the_proposal_the_card_renders():

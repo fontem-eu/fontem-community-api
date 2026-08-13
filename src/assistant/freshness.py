@@ -1,6 +1,6 @@
 """Formatting for the per-source coverage block.
 
-Split out of mistral_client for its 1000-line cap. Pure string shaping over
+Split out of the tool runtime for its 1000-line cap. Pure string shaping over
 a payload; no client state.
 
 Worth knowing while reading this: the endpoint it formats has never returned
