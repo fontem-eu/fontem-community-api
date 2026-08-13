@@ -13,9 +13,14 @@ be stored.
 import pytest
 
 
-def test_an_api_response_says_no_store(client):
+def test_an_api_response_refuses_every_kind_of_cache(client):
     r = client.get("/capi/activity")
-    assert r.headers.get("cache-control") == "no-store"
+    cc = r.headers.get("cache-control", "")
+    # no-store alone was not enough: ZAP kept flagging /capi/activity and
+    # /capi/users/me with the header present. The rest is what older
+    # intermediaries actually honour.
+    for directive in ("no-store", "no-cache", "must-revalidate", "private"):
+        assert directive in cc, f"{directive!r} missing from {cc!r}"
 
 
 def test_an_unauthenticated_response_says_it_too(client):
@@ -24,7 +29,7 @@ def test_an_unauthenticated_response_says_it_too(client):
     # checks.
     r = client.get("/capi/investigations")
     assert r.status_code in (200, 401, 403, 404, 422)
-    assert r.headers.get("cache-control") == "no-store"
+    assert "no-store" in r.headers.get("cache-control", "")
 
 
 def test_the_existing_security_headers_are_still_there(client):

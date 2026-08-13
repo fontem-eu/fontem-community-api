@@ -177,7 +177,15 @@ def build_app(database_url: str | None = None) -> FastAPI:
         # "correct but occasionally stale" is not worth the branch. Static
         # assets are served by nginx, not from here, so the caching that
         # actually pays is untouched.
-        response.headers.setdefault("Cache-Control", "no-store")
+        # The full directive set, not just no-store. ZAP's rule 10015 kept
+        # flagging /capi/activity and /capi/users/me after no-store alone was
+        # in place (verified live: the header was there and the alert fired
+        # anyway), and the extra directives are what old intermediaries
+        # actually honour — no-store is HTTP/1.1, no-cache + must-revalidate
+        # cover proxies that predate it, and private keeps shared caches out
+        # even if one ignores the rest.
+        response.headers.setdefault(
+            "Cache-Control", "no-store, no-cache, must-revalidate, private")
         return response
 
     # Exception handlers below take ``request`` as the first positional
