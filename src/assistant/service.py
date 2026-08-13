@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator as TypingAsyncIterator, Protocol
 
@@ -202,8 +202,7 @@ class AssistantService:
         # in-process, so nothing about the transport would say so — this is
         # the only place that knows.
         audit_token = audit_context.set_current(
-            replace(
-                audit_context.current(),
+            audit_context.current().derive(
                 actor_id=req.user_id,
                 actor_kind=audit_context.AGENT,
                 conversation_id=conv.id,

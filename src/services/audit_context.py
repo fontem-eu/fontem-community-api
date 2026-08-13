@@ -24,7 +24,7 @@ Two consequences worth stating plainly:
 from __future__ import annotations
 
 import contextvars
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 USER = "user"
 AGENT = "agent"
@@ -64,6 +64,26 @@ class AuditContext:
     @property
     def is_agent(self) -> bool:
         return self.actor_kind == AGENT
+
+    def derive(self, **changes) -> "AuditContext":
+        """A copy with some fields changed.
+
+        Written out rather than using dataclasses.replace so the return type
+        is this class and not a structural protocol — and so the one subtle
+        part is visible: `written` is passed through by reference, which is
+        what lets a nested tool-call scope report back to the request that
+        opened it.
+        """
+        fields = {
+            "actor_id": self.actor_id,
+            "actor_kind": self.actor_kind,
+            "request_id": self.request_id,
+            "conversation_id": self.conversation_id,
+            "message_id": self.message_id,
+            "written": self.written,
+        }
+        fields.update(changes)
+        return AuditContext(**fields)
 
     def note(self, entity_type: str, action: str) -> None:
         """Called when something is recorded under this context."""
@@ -115,7 +135,7 @@ class tool_call:  # pylint: disable=invalid-name
         self._token = None
 
     def __enter__(self) -> AuditContext:
-        ctx = replace(current(), message_id=self._message_id)
+        ctx = current().derive(message_id=self._message_id)
         self._token = set_current(ctx)
         return ctx
 
