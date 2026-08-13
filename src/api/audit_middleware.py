@@ -27,6 +27,7 @@ import logging
 import uuid
 
 import jwt
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from src.api.auth import JWT_ALGORITHM, JWT_SECRET
@@ -84,8 +85,7 @@ def install(app, activity_factory) -> None:
     """Attach the middleware. ``activity_factory`` takes a request and
     returns an ActivityService, or None when one cannot be built."""
 
-    @app.middleware("http")
-    async def audit(request: Request, call_next):  # pylint: disable=unused-variable
+    async def audit(request: Request, call_next):
         path = request.url.path
         if not should_audit(request.method, path):
             return await call_next(request)
@@ -109,6 +109,13 @@ def install(app, activity_factory) -> None:
                 and not _is_stream(response)):
             await _record_generic(request, response, ctx, activity_factory)
         return response
+
+    # add_middleware rather than the @app.middleware decorator: the decorator
+    # is FastAPI's, and this needs to install onto a plain Starlette app too
+    # — which is how the streaming behaviour is tested without standing up
+    # the whole application. Same placement either way: the most recently
+    # added middleware is the outermost.
+    app.add_middleware(BaseHTTPMiddleware, dispatch=audit)
 
 
 def _is_stream(response) -> bool:
