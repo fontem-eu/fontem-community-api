@@ -20,7 +20,7 @@ validated.
 from __future__ import annotations
 
 import re
-from dataclasses import replace
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from src.domain.named_query import (
@@ -128,7 +128,7 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
         if current is None:
             raise NotFound(f"Named query {query_id} not found")
 
-        updated: NamedQuery = replace(current)
+        updated = deepcopy(current)
         if fields.get("slug") is not None:
             slug = self._validate_slug(fields["slug"])
             clash = await self._repo.get_query_by_slug(slug)
@@ -304,7 +304,7 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
         current = await self._repo.get_group(group_id)
         if current is None:
             raise NotFound(f"Query group {group_id} not found")
-        updated: QueryGroup = replace(current)
+        updated = deepcopy(current)
         if fields.get("slug") is not None:
             slug = self._validate_slug(fields["slug"])
             clash = await self._repo.get_group_by_slug(slug)
