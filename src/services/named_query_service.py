@@ -35,7 +35,7 @@ from src.repositories.named_query_repository import NamedQueryRepository
 from src.services import feed_contract
 from src.services.authz import Action, AuthorizationService
 from src.services.exceptions import Conflict, InvalidInput, NotFound
-from src.services.query_executor import ExecResult, QueryExecutor
+from src.services.query_executor import QueryExecutor
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -128,7 +128,7 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
         if current is None:
             raise NotFound(f"Named query {query_id} not found")
 
-        updated = replace(current)
+        updated: NamedQuery = replace(current)
         if fields.get("slug") is not None:
             slug = self._validate_slug(fields["slug"])
             clash = await self._repo.get_query_by_slug(slug)
@@ -214,7 +214,6 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
         blocking = [c for c in checks if not c.passed and c.id in
                     ("lang", "not_empty", "size", "read_only")]
 
-        first = ExecResult()
         if blocking:
             # Don't execute something we already know the proxy will reject;
             # the static failure is the useful message.
@@ -305,7 +304,7 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
         current = await self._repo.get_group(group_id)
         if current is None:
             raise NotFound(f"Query group {group_id} not found")
-        updated = replace(current)
+        updated: QueryGroup = replace(current)
         if fields.get("slug") is not None:
             slug = self._validate_slug(fields["slug"])
             clash = await self._repo.get_group_by_slug(slug)

@@ -71,8 +71,9 @@ def sample_params() -> dict:
     return {"nuts": list(SAMPLE_NUTS), "since": since.isoformat()}
 
 
-def _bind_pattern(lang: str, name: str) -> re.Pattern:
-    """The engine's own placeholder syntax for ``name``.
+def _bind_pattern(lang: str, name: str) -> re.Pattern | None:
+    """The engine's own placeholder syntax for ``name``, or None if the engine
+    has no bind protocol at all.
 
     We look for the native form rather than a neutral ``:name`` because the
     query text is passed to the driver verbatim — rewriting placeholders is
@@ -82,9 +83,15 @@ def _bind_pattern(lang: str, name: str) -> re.Pattern:
         return re.compile(r"%\(\s*" + re.escape(name) + r"\s*\)s")
     if lang == "cypher":
         return re.compile(r"\$" + re.escape(name) + r"\b")
-    # SPARQL has no bind protocol; nothing can match, which is the honest
-    # answer and shows up as a failing check with a reason.
-    return re.compile(r"(?!x)x")
+    # SPARQL. None rather than a pattern that cannot match: "this engine has
+    # no binds" is a different statement from "the bind is absent", and the
+    # caller reports it differently.
+    return None
+
+
+def _declares_bind(lang: str, body: str, name: str) -> bool:
+    pattern = _bind_pattern(lang, name)
+    return bool(pattern and pattern.search(body))
 
 
 def _check(cid: str, passed: bool, reason: str) -> ContractCheck:
@@ -125,7 +132,7 @@ def static_checks(nq: NamedQuery) -> list[ContractCheck]:
     ))
 
     for bind in STANDARD_BINDS:
-        found = bool(_bind_pattern(nq.lang, bind).search(body))
+        found = _declares_bind(nq.lang, body, bind)
         out.append(_check(
             f"binds_{bind}",
             found,
@@ -180,9 +187,7 @@ def runtime_checks(first, second) -> list[ContractCheck]:
     if missing:
         return out
 
-    idx = {c: cols.index(c) for c in REQUIRED_COLUMNS}
     rows = first.rows or []
-
     if not rows:
         # Not a failure. An empty window is a normal state for a feed, and
         # failing here would make every quiet query un-publishable. Say so
@@ -194,47 +199,51 @@ def runtime_checks(first, second) -> list[ContractCheck]:
         ))
         return out
 
-    ids = [r[idx["item_id"]] for r in rows]
+    ids = _column(first, "item_id")
+    out.extend(_value_checks(ids, _column(first, "item_time")))
+    out.append(_stability_check(ids, second))
+    return out
+
+
+def _column(result, name: str) -> list:
+    """Values of ``name`` from a result, or [] if it does not project it."""
+    cols = list(result.columns or [])
+    if name not in cols:
+        return []
+    at = cols.index(name)
+    return [row[at] for row in (result.rows or [])]
+
+
+def _value_checks(ids: list, times: list) -> list[ContractCheck]:
     non_null = all(i is not None and str(i).strip() != "" for i in ids)
-    out.append(_check(
-        "item_id_present", non_null,
-        "every item_id is populated" if non_null
-        else "at least one row has a null or empty item_id",
-    ))
-
     unique = len(set(map(str, ids))) == len(ids)
-    out.append(_check(
-        "item_id_unique", unique,
-        f"{len(ids)} rows, all item_ids distinct" if unique
-        else f"{len(ids) - len(set(map(str, ids)))} duplicate item_id(s) — RSS "
-             "readers would collapse them into one item",
-    ))
-
-    times = [r[idx["item_time"]] for r in rows]
     parsed = all(_parses_as_time(t) for t in times)
-    out.append(_check(
-        "item_time_parses", parsed,
-        "every item_time parses as a timestamp" if parsed
-        else "at least one item_time is not a parseable timestamp",
-    ))
+    return [
+        _check("item_id_present", non_null,
+               "every item_id is populated" if non_null
+               else "at least one row has a null or empty item_id"),
+        _check("item_id_unique", unique,
+               f"{len(ids)} rows, all item_ids distinct" if unique
+               else f"{len(ids) - len(set(map(str, ids)))} duplicate item_id(s) — "
+                    "RSS readers would collapse them into one item"),
+        _check("item_time_parses", parsed,
+               "every item_time parses as a timestamp" if parsed
+               else "at least one item_time is not a parseable timestamp"),
+    ]
 
+
+def _stability_check(ids: list, second) -> ContractCheck:
+    """The whole reason the query is run twice."""
     if second is None or second.error:
-        out.append(_check(
-            "item_id_stable", False,
-            "could not re-run the query to confirm item_id stability",
-        ))
-        return out
-
-    second_ids = [r[list(second.columns).index("item_id")] for r in (second.rows or [])] \
-        if "item_id" in (second.columns or []) else []
-    stable = list(map(str, ids)) == list(map(str, second_ids))
-    out.append(_check(
+        return _check("item_id_stable", False,
+                      "could not re-run the query to confirm item_id stability")
+    stable = list(map(str, ids)) == list(map(str, _column(second, "item_id")))
+    return _check(
         "item_id_stable", stable,
         "item_ids identical across two runs" if stable
         else "item_ids changed between two identical runs — the id is derived "
              "from row position, not from the item itself",
-    ))
-    return out
+    )
 
 
 def _parses_as_time(value) -> bool:
