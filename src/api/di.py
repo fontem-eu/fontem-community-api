@@ -37,6 +37,7 @@ from src.infra.postgres.pg_investigation_repo import PgInvestigationRepository
 from src.infra.postgres.pg_dossier_repo import PgDossierRepository
 from src.infra.postgres.pg_visualization_repo import PgVisualizationRepository
 from src.infra.postgres.pg_data_project_repo import PgDataProjectRepository
+from src.infra.postgres.pg_named_query_repo import PgNamedQueryRepository
 from src.infra.postgres.pg_resource_grant_repo import PgResourceGrantRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
 from src.infra.postgres.pg_activity_repo import PgActivityRepository
@@ -54,6 +55,7 @@ from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.dossier_repository import DossierRepository
 from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.data_project_repository import DataProjectRepository
+from src.repositories.named_query_repository import NamedQueryRepository
 from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.activity_repository import ActivityRepository
@@ -72,6 +74,8 @@ from src.services.group_service import GroupService
 from src.services.investigation_service import InvestigationService
 from src.services.visualization_service import VisualizationService
 from src.services.data_project_service import DataProjectService
+from src.services.named_query_service import NamedQueryService
+from src.services.query_executor import HttpQueryExecutor, QueryExecutor
 from src.services.dossier_service import DossierService
 from src.services.issue_service import IssueService
 from src.services.activity_service import ActivityService
@@ -173,6 +177,10 @@ class RepositoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def data_project_repo(self, session: AsyncSession) -> DataProjectRepository:
         return PgDataProjectRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def named_query_repo(self, session: AsyncSession) -> NamedQueryRepository:
+        return PgNamedQueryRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def resource_grant_repo(self, session: AsyncSession) -> ResourceGrantRepository:
@@ -354,6 +362,22 @@ class ServiceProvider(Provider):
         return DataProjectService(
             repo=repo, investigations=investigations, authz=authz, grants=grants, users=users,
         )
+
+    @provide(scope=Scope.APP)
+    def query_executor(self) -> QueryExecutor:
+        # APP scope: the executor is stateless config (base URL + timeout).
+        # It opens a short-lived httpx client per call rather than holding a
+        # pool, because validation runs are rare and bursty.
+        return HttpQueryExecutor()
+
+    @provide(scope=Scope.REQUEST)
+    def named_query_service(
+        self,
+        repo: NamedQueryRepository,
+        authz: AuthorizationService,
+        executor: QueryExecutor,
+    ) -> NamedQueryService:
+        return NamedQueryService(repo=repo, authz=authz, executor=executor)
 
     @provide(scope=Scope.REQUEST)
     def report_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments

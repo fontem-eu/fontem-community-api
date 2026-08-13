@@ -120,3 +120,13 @@ class Action(StrEnum):
 
     # ── Flowers (clap) ────────────────────────────────────────
     FLOWERS_GIVE = "flowers:give"
+
+    # ── Feed-query catalogue ──────────────────────────────────
+    # Editorially-curated named queries and the groups they sit in — the
+    # substrate for the notable-events feed. Admin-only to write: a named
+    # query is platform content that ends up published to every visitor,
+    # and a bad one gets executed on a schedule for every subscriber.
+    # Reading the catalogue is public (it is the feed picker).
+    FEEDS_MANAGE_QUERIES = "feeds:manage_queries"
+    FEEDS_MANAGE_GROUPS = "feeds:manage_groups"
+    FEEDS_READ_CATALOG = "feeds:read_catalog"

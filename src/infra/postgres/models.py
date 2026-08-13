@@ -871,3 +871,78 @@ class McpTokenModel(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True,
     )
+
+
+# ── Feed-query catalogue ────────────────────────────────────────────
+# Editorially-curated queries and the groups they sit in. Separate from
+# data_queries (Data Studio), which is project-scoped and owner-private —
+# a personal workspace artifact rather than platform content.
+
+
+class NamedQueryModel(Base):
+    __tablename__ = "named_queries"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    # The stable public reference. Subscriptions and feed URLs point at the
+    # slug, not the uuid, so a query can be rewritten without breaking them.
+    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    lang: Mapped[str] = mapped_column(Text, nullable=False, default="sql")
+    query: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    params: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
+    waivers: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    contract_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # The full verdict, kept as written so a later reviewer can see which
+    # checks passed and what each one cost, not just the boolean.
+    contract_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    validated_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+    )
+    created_by: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
+    )
+
+
+class QueryGroupModel(Base):
+    __tablename__ = "query_groups"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    visibility: Mapped[str] = mapped_column(Text, nullable=False, default="public")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
+    )
+
+
+class QueryGroupMemberModel(Base):
+    """Many-to-many between groups and named queries.
+
+    sort_order lives on the membership row, not on the query, so the same
+    query can sit at a different position in each group it belongs to.
+    """
+
+    __tablename__ = "query_group_members"
+
+    group_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("query_groups.id", ondelete="CASCADE"),
+        primary_key=True, nullable=False,
+    )
+    query_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("named_queries.id", ondelete="CASCADE"),
+        primary_key=True, nullable=False,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

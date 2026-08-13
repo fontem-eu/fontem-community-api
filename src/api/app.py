@@ -17,7 +17,7 @@ from sqlalchemy.exc import DBAPIError
 from src.api.di import make_container
 from src.api.rate_limit import limiter
 from src.api.routers import (
-    activity, auth, data_projects, dossiers, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
+    activity, auth, data_projects, dossiers, feed_catalogue, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
 )
 from src.assistant import router as assistant_router
 from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
@@ -295,6 +295,10 @@ def build_app(database_url: str | None = None) -> FastAPI:
     # /me/followed-tags). No prefix; tag paths are namespaced by their
     # own routes.
     application.include_router(tags.router)
+    # Feed-query catalogue — admin CRUD under /admin/*, plus the anonymous
+    # GET /query-groups the feed picker reads. No prefix: the admin paths are
+    # already namespaced by their own routes.
+    application.include_router(feed_catalogue.router)
 
     @application.get("/health", tags=["Health"])
     async def health() -> dict:

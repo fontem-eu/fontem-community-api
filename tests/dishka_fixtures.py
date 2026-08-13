@@ -25,6 +25,7 @@ from src.repositories.investigation_repository import InvestigationRepository
 from src.repositories.dossier_repository import DossierRepository
 from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.data_project_repository import DataProjectRepository
+from src.repositories.named_query_repository import NamedQueryRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.activity_repository import ActivityRepository
 from src.repositories.user_profile_repository import UserProfileRepository
@@ -48,6 +49,7 @@ from src.services.investigation_service import InvestigationService
 from src.services.dossier_service import DossierService
 from src.services.visualization_service import VisualizationService
 from src.services.data_project_service import DataProjectService
+from src.services.named_query_service import NamedQueryService
 from src.services.report_service import ReportService
 from src.services.flower_service import FlowerService
 from src.services.refresh_token_service import RefreshTokenService
@@ -204,6 +206,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def data_project_service(self) -> DataProjectService:
         return self._svc["data_project_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def named_query_repo(self) -> NamedQueryRepository:
+        return self._svc["named_query_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def named_query_service(self) -> NamedQueryService:
+        return self._svc["named_query_svc"]
 
     @provide(scope=Scope.REQUEST)
     def report_service(self) -> ReportService:
