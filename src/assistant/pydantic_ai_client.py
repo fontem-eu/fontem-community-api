@@ -233,7 +233,7 @@ class PydanticAIProxyClient:
                 tools = self._build_tools(
                     client, tool_cls, specs, nav_routes, budget,
                     payload.get("studio_ops"), pending_nav, name_cache,
-                    traced, payload.get("audit"),
+                    traced,
                 )
                 # The name the SERVER serves, not the id we store. The
                 # production agent runs in router mode and answers to
