@@ -135,6 +135,20 @@ class LangGraphProxyClient:
         self._local_url = local_url
         self._local_model = local_model
 
+    @staticmethod
+    def _navigate(path: str, nav_routes: list, pending_nav: list) -> str:
+        """Serve one navigate call: receipt for the model, emit for the panel.
+
+        The emit is queued rather than returned because the tool closures
+        cannot yield; the stream loop drains it. Dropping it is what made the
+        assistant claim to navigate while the page stayed put, so it is kept
+        in one place that both the sync and async bridges call.
+        """
+        result, emit = navigation.navigate_result(path, nav_routes)
+        if emit:
+            pending_nav.append(emit)
+        return result
+
     def _build_tools(self, client: httpx.AsyncClient, structured_tool,
                      specs: list[dict], nav_routes: list, seen: list,
                      budget: list[int], traced: list, studio,
@@ -158,18 +172,8 @@ class LangGraphProxyClient:
                 # Studio tool is registered with `coroutine=arun`, so this
                 # path is never the one that serves them.
                 if _name == navigation.NAVIGATE_TOOL_NAME:
-                    # The result is only the model's receipt; the panel moves
-                    # because of the `navigate` SSE event. This closure cannot
-                    # yield one, so the emit rides along in `pending_nav` and
-                    # _drain_navigations sends it — the same arrangement the
-                    # tool traces already use. Dropping it made the assistant
-                    # claim to navigate while the page stayed put.
-                    result, emit = navigation.navigate_result(
-                        kwargs.get("path", ""), nav_routes,
-                    )
-                    if emit:
-                        pending_nav.append(emit)
-                    return result
+                    return self._navigate(
+                        kwargs.get("path", ""), nav_routes, pending_nav)
                 # Sync bridge: create_agent calls tools synchronously unless
                 # they are coroutines, and the executor is async.
                 raise NotImplementedError
@@ -186,18 +190,8 @@ class LangGraphProxyClient:
                                      "for this turn"})
                     return await studio.execute(_name, kwargs)
                 if _name == navigation.NAVIGATE_TOOL_NAME:
-                    # The result is only the model's receipt; the panel moves
-                    # because of the `navigate` SSE event. This closure cannot
-                    # yield one, so the emit rides along in `pending_nav` and
-                    # _drain_navigations sends it — the same arrangement the
-                    # tool traces already use. Dropping it made the assistant
-                    # claim to navigate while the page stayed put.
-                    result, emit = navigation.navigate_result(
-                        kwargs.get("path", ""), nav_routes,
-                    )
-                    if emit:
-                        pending_nav.append(emit)
-                    return result
+                    return self._navigate(
+                        kwargs.get("path", ""), nav_routes, pending_nav)
                 raw = await self._native._execute_tool(  # pylint: disable=protected-access
                     client, _name, kwargs,
                 )
