@@ -625,6 +625,15 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     # Flowers — any authenticated user (the service handles cap +
     # visibility internally; this is just the "logged in" gate).
     Action.FLOWERS_GIVE: _trust_at_least_factory("new_user"),
+
+    # Feed-query catalogue — admin-only to write. These queries are
+    # published to every visitor and then run on a schedule for every
+    # subscriber, so authoring one is an editorial act with a cost, not
+    # a personal workspace action (that is Data Studio, which stays at
+    # contributor level). Reading the catalogue is public.
+    Action.FEEDS_MANAGE_QUERIES: _trust_at_least_factory("admin"),
+    Action.FEEDS_MANAGE_GROUPS: _trust_at_least_factory("admin"),
+    Action.FEEDS_READ_CATALOG: _public_read,
 }
 
 

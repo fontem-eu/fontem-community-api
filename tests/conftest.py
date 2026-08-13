@@ -51,6 +51,7 @@ from src.infra.memory.mem_investigation_repo import InMemoryInvestigationReposit
 from src.infra.memory.mem_dossier_repo import InMemoryDossierRepository
 from src.infra.memory.mem_visualization_repo import InMemoryVisualizationRepository
 from src.infra.memory.mem_data_project_repo import InMemoryDataProjectRepository
+from src.infra.memory.mem_named_query_repo import InMemoryNamedQueryRepository
 from src.infra.memory.mem_resource_grant_repo import InMemoryResourceGrantRepository
 from src.infra.memory.mem_issue_repo import InMemoryIssueRepository
 from src.infra.memory.mem_activity_repo import InMemoryActivityRepository
@@ -76,6 +77,8 @@ from src.services.dossier_service import DossierService
 from src.services.access_inheritance import AccessInheritance
 from src.services.visualization_service import VisualizationService
 from src.services.data_project_service import DataProjectService
+from src.services.named_query_service import NamedQueryService
+from tests.fake_query_executor import FakeQueryExecutor
 from src.services.report_service import ReportService
 from src.services.profile_service import ProfileService
 from src.services.flower_service import FlowerService
@@ -151,6 +154,10 @@ def services():
     visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
     data_project_svc = DataProjectService(
         data_project_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
+    named_query_repo = InMemoryNamedQueryRepository()
+    query_executor = FakeQueryExecutor()
+    named_query_svc = NamedQueryService(
+        repo=named_query_repo, authz=authz_svc, executor=query_executor)
     inheritance = AccessInheritance(investigation_repo, dossier_repo)
     report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance, user_repo, group_repo, activity_svc)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc, activity_svc)
@@ -175,6 +182,9 @@ def services():
         "visualization_svc": visualization_svc,
         "data_project_repo": data_project_repo,
         "data_project_svc": data_project_svc,
+        "named_query_repo": named_query_repo,
+        "named_query_svc": named_query_svc,
+        "query_executor": query_executor,
         "report_repo": report_repo,
         "permission_repo": permission_repo,
         "issue_repo": issue_repo,
