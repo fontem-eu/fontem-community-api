@@ -4,7 +4,7 @@ Position is not cosmetic here. With navigate appended last, qwen3-4b stopped
 calling it entirely — no error, no warning, navigation simply stopped
 working. A refactor that appends it again would be invisible without this.
 """
-from src.assistant.mistral_client import _TOOLS, _turn_tools
+from src.assistant.tool_runtime import _TOOLS, _turn_tools
 
 ROUTES = [{"path": "/map", "description": "Atlas"}]
 

@@ -1,7 +1,7 @@
 """Tool names kept callable for conversations saved before the tool revamp.
 
 Not advertised in `_TOOLS`, so no model will choose one — they exist only so
-replaying an old thread does not error. Split out of mistral_client because
+replaying an old thread does not error. Split out of the tool runtime because
 they are pure request-building with no client state, and that module is
 capped at 1000 lines.
 """

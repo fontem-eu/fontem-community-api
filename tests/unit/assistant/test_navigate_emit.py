@@ -58,11 +58,11 @@ class _FakeTool:
 
 def _pai_navigate(path):
     """Invoke the pydantic-ai navigate closure; return (result, pending)."""
-    client = pai.PydanticAIProxyClient(api_key="k", gmr_api_url="http://fake")
+    client = pai.PydanticAIProxyClient(gmr_api_url="http://fake")
     specs = [{"function": {"name": NAV, "description": "d", "parameters": {}}}]
     pending: list = []
     tools = client._build_tools(  # pylint: disable=protected-access
-        None, _FakeTool, specs, ROUTES, [10_000], None, pending,
+        None, _FakeTool, specs, ROUTES, [10_000], None, pending, {},
     )
     result = _run(tools[0].function(path=path))
     return result, pending
@@ -102,11 +102,11 @@ class _FakeStructuredTool:
 
 
 def _lg_tools(pending):
-    client = lg.LangGraphProxyClient(api_key="k", gmr_api_url="http://fake")
+    client = lg.LangGraphProxyClient(gmr_api_url="http://fake")
     specs = [{"function": {"name": NAV, "description": "d", "parameters": {}}}]
     return client._build_tools(  # pylint: disable=protected-access
         None, _FakeStructuredTool, specs, ROUTES, [], [10_000], [], None,
-        pending,
+        pending, {},
     )
 
 

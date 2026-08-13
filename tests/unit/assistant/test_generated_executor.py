@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from src.assistant.mistral_client import MistralProxyClient
+from src.assistant.tool_runtime import ToolRuntime
 
 
 class _Resp:
@@ -27,7 +27,7 @@ class _Client:
 
 
 def _client_with(tools):
-    proxy = MistralProxyClient(api_key="", gmr_api_url="http://api")
+    proxy = ToolRuntime(gmr_api_url="http://api")
     proxy._generated = tools  # pylint: disable=protected-access
     return proxy
 

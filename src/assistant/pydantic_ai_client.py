@@ -39,18 +39,19 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from src.assistant import (
-    local_models, navigation, studio_tools, tool_budget, tool_trace,
-)
+from src.assistant import navigation, studio_tools, tool_budget, tool_trace
 from src.assistant.engine_tools import turn_tool_specs
 from src.assistant import generated_tools
-from src.assistant.mistral_client import (
+from src.assistant.tool_runtime import (
     _DEFAULT_GMR_API,
     _sse,
     _system_prompt_with_today,
     _tool_detail,
-    MistralProxyClient,
+    resolve_route,
+    ToolRuntime,
 )
+from src.assistant.entities import _capture_names
+from src.assistant.language import _language_directive
 
 #: Matches the other engines so a comparison measures the loop, not a
 #: different budget.
@@ -106,13 +107,15 @@ def _import_pydantic_ai():
 class PydanticAIProxyClient:
     """ProxyClient built on ``pydantic_ai.Agent``."""
 
-    def __init__(self, *, api_key: str = "", model: str = "",
+    def __init__(self, *, model: str = "",
                  gmr_api_url: str = _DEFAULT_GMR_API,
                  local_url: str = "", local_model: str = "") -> None:
-        self._native = MistralProxyClient(
-            api_key=api_key, model=model, gmr_api_url=gmr_api_url,
-            local_url=local_url, local_model=local_model,
-        )
+        self._tools = ToolRuntime(gmr_api_url=gmr_api_url)
+        # No platform key: a turn either carries the caller's own
+        # credential or is answered by the cluster-local model. The
+        # decommissioned loop ended with "else spend the platform
+        # key", which moved the bill without telling anybody.
+        self._model = model
         self._gmr_api_url = gmr_api_url
         self._local_url = local_url
         self._local_model = local_model
@@ -123,7 +126,7 @@ class PydanticAIProxyClient:
 
     def _build_tools(self, client: httpx.AsyncClient, tool_cls,
                      specs: list[dict], nav_routes: list, budget: list[int],
-                     studio, pending_nav: list):
+                     studio, pending_nav: list, name_cache: dict):
         """Wrap our JSON-schema tools over the shared executor.
 
         ``Tool.from_schema`` takes the schema as-is, so the model sees exactly
@@ -162,9 +165,15 @@ class PydanticAIProxyClient:
                     if emit:
                         pending_nav.append(emit)
                     return result
-                raw = await self._native._execute_tool(  # pylint: disable=protected-access
-                    client, _name, kwargs,
-                )
+                raw = await self._tools.execute_tool(client, _name, kwargs)
+                # Keep the id->name mapping fresh from every result, so the
+                # status line says "Investigating Siemens Energy AG/ADR"
+                # rather than a UUID. Read from the FULL result, before the
+                # budget cap truncates it.
+                try:
+                    _capture_names(name_cache, json.loads(raw))
+                except (ValueError, TypeError):
+                    pass
                 capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
                 return capped
 
@@ -185,14 +194,18 @@ class PydanticAIProxyClient:
         # Never silently reroute a turn spending the caller's own key: this
         # executor has no credential path, and a different model on someone
         # else's bill is not a detail to discover from an invoice.
-        if payload.get("credential"):
-            async for event in self._native.stream(payload):
-                yield event
-            return
-
-        if not self._local_url:
-            yield _sse("error", {
-                "error": "pydantic-ai engine requires LOCAL_LLM_URL"})
+        # A turn spending the caller's own key used to be handed to the
+        # hand-written loop. That loop is gone, so it is served here — which
+        # also fixes it: the old path sent every provider's key to Mistral's
+        # URL, so an OpenAI key could only ever come back 401.
+        route, route_error = resolve_route(
+            payload.get("credential"),
+            local_url=self._local_url,
+            local_model_id=payload.get("local_model_id") or self._local_model,
+            default_model=self._model,
+        )
+        if route is None:
+            yield _sse("error", {"error": route_error})
             yield _sse("done", {})
             return
 
@@ -204,6 +217,13 @@ class PydanticAIProxyClient:
             return
 
         system = _system_prompt_with_today(payload.get("system", ""))
+        # Answer in the user's language. The hand-written loop did this and
+        # neither framework executor ever did, so switching production to
+        # this engine silently made the assistant reply in English to a
+        # Portuguese reader.
+        language = _language_directive(payload.get("locale"))
+        if language:
+            system = system.rstrip() + language
         nav = payload.get("nav") or {}
         nav_routes = nav.get("routes") or []
         has_editor = bool(payload.get("has_editor"))
@@ -219,24 +239,27 @@ class PydanticAIProxyClient:
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 # Navigate emits queue here; the tool closures cannot yield.
                 pending_nav: list = []
+                # One dict, shared by the tool closures that fill it and the
+                # status events that read it.
+                name_cache: dict[str, str] = {}
                 tools = self._build_tools(
                     client, tool_cls, specs, nav_routes, budget,
-                    payload.get("studio_ops"), pending_nav,
+                    payload.get("studio_ops"), pending_nav, name_cache,
                 )
                 # The name the SERVER serves, not the id we store. The
                 # production agent runs in router mode and answers to
                 # "qwen3-4b-q4_k_m"; asking it for "qwen3-4b" is a 400 that
                 # took the assistant down when the LangGraph executor was
                 # first switched on.
-                served = local_models.resolve(
-                    payload.get("local_model_id") or self._local_model,
-                ).served_name
-                model = model_cls(served, provider=provider_cls(
-                    base_url=self._local_url.rstrip("/") + "/v1",
-                    api_key="none"))
+                # `api_key="none"` rather than "" for the local server:
+                # the OpenAI client refuses to construct without one, and
+                # the cluster-local server ignores it.
+                model = model_cls(route.model, provider=provider_cls(
+                    base_url=route.base_url,
+                    api_key=route.api_key or "none"))
                 agent = agent_cls(model, system_prompt=system, tools=tools)
                 async for event in self._run(
-                    agent, message, start, pending_nav,
+                    agent, message, start, pending_nav, name_cache,
                 ):
                     yield event
         except (httpx.HTTPError, ValueError, TypeError, KeyError,
@@ -245,14 +268,16 @@ class PydanticAIProxyClient:
         yield _sse("done", {})
 
     async def _run(self, agent, message: str, start: float,
-                   pending_nav: list | None = None) -> AsyncIterator[str]:
+                   pending_nav: list | None = None,
+                   name_cache: dict | None = None) -> AsyncIterator[str]:
         """Translate PydanticAI's event stream into our SSE vocabulary.
 
         The per-event decision lives in `_translate`, flat, rather than as a
         branch chain nested inside this loop -- same behaviour, but readable
         without holding the loop state in your head.
         """
-        state = {"streaming": False, "text_len": 0, "name_cache": {},
+        state = {"streaming": False, "text_len": 0,
+                 "name_cache": name_cache if name_cache is not None else {},
                  "usage": {"input_tokens": 0, "output_tokens": 0}}
         async with agent.run_stream_events(message) as events:
             async for ev in events:

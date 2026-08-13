@@ -17,7 +17,7 @@ import pytest
 from src.assistant import langgraph_client as lg
 from src.assistant import local_models, tool_budget
 from src.assistant import navigation
-from src.assistant.mistral_client import _turn_tools
+from src.assistant.tool_runtime import _turn_tools, resolve_route
 
 
 def test_engine_is_off_unless_explicitly_selected(monkeypatch):
@@ -128,30 +128,25 @@ def test_di_selects_the_engine_from_the_environment(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_byok_turn_is_handed_back_to_the_native_client():
+async def test_a_byok_turn_is_served_here_not_handed_to_a_loop_that_is_gone():
     """Never silently downgrade someone spending their own key.
 
-    This executor has no credential path. Without this guard a user with
-    their own provider key configured would be rerouted to the platform's
-    local model — different model, different bill, and nothing in the UI
-    saying so. Zero users are affected today; the guard is what keeps that
-    true when the first one configures a key.
+    This used to delegate to the hand-written executor. That executor was
+    decommissioned — and it sent every provider's key to Mistral's URL, so
+    an OpenAI key could only ever come back 401. The turn is routed here
+    now, and routing is asserted directly in test_turn_routing.py.
     """
-    client = lg.LangGraphProxyClient(local_url="http://llm")
-    sent = []
-
-    async def fake_native_stream(payload):
-        sent.append(payload)
-        yield 'event: chunk\ndata: {"text":"from native"}\n\n'
-
-    # pylint: disable=protected-access
-    client._native.stream = fake_native_stream
-    body = "".join([e async for e in client.stream({
-        "message": "hi", "credential": ("mistral", "sk-user-key", "magistral-medium-latest"),
-    })])
-    assert "from native" in body
-    assert len(sent) == 1, "the turn never reached the native client"
-    assert "langgraph engine requires" not in body
+    client = lg.LangGraphProxyClient(local_url="http://llm", model="platform-default")
+    route, err = resolve_route(
+        {"provider": "mistral", "api_key": "sk-user", "model": "magistral-medium-latest"},
+        local_url="http://llm", local_model_id=None, default_model="platform-default",
+    )
+    assert err == ""
+    assert route.local is False, "a BYOK turn must not be answered by the local model"
+    assert route.api_key == "sk-user"
+    assert route.model == "magistral-medium-latest"
+    # And the executor no longer keeps a loop to hand anything to.
+    assert not hasattr(client, "_native")
 
 
 def test_the_model_id_is_resolved_to_the_name_the_server_serves():
@@ -160,11 +155,21 @@ def test_the_model_id_is_resolved_to_the_name_the_server_serves():
     Passing the id straight through is a 400 from llama-server, and it took
     the assistant down in production the moment this executor was switched
     on: the flag was correct, the env was correct, and every turn failed.
-    The native client has always resolved through local_models.
+    Asserted through resolve_route rather than by grepping this executor's
+    source: the resolution moved there when the hand-written loop was
+    decommissioned, and both executors now get it from the same place.
     """
     assert local_models.resolve("qwen3-4b").served_name == "qwen3-4b-q4_k_m"
     assert local_models.resolve("qwen3-1.7b").served_name == "qwen3-1.7b-q4_k_m"
-    # and the executor must be reaching for that, not the bare id
+    route, err = resolve_route(
+        {}, local_url="http://llm", local_model_id="qwen3-4b",
+        default_model="unused",
+    )
+    assert err == ""
+    assert route.model == "qwen3-4b-q4_k_m", (
+        "the served name must reach the server, not the id we store"
+    )
+    # and the executor must take the model from the route, not re-derive it
     src = pathlib.Path(lg.__file__).read_text("utf-8")
-    assert "local_models.resolve(" in src
-    assert "served_name" in src
+    assert "resolve_route(" in src
+    assert "route.model" in src

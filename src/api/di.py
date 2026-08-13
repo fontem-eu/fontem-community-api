@@ -23,10 +23,7 @@ from sqlalchemy.ext.asyncio import (
 
 from src.assistant.context import TurnLimits
 from src.assistant import langgraph_client, pydantic_ai_client
-from src.assistant.mistral_client import (
-    _DEFAULT_GMR_API,
-    MistralProxyClient,
-)
+from src.assistant.tool_runtime import _DEFAULT_GMR_API
 from src.assistant.pg_repository import PgAssistRepository
 from src.assistant.proxy_client import ClaudeProxyClient
 from src.assistant.repository import AssistRepository
@@ -505,45 +502,28 @@ class AssistantProvider(Provider):
     def proxy_client(self) -> ProxyClient:
         provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
         if provider == "mistral":
-            # A second executor, same ProxyClient protocol, chosen by
-            # ASSISTANT_ENGINE. Off unless explicitly asked for, so the
-            # native loop stays the default everywhere until the two have
-            # been compared on the same battery.
-            if pydantic_ai_client.engine_selected():
-                return pydantic_ai_client.PydanticAIProxyClient(
-                    api_key=os.environ.get("MISTRAL_API_KEY", ""),
-                    model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
-                    gmr_api_url=os.environ.get(
-                        "GMR_API_INTERNAL", _DEFAULT_GMR_API,
-                    ),
-                    local_url=os.environ.get("LOCAL_LLM_URL", ""),
-                    local_model=os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b"),
-                )
-            if langgraph_client.engine_selected():
-                return langgraph_client.LangGraphProxyClient(
-                    api_key=os.environ.get("MISTRAL_API_KEY", ""),
-                    model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
-                    gmr_api_url=os.environ.get(
-                        "GMR_API_INTERNAL", _DEFAULT_GMR_API,
-                    ),
-                    local_url=os.environ.get("LOCAL_LLM_URL", ""),
-                    local_model=os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b"),
-                )
-            return MistralProxyClient(
-                api_key=os.environ.get("MISTRAL_API_KEY", ""),
-                model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
-                gmr_api_url=os.environ.get(
-                    "GMR_API_INTERNAL", "http://fontem-api",
+            # Two executors, same ProxyClient protocol, chosen by
+            # ASSISTANT_ENGINE. The hand-written loop that used to be the
+            # default is gone, so PydanticAI IS the default — production has
+            # run it since 2026-08-12 and it is the only path the e2e battery
+            # exercises. `langgraph` is the one opt-in.
+            kwargs = {
+                # No platform key: a turn either carries the caller's own
+                # credential or is answered by the cluster-local model.
+                "model": os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
+                "gmr_api_url": os.environ.get(
+                    "GMR_API_INTERNAL", _DEFAULT_GMR_API,
                 ),
                 # Must be passed here. This provider constructs the client
                 # directly rather than going through from_env(), so a new
-                # constructor argument that is only wired into from_env()
-                # silently keeps its default — and the default for
-                # local_url is "no local server", which sends every
-                # keyless user to the platform Mistral key instead.
-                local_url=os.environ.get("LOCAL_LLM_URL", ""),
-                local_model=os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b"),
-            )
+                # constructor argument only wired into from_env() silently
+                # keeps its default.
+                "local_url": os.environ.get("LOCAL_LLM_URL", ""),
+                "local_model": os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b"),
+            }
+            if langgraph_client.engine_selected():
+                return langgraph_client.LangGraphProxyClient(**kwargs)
+            return pydantic_ai_client.PydanticAIProxyClient(**kwargs)
         url = os.environ.get(
             "CLAUDE_PROXY_URL",
             "http://claude-proxy.gmr.svc.cluster.local:8090",

@@ -23,10 +23,10 @@ from src.assistant import generated_tools, navigation, studio_tools
 
 
 def _builtin_tools() -> list[dict]:
-    """Imported lazily: mistral_client imports this module's siblings, and a
+    """Imported lazily: tool_runtime imports this module's siblings, and a
     module-level import here would close the cycle."""
     # pylint: disable=import-outside-toplevel
-    from src.assistant.mistral_client import _TOOLS
+    from src.assistant.tool_runtime import _TOOLS
     return list(_TOOLS)
 
 

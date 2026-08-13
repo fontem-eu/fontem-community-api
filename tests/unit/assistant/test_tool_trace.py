@@ -68,10 +68,8 @@ def test_every_engine_emits_the_same_event_name():
     the turn is a panel that will get it wrong."""
     # pylint: disable=import-outside-toplevel
     import pathlib
-    from src.assistant import (
-        langgraph_client, mistral_client, pydantic_ai_client,
-    )
-    for mod in (mistral_client, langgraph_client, pydantic_ai_client):
+    from src.assistant import langgraph_client, pydantic_ai_client
+    for mod in (langgraph_client, pydantic_ai_client):
         src = pathlib.Path(mod.__file__).read_text("utf-8")
         assert "tool_trace.EVENT" in src, f"{mod.__name__} does not emit it"
         assert "tool_trace.trace(" in src, f"{mod.__name__} builds no payload"

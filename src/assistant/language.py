@@ -1,6 +1,6 @@
 """Which language to answer in, from the platform's selected locale.
 
-Split out of mistral_client, which is capped at 1000 lines. Self-contained:
+Split out of the tool runtime, which is capped at 1000 lines. Self-contained:
 a locale string in, an instruction out, no client state involved.
 """
 from __future__ import annotations

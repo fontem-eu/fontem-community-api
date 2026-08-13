@@ -2,7 +2,7 @@
 Schema parity for the ``propose_edit`` tool.
 
 The assistant declares an action enum in
-``src/assistant/mistral_client.py`` (the Python side, what the model
+``src/assistant/tool_runtime.py`` (the Python side, what the model
 sees), and the frontend declares which actions it accepts in
 ``gmr-web/src/composables/useEditProposals.js`` (what the Apply
 button can actually do). When those two drift, the model proposes
@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from src.assistant.mistral_client import (
+from src.assistant.tool_runtime import (
     PROPOSE_EDIT_ACTIONS,
     PROPOSE_EDIT_LEGACY_ACTIONS,
     _TOOLS,
