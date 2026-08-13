@@ -60,6 +60,21 @@ ENGINE_ENV = "ASSISTANT_ENGINE"
 ENGINE_NAME = "pydantic-ai"
 
 
+def drain_navigations(pending_nav: list | None) -> list[str]:
+    """SSE events for navigations queued since the last check.
+
+    Separate from the tool closures because they cannot yield: they append
+    the emit and this drains it. Popping rather than reading matters — a
+    queue read twice navigates twice.
+    """
+    if not pending_nav:
+        return []
+    out = []
+    while pending_nav:
+        out.append(_sse("navigate", pending_nav.pop(0)))
+    return out
+
+
 def engine_selected() -> bool:
     """True when the deployment asked for this executor."""
     return os.environ.get(ENGINE_ENV, "").strip().lower() == ENGINE_NAME
@@ -102,8 +117,13 @@ class PydanticAIProxyClient:
         self._local_url = local_url
         self._local_model = local_model
 
+    @staticmethod
+    def _drain_navigations(pending_nav: list) -> list[str]:
+        return drain_navigations(pending_nav)
+
     def _build_tools(self, client: httpx.AsyncClient, tool_cls,
-                     specs: list[dict], nav_routes: list, budget: list[int], studio):
+                     specs: list[dict], nav_routes: list, budget: list[int],
+                     studio, pending_nav: list):
         """Wrap our JSON-schema tools over the shared executor.
 
         ``Tool.from_schema`` takes the schema as-is, so the model sees exactly
@@ -127,10 +147,20 @@ class PydanticAIProxyClient:
                     return await studio.execute(_name, kwargs)
                 if _name == navigation.NAVIGATE_TOOL_NAME:
                     # Runs in the browser, not here. The model is told
-                    # whether the path was accepted.
-                    result, _emit = navigation.navigate_result(
+                    # whether the path was accepted — but that result is only
+                    # its receipt. The panel moves because a `navigate` SSE
+                    # event reaches it, and this closure cannot yield one, so
+                    # the emit rides along in `pending_nav` and the stream
+                    # loop sends it (same shape as LangGraph's tool traces).
+                    #
+                    # Dropping the emit here is what made the assistant say
+                    # "I've taken you to the Atlas" while the page stayed
+                    # exactly where it was.
+                    result, emit = navigation.navigate_result(
                         kwargs.get("path", ""), nav_routes,
                     )
+                    if emit:
+                        pending_nav.append(emit)
                     return result
                 raw = await self._native._execute_tool(  # pylint: disable=protected-access
                     client, _name, kwargs,
@@ -187,9 +217,11 @@ class PydanticAIProxyClient:
                 )
                 specs = turn_tool_specs(gen_tools, has_editor, nav_routes)
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
+                # Navigate emits queue here; the tool closures cannot yield.
+                pending_nav: list = []
                 tools = self._build_tools(
                     client, tool_cls, specs, nav_routes, budget,
-                    payload.get("studio_ops"),
+                    payload.get("studio_ops"), pending_nav,
                 )
                 # The name the SERVER serves, not the id we store. The
                 # production agent runs in router mode and answers to
@@ -203,15 +235,17 @@ class PydanticAIProxyClient:
                     base_url=self._local_url.rstrip("/") + "/v1",
                     api_key="none"))
                 agent = agent_cls(model, system_prompt=system, tools=tools)
-                async for event in self._run(agent, message, start):
+                async for event in self._run(
+                    agent, message, start, pending_nav,
+                ):
                     yield event
         except (httpx.HTTPError, ValueError, TypeError, KeyError,
                 RuntimeError) as exc:
             yield _sse("error", {"error": f"{type(exc).__name__}: {exc}"})
         yield _sse("done", {})
 
-    async def _run(self, agent, message: str,
-                   start: float) -> AsyncIterator[str]:
+    async def _run(self, agent, message: str, start: float,
+                   pending_nav: list | None = None) -> AsyncIterator[str]:
         """Translate PydanticAI's event stream into our SSE vocabulary.
 
         The per-event decision lives in `_translate`, flat, rather than as a
@@ -223,6 +257,10 @@ class PydanticAIProxyClient:
         async with agent.run_stream_events(message) as events:
             async for ev in events:
                 for out in self._translate(ev, state, start):
+                    yield out
+                # After the tool result, so the panel has already drawn the
+                # trace bubble by the time it is asked to move.
+                for out in drain_navigations(pending_nav):
                     yield out
 
         if not state["text_len"]:
