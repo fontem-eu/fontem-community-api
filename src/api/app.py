@@ -163,6 +163,21 @@ def build_app(database_url: str | None = None) -> FastAPI:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        # Nothing this API returns belongs in a cache. Verified against the
+        # dast environment on 2026-08-13: /capi/investigations,
+        # /capi/studio/projects and /capi/activity all answered 200 with a
+        # user's own records and no cache directives at all, so a browser
+        # or an intermediary was free to keep them and hand them to whoever
+        # asked next. ZAP reports it as "Re-examine Cache-control
+        # Directives" (160 instances); the objection that matters is that
+        # these are somebody's private records.
+        #
+        # Set unconditionally rather than only on authenticated routes: the
+        # public endpoints return data that changes on every publish, and
+        # "correct but occasionally stale" is not worth the branch. Static
+        # assets are served by nginx, not from here, so the caching that
+        # actually pays is untouched.
+        response.headers.setdefault("Cache-Control", "no-store")
         return response
 
     # Exception handlers below take ``request`` as the first positional
