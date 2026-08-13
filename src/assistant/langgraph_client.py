@@ -73,6 +73,21 @@ ENGINE_ENV = "ASSISTANT_ENGINE"
 ENGINE_NAME = "langgraph"
 
 
+def drain_navigations(pending_nav: list | None) -> list[str]:
+    """SSE events for navigations queued since the last check.
+
+    Separate from the tool closures because they cannot yield: they append
+    the emit and this drains it. Popping rather than reading matters — a
+    queue read twice navigates twice.
+    """
+    if not pending_nav:
+        return []
+    out = []
+    while pending_nav:
+        out.append(_sse("navigate", pending_nav.pop(0)))
+    return out
+
+
 def engine_selected() -> bool:
     """True when the deployment asked for this executor."""
     return os.environ.get(ENGINE_ENV, "").strip().lower() == ENGINE_NAME
@@ -122,7 +137,8 @@ class LangGraphProxyClient:
 
     def _build_tools(self, client: httpx.AsyncClient, structured_tool,
                      specs: list[dict], nav_routes: list, seen: list,
-                     budget: list[int], traced: list, studio):
+                     budget: list[int], traced: list, studio,
+                     pending_nav: list):
         """Wrap our tool schemas as LangChain tools over the shared executor.
 
         ``budget`` is a one-element list so the closures can spend a single
@@ -142,9 +158,17 @@ class LangGraphProxyClient:
                 # Studio tool is registered with `coroutine=arun`, so this
                 # path is never the one that serves them.
                 if _name == navigation.NAVIGATE_TOOL_NAME:
-                    result, _emit = navigation.navigate_result(
+                    # The result is only the model's receipt; the panel moves
+                    # because of the `navigate` SSE event. This closure cannot
+                    # yield one, so the emit rides along in `pending_nav` and
+                    # _drain_navigations sends it — the same arrangement the
+                    # tool traces already use. Dropping it made the assistant
+                    # claim to navigate while the page stayed put.
+                    result, emit = navigation.navigate_result(
                         kwargs.get("path", ""), nav_routes,
                     )
+                    if emit:
+                        pending_nav.append(emit)
                     return result
                 # Sync bridge: create_agent calls tools synchronously unless
                 # they are coroutines, and the executor is async.
@@ -162,9 +186,17 @@ class LangGraphProxyClient:
                                      "for this turn"})
                     return await studio.execute(_name, kwargs)
                 if _name == navigation.NAVIGATE_TOOL_NAME:
-                    result, _emit = navigation.navigate_result(
+                    # The result is only the model's receipt; the panel moves
+                    # because of the `navigate` SSE event. This closure cannot
+                    # yield one, so the emit rides along in `pending_nav` and
+                    # _drain_navigations sends it — the same arrangement the
+                    # tool traces already use. Dropping it made the assistant
+                    # claim to navigate while the page stayed put.
+                    result, emit = navigation.navigate_result(
                         kwargs.get("path", ""), nav_routes,
                     )
+                    if emit:
+                        pending_nav.append(emit)
                     return result
                 raw = await self._native._execute_tool(  # pylint: disable=protected-access
                     client, _name, kwargs,
@@ -235,9 +267,11 @@ class LangGraphProxyClient:
                 specs = turn_tool_specs(gen_tools, has_editor, nav_routes)
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 traced: list = []
+                # Navigate emits queue here; the tool closures cannot yield.
+                pending_nav: list = []
                 tools = self._build_tools(
                     client, structured_tool, specs, nav_routes, seen, budget,
-                    traced, payload.get("studio_ops"),
+                    traced, payload.get("studio_ops"), pending_nav,
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves
@@ -255,7 +289,9 @@ class LangGraphProxyClient:
                 )
                 agent = create_agent(model=llm, tools=tools,
                                      system_prompt=system)
-                async for event in self._run(agent, message, start, seen, traced):
+                async for event in self._run(
+                    agent, message, start, seen, traced, pending_nav,
+                ):
                     yield event
         except (httpx.HTTPError, ValueError, TypeError, KeyError,
                 RuntimeError) as exc:
@@ -335,8 +371,9 @@ class LangGraphProxyClient:
             state["usage"]["output_tokens"] += meta.get("output_tokens", 0)
         return out
 
-    async def _run(self, agent, message: str, start: float,
-                   seen: list, traced: list) -> AsyncIterator[str]:
+    async def _run(self, agent, message: str, start: float, seen: list,
+                   traced: list,
+                   pending_nav: list | None = None) -> AsyncIterator[str]:
         """Translate the graph's event stream into our SSE vocabulary.
 
         Deliberately narrow: the panel understands five event types and five
@@ -356,11 +393,20 @@ class LangGraphProxyClient:
             if mode == "updates":
                 events, state["announced"] = self._announce(
                     seen, state["announced"], state["name_cache"], start)
-                for ev in events + self._drain_traces(traced, start):
+                # Navigations after the traces, so the panel has drawn
+                # the tool bubble before it is asked to move.
+                for ev in (events + self._drain_traces(traced, start)
+                           + drain_navigations(pending_nav)):
                     yield ev
                 continue
             for ev in self._on_message(chunk, state, start):
                 yield ev
+
+        # A navigation queued after the final "updates" event would otherwise
+        # be stranded in the queue, which is the original bug wearing a
+        # different hat: the model says it navigated, nothing moves.
+        for ev in drain_navigations(pending_nav):
+            yield ev
 
         text_len = state["text_len"]
         usage = state["usage"]
