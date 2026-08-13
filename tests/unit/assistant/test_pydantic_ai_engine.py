@@ -153,3 +153,52 @@ def test_malformed_tool_args_do_not_take_the_turn_down():
     out = pai.PydanticAIProxyClient._tool_status(Ev(), {}, 0.0)  # pylint: disable=protected-access
     assert "event: status" in out
     assert "search_entities" in out
+
+
+# ── The translate loop, driven ─────────────────────────────────
+#
+# Nothing exercised _translate, so deleting a helper it calls passed every
+# test and would have shipped an assistant that raised AttributeError on the
+# first word of every answer. These drive it with the event shapes PydanticAI
+# actually produces.
+
+class _Delta:
+    def __init__(self, text):
+        self.event_kind = "part_delta"
+        self.delta = type("d", (), {"content_delta": text})()
+
+
+class _ToolArgsDelta:
+    """Tool-argument deltas share the kind and carry no prose."""
+
+    def __init__(self):
+        self.event_kind = "part_delta"
+        self.delta = type("d", (), {})()
+
+
+def test_a_text_delta_becomes_a_chunk():
+    client = pai.PydanticAIProxyClient(local_url="http://llm")
+    state = {"streaming": False, "text_len": 0, "name_cache": {},
+             "usage": {"input_tokens": 0, "output_tokens": 0}}
+    out = client._translate(_Delta("Siemens"), state, 0.0)  # pylint: disable=protected-access
+    body = "".join(out)
+    assert "event: chunk" in body
+    assert "Siemens" in body
+    assert state["text_len"] == len("Siemens")
+
+
+def test_the_first_chunk_announces_streaming_once():
+    client = pai.PydanticAIProxyClient(local_url="http://llm")
+    state = {"streaming": False, "text_len": 0, "name_cache": {},
+             "usage": {"input_tokens": 0, "output_tokens": 0}}
+    first = "".join(client._translate(_Delta("a"), state, 0.0))  # pylint: disable=protected-access
+    second = "".join(client._translate(_Delta("b"), state, 0.0))  # pylint: disable=protected-access
+    assert first.count("phase") == 1
+    assert "phase" not in second
+
+
+def test_a_tool_argument_delta_produces_nothing():
+    client = pai.PydanticAIProxyClient(local_url="http://llm")
+    state = {"streaming": False, "text_len": 0, "name_cache": {},
+             "usage": {"input_tokens": 0, "output_tokens": 0}}
+    assert not client._translate(_ToolArgsDelta(), state, 0.0)  # pylint: disable=protected-access

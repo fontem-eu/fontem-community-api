@@ -32,9 +32,11 @@ What stayed is everything that was never the framework's business:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -45,7 +47,7 @@ from src.assistant.freshness import _format_freshness_summary
 from src.assistant.catalogue import CatalogueCache
 
 from src.assistant import (
-    local_models, navigation, studio_tools, tool_budget,
+    local_models, navigation, studio_tools, tool_budget, tool_trace,
 )
 from src.assistant.entities import _build_summary, _capture_names, entity_name
 
@@ -424,6 +426,18 @@ def _system_prompt_with_today(base: str) -> str:
     return f"{base.rstrip()}\n\nToday's date is {today}."
 
 
+def _record_call(traced: list | None, call_id: str, name: str, args: dict,
+                 result: str, started: float, raw_len: int) -> None:
+    """Queue the trace for this call. The closures cannot yield; this rides
+    along and the stream loop emits it."""
+    if traced is None:
+        return
+    traced.append(tool_trace.trace(
+        name, args, result, time.time() - started,
+        raw_len=raw_len or None, call_id=call_id,
+    ))
+
+
 class ToolRuntime:
     """Executes the assistant's tools. Owns no loop and talks to no model.
 
@@ -509,8 +523,15 @@ class ToolRuntime:
         self, client, name: str, args: dict, *,
         studio, nav_routes: list, pending_nav: list,
         budget: list[int], name_cache: dict,
+        traced: list | None = None, audit=None,
     ) -> tuple[str, int]:
         """Run one tool call. Returns (what the model sees, raw result length).
+
+        Every call gets an id, minted here because here is the one place
+        that sees the call before it runs. It goes three ways: into the
+        `tool_result` event the panel renders, into the conversation row the
+        service persists, and into whatever the tool writes while it runs —
+        so an activity entry can name the exact call that caused it.
 
         Both executors call this, so a tool behaves identically whichever is
         driving — and the three special cases below stop being copy-pasted
@@ -520,15 +541,41 @@ class ToolRuntime:
         Studio and navigate paths answer locally and are not worth a trace
         bubble.
         """
+        started = time.time()
+        call_id = uuid.uuid4().hex
+        # Anything the tool writes from here is attributable to this call,
+        # not merely to the turn. Scoped, so the id comes off again when the
+        # call ends — a later write belongs to the turn, not to whichever
+        # tool happened to run last.
+        scope = (audit.tool_call(call_id, name) if audit is not None
+                 else contextlib.nullcontext())
+        with scope:
+            return await self._dispatch_inner(
+                client, name, args, studio=studio, nav_routes=nav_routes,
+                pending_nav=pending_nav, budget=budget, name_cache=name_cache,
+                traced=traced, call_id=call_id, started=started,
+            )
+
+    async def _dispatch_inner(
+        self, client, name: str, args: dict, *,
+        studio, nav_routes: list, pending_nav: list,
+        budget: list[int], name_cache: dict,
+        traced: list | None, call_id: str, started: float,
+    ) -> tuple[str, int]:
+        """The dispatch itself, once provenance is in scope."""
         if name in studio_tools.STUDIO_ACTIONS:
             # Server-side, as the asking user. The service checks access on
             # every call, so this cannot reach a project the user could not
             # open themselves.
             if studio is None:
-                return json.dumps({
+                out = json.dumps({
                     "error": "the Data Studio is not available for this turn",
-                }), 0
-            return await studio.execute(name, args), 0
+                })
+                _record_call(traced, call_id, name, args, out, started, 0)
+                return out, 0
+            out = await studio.execute(name, args)
+            _record_call(traced, call_id, name, args, out, started, 0)
+            return out, 0
 
         if name == navigation.NAVIGATE_TOOL_NAME:
             # Runs in the browser, not here. The result is only the model's
@@ -541,6 +588,7 @@ class ToolRuntime:
             )
             if emit:
                 pending_nav.append(emit)
+            _record_call(traced, call_id, name, args, result, started, 0)
             return result, 0
 
         raw = await self.execute_tool(client, name, args)
@@ -552,6 +600,7 @@ class ToolRuntime:
         except (ValueError, TypeError):
             pass
         capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
+        _record_call(traced, call_id, name, args, capped, started, len(raw))
         return capped, len(raw)
 
     async def execute_tool(

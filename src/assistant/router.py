@@ -235,11 +235,18 @@ async def get_conversation(
         "conversation_key": conversation_key,
         "messages": [
             {
+                "id": m.id,
                 "role": m.role,
                 "content": m.content,
                 "created_at": m.created_at.isoformat(),
                 "tokens_in": m.tokens_in,
                 "tokens_out": m.tokens_out,
+                "model": m.model,
+                # Tool rows carry the call's arguments here. The result is
+                # deliberately not stored, so there is nothing else to send:
+                # what was called and with what is the part that says whether
+                # the agent did what was asked.
+                "extras": m.extras or {},
             }
             for m in messages
         ],

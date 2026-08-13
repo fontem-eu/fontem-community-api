@@ -22,6 +22,10 @@ class PgActivityRepository(ActivityRepository):
             action=row.action,
             summary=row.summary,
             created_at=row.created_at,
+            actor_kind=row.actor_kind,
+            conversation_id=row.conversation_id,
+            message_id=row.message_id,
+            request_id=row.request_id,
         )
 
     async def record(self, event: ActivityEvent) -> ActivityEvent:
@@ -31,9 +35,21 @@ class PgActivityRepository(ActivityRepository):
             entity_id=event.entity_id,
             action=event.action,
             summary=event.summary,
+            actor_kind=event.actor_kind,
+            conversation_id=event.conversation_id,
+            message_id=event.message_id,
+            request_id=event.request_id,
         )
         self._session.add(model)
-        await self._session.commit()
+        # Flush, not commit. The audit row belongs to the same transaction as
+        # the change it describes: either both land or neither does, and a
+        # record of something that was rolled back is worse than no record.
+        #
+        # Committing here also committed whatever else the request had
+        # pending, which made an audit write a surprising place for unrelated
+        # half-finished work to become permanent. The session provider
+        # commits at the end of the request.
+        await self._session.flush()
         return self._to_domain(model)
 
     async def list_for_actor(self, actor_id: str, limit: int, offset: int) -> list[ActivityEvent]:

@@ -14,7 +14,9 @@ from slowapi.errors import RateLimitExceeded
 import asyncpg.exceptions as asyncpg_exc
 from sqlalchemy.exc import DBAPIError
 
+from src.api import audit_middleware
 from src.api.di import make_container
+from src.services.activity_service import ActivityService
 from src.api.rate_limit import limiter
 from src.api.routers import (
     activity, auth, data_projects, dossiers, feed_catalogue, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
@@ -124,6 +126,18 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
+async def _activity_for(request):
+    """Resolve the request's ActivityService, or None if there is no
+    container (an app built without a database, as some tests do)."""
+    container = getattr(request.state, "dishka_container", None)
+    if container is None:
+        return None
+    try:
+        return await container.get(ActivityService)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+
+
 def build_app(database_url: str | None = None) -> FastAPI:
     """Create a fully-wired FastAPI application.
 
@@ -140,6 +154,14 @@ def build_app(database_url: str | None = None) -> FastAPI:
 
     application.state.limiter = limiter
     application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    # Registered BEFORE dishka, deliberately. Starlette makes the
+    # last-registered middleware the outermost one, so this ordering puts
+    # dishka outside the audit middleware — which is what keeps the request
+    # container (and its session) open while the fallback entry is written
+    # after the response. Register it afterwards and the container is closed
+    # by the time there is a status code to judge.
+    audit_middleware.install(application, _activity_for)
 
     db_url = database_url or os.environ.get("DATABASE_URL")
     if db_url:

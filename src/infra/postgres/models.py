@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     PrimaryKeyConstraint,
     Text,
+    text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
@@ -682,6 +683,19 @@ class ActivityLogModel(Base):
     __table_args__ = (
         Index("ix_activity_log_actor", "actor_id", "created_at"),
     )
+    # Provenance. See migration 012 — nullable so the rows written before it
+    # stay valid, and no FKs on the conversation/message references because
+    # they are allowed to dangle when a conversation is deleted.
+    actor_kind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'user'"), default="user"
+    )
+    conversation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), nullable=True
+    )
+    message_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), nullable=True
+    )
+    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     actor_id: Mapped[str] = mapped_column(

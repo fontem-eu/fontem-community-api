@@ -73,6 +73,21 @@ ENGINE_ENV = "ASSISTANT_ENGINE"
 ENGINE_NAME = "langgraph"
 
 
+def drain_traces(traced: list | None) -> list[str]:
+    """SSE events for tool calls that finished since the last check.
+
+    Same arrangement as drain_navigations, and for the same reason: the tool
+    closures cannot yield. Popping rather than reading matters — a queue read
+    twice draws the bubble twice.
+    """
+    if not traced:
+        return []
+    out = []
+    while traced:
+        out.append(_sse(tool_trace.EVENT, traced.pop(0)))
+    return out
+
+
 def drain_navigations(pending_nav: list | None) -> list[str]:
     """SSE events for navigations queued since the last check.
 
@@ -154,7 +169,7 @@ class LangGraphProxyClient:
     def _build_tools(self, client: httpx.AsyncClient, structured_tool,
                      specs: list[dict], nav_routes: list, seen: list,
                      budget: list[int], traced: list, studio,
-                     pending_nav: list, name_cache: dict):
+                     pending_nav: list, name_cache: dict, audit=None):
         """Wrap our tool schemas as LangChain tools over the shared executor.
 
         ``budget`` is a one-element list so the closures can spend a single
@@ -182,18 +197,12 @@ class LangGraphProxyClient:
 
             async def arun(_name=name, **kwargs):
                 seen.append((_name, kwargs))
-                capped, raw_len = await self._tools.dispatch(
+                capped, _raw_len = await self._tools.dispatch(
                     client, _name, kwargs,
                     studio=studio, nav_routes=nav_routes,
                     pending_nav=pending_nav, budget=budget,
-                    name_cache=name_cache,
+                    name_cache=name_cache, traced=traced, audit=audit,
                 )
-                # Stash for the trace event: this closure cannot yield, so the
-                # result rides along and _announce emits it. Studio and
-                # navigate answer locally (raw_len 0) and get no bubble, which
-                # is what they did before.
-                if raw_len:
-                    traced.append((_name, kwargs, capped, raw_len))
                 return capped
 
             tools.append(structured_tool(
@@ -273,6 +282,7 @@ class LangGraphProxyClient:
                 tools = self._build_tools(
                     client, structured_tool, specs, nav_routes, seen, budget,
                     traced, payload.get("studio_ops"), pending_nav, name_cache,
+                    payload.get("audit"),
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves
@@ -336,20 +346,6 @@ class LangGraphProxyClient:
                            if isinstance(b, dict))
         return text
 
-    @staticmethod
-    def _drain_traces(traced: list, start: float) -> list[str]:
-        """Trace events for tools that have finished since the last check.
-
-        Separate from the stream loop because the tool closures cannot
-        yield: they append here and this drains it.
-        """
-        out = []
-        while traced:
-            tname, targs, tresult, traw = traced.pop(0)
-            out.append(_sse(tool_trace.EVENT, tool_trace.trace(
-                tname, targs, tresult, time.time() - start, raw_len=traw)))
-        return out
-
     def _on_message(self, chunk, state: dict, start: float) -> list[str]:
         """SSE events for one streamed message chunk. Empty for the chunks
         that carry no prose, which is most of them — tool-call fragments
@@ -397,7 +393,7 @@ class LangGraphProxyClient:
                     seen, state["announced"], state["name_cache"], start)
                 # Navigations after the traces, so the panel has drawn
                 # the tool bubble before it is asked to move.
-                for ev in (events + self._drain_traces(traced, start)
+                for ev in (events + drain_traces(traced)
                            + drain_navigations(pending_nav)):
                     yield ev
                 continue
