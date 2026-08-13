@@ -1,8 +1,14 @@
 """activity_log: who caused this, and on whose behalf
 
-Revision ID: 012
-Revises: 011
+Revision ID: 013
+Revises: 012
 Create Date: 2026-08-13
+
+Numbered 013, not 012: the feed-query catalogue took 012 while this was in
+review. Sequential revision ids collide silently when two branches are open
+at once — it is not a text conflict, so a rebase sails past it and alembic
+only complains at deploy time with "Multiple head revisions are present",
+which is what happened in testing.
 
 The activity log answered "what happened" and, implicitly, "a user did it".
 Once an agent can write to the platform on a user's behalf, that implication
@@ -33,8 +39,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
-revision: str = "012"
-down_revision: Union[str, None] = "011"
+revision: str = "013"
+down_revision: Union[str, None] = "012"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
