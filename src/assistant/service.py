@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator as TypingAsyncIterator, Protocol
 
 from src.assistant import navigation
+from src.services import audit_context
 from src.assistant.context import (
     TurnLimits,
     budget_context_block,
@@ -113,7 +114,11 @@ class AssistantService:
 
     # ─────────── Turn handling ────────────
 
-    # NOSONAR S3776: SSE stream reconciliation is inherently sequential
+    # NOSONAR S3776: SSE stream reconciliation is inherently sequential.
+    # The branch and statement counts are the SSE vocabulary itself — one
+    # arm per event type the panel understands — so splitting it would move
+    # the count rather than reduce what a reader has to hold.
+    # pylint: disable=too-many-branches,too-many-statements
     async def turn(self, req: ChatRequest) -> AsyncIterator[str]:
         """Handle a single chat turn, streaming SSE lines back to the caller.
 
@@ -147,7 +152,7 @@ class AssistantService:
         # Persist the user row immediately with an estimate.
         # If the proxy forwards real usage later, we'll reconcile.
         estimated_in = estimate_tokens(req.message) + estimate_tokens(budgeted_context)
-        await self._repo.append_message(
+        user_row = await self._repo.append_message(
             conversation_id=conv.id,
             user_id=req.user_id,
             role="user",
@@ -161,6 +166,12 @@ class AssistantService:
         assistant_buf: list[str] = []
         real_usage: TokenUsage | None = None
         errored = False
+        # Which model actually answered. Stored on the assistant row, because
+        # "was the 1.7B or the 4B asked to do this" is unanswerable after the
+        # fact otherwise — and every row in production was NULL.
+        answered_by = req.local_model_id
+        if req.credential:
+            answered_by = req.credential[2] or req.credential[0]
 
         payload: dict = {
             "system": system_prompt,
@@ -186,6 +197,21 @@ class AssistantService:
             "has_editor": (bool(req.context_block) if req.has_editor is None
                            else bool(req.has_editor)),
         }
+        # From here until the stream ends, anything written on this user's
+        # behalf is the assistant's doing. The tools call the services
+        # in-process, so nothing about the transport would say so — this is
+        # the only place that knows.
+        audit_token = audit_context.set_current(
+            replace(
+                audit_context.current(),
+                actor_id=req.user_id,
+                actor_kind=audit_context.AGENT,
+                conversation_id=conv.id,
+                message_id=None,
+            )
+        )
+        payload["audit"] = audit_context
+
         if self._projects is not None:
             # An object, not JSON: these clients run in-process, and the
             # alternative is re-authenticating the user over HTTP to this
@@ -222,6 +248,14 @@ class AssistantService:
                 text = _extract_chunk_text(data)
                 if text:
                     assistant_buf.append(text)
+            elif event == "tool_result":
+                # One row per tool call: what was called and with which
+                # arguments. Not the result — a tool that returns 90k of JSON
+                # would make the conversation store mostly tool output, and
+                # the argument is what says whether the agent did what was
+                # asked. The id is the one minted where the call ran, so an
+                # activity entry can point straight at this row.
+                await self._persist_tool_call(conv.id, req.user_id, data)
             elif event == "error":
                 errored = True
             else:
@@ -246,17 +280,17 @@ class AssistantService:
                 content=assistant_text,
                 tokens_in=None,
                 tokens_out=tokens_out,
-                model=None,
+                model=answered_by,
             )
 
-            # If we got a real input_tokens count, reconcile the user row.
-            # For simplicity we write a correction row in extras rather than
-            # mutating the persisted user row. MVP: update the most-recent
-            # user row's tokens_in in place via the repo's write path.
-            if real_usage is not None:
-                await self._update_last_user_tokens_in(
-                    conv.id, real_usage.input_tokens
+            # Replace the estimate with what the model actually counted.
+            if real_usage is not None and real_usage.input_tokens:
+                await self._repo.set_tokens_in(
+                    user_row.id, real_usage.input_tokens
                 )
+
+        # The turn is over; later work on this request is the user's again.
+        audit_context.reset(audit_token)
 
         # Commit all writes so they survive regardless of how the
         # HTTP framework manages the session lifecycle (e.g. streaming
@@ -266,29 +300,41 @@ class AssistantService:
         if errored and not assistant_buf:
             return
 
-    async def _update_last_user_tokens_in(
-        self, conversation_id: str, tokens_in: int
+    async def _persist_tool_call(
+        self, conversation_id: str, user_id: str, data: str
     ) -> None:
-        """Reconcile the estimated tokens_in on the most-recent user row.
+        """Record one tool call from its `tool_result` event.
 
-        MVP implementation: list messages, find the last user row, mutate
-        it via a repo helper. Currently the memory repo mutates the object
-        directly (which is what we want for tests), and the Postgres repo
-        will need a dedicated ``update_tokens_in`` method later. For now,
-        since the Postgres repo keeps a session reference, we mutate the
-        SQLAlchemy object via a targeted update.
+        Best-effort on parsing only: a malformed event must not take down a
+        turn that is otherwise working. A failure to WRITE is not swallowed —
+        it belongs to the same transaction as the rest of the turn.
         """
-        messages = await self._repo.list_messages(conversation_id)
-        for msg in reversed(messages):
-            if msg.role == "user":
-                msg.tokens_in = tokens_in
-                # For the Postgres repo: the underlying ORM object is not
-                # automatically re-fetched. We run a SQL update as a second
-                # step in the service layer via a dedicated method on the
-                # repo interface in a follow-up. For this MVP, the in-memory
-                # mutation is sufficient for tests and the Postgres path
-                # will use the estimated value until a reconcile job runs.
-                return
+        try:
+            payload = json.loads(data)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        name = payload.get("tool") or ""
+        if not name:
+            return
+        await self._repo.append_message(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            role="tool",
+            content=name,
+            tokens_in=None,
+            tokens_out=None,
+            model=None,
+            extras={
+                "args": payload.get("args") or {},
+                "elapsed": payload.get("elapsed"),
+                # How much the tool produced, even though we keep none of it.
+                "bytes": payload.get("bytes"),
+                "truncated": bool(payload.get("truncated")),
+            },
+            message_id=payload.get("call_id") or None,
+        )
 
     # ─────────── Usage queries ────────────
 

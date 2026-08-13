@@ -74,7 +74,19 @@ class AssistRepository(ABC):
         tokens_out: int | None,
         model: str | None,
         extras: dict | None = None,
+        message_id: str | None = None,
     ) -> AssistMessage:
+        ...
+
+    @abstractmethod
+    async def set_tokens_in(self, message_id: str, tokens_in: int) -> None:
+        """Correct a message's estimated tokens_in with the real count.
+
+        Its own method because the obvious implementation is wrong: reading
+        a message, assigning to it and hoping is a no-op against Postgres,
+        where list_messages hands back detached dataclasses. That is exactly
+        what production did, so every tokens_in ever stored was the estimate.
+        """
         ...
 
     @abstractmethod
@@ -159,9 +171,10 @@ class InMemoryAssistRepository(AssistRepository):
         tokens_out: int | None,
         model: str | None,
         extras: dict | None = None,
+        message_id: str | None = None,
     ) -> AssistMessage:
         msg = AssistMessage(
-            id=str(uuid4()),
+            id=message_id or str(uuid4()),
             conversation_id=conversation_id,
             user_id=user_id,
             role=role,
@@ -178,6 +191,12 @@ class InMemoryAssistRepository(AssistRepository):
         if conv is not None:
             conv.updated_at = msg.created_at
         return msg
+
+    async def set_tokens_in(self, message_id: str, tokens_in: int) -> None:
+        for msg in self._messages:
+            if msg.id == message_id:
+                msg.tokens_in = tokens_in
+                return
 
     async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
         return [

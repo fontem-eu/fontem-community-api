@@ -153,7 +153,8 @@ def services():
     dossier_svc = DossierService(dossier_repo, report_repo, authz_svc, investigation_repo, resource_grant_repo, user_repo, activity_svc)
     visualization_svc = VisualizationService(visualization_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
     data_project_svc = DataProjectService(
-        data_project_repo, investigation_repo, authz_svc, resource_grant_repo, user_repo)
+        data_project_repo, investigation_repo, authz_svc,
+        resource_grant_repo, user_repo, activity_svc)
     named_query_repo = InMemoryNamedQueryRepository()
     query_executor = FakeQueryExecutor()
     named_query_svc = NamedQueryService(

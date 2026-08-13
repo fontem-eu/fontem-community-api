@@ -31,9 +31,19 @@ MAX_DISPLAY_CHARS = 20_000
 DISPLAY_TRUNCATED = "\n\n[... {dropped} more characters not shown here ...]"
 
 
+# One parameter per fact about a call, and every one of them is rendered or
+# stored. Bundling them into an object would move the count into a
+# constructor at the same call sites.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def trace(name: str, args: dict, result: str, elapsed: float,
-          raw_len: int | None = None) -> dict:
-    """The payload for one `tool_result` event."""
+          raw_len: int | None = None, call_id: str = "") -> dict:
+    """The payload for one `tool_result` event.
+
+    ``call_id`` identifies this one call. It is minted where the tool runs,
+    so the audit row a tool writes and the conversation row the panel
+    renders name the same event — that is what makes "the agent did this,
+    because of that prompt" a link rather than an inference.
+    """
     text = result if isinstance(result, str) else json.dumps(result, default=str)
     shown = text
     if len(text) > MAX_DISPLAY_CHARS:
@@ -41,6 +51,7 @@ def trace(name: str, args: dict, result: str, elapsed: float,
             dropped=len(text) - MAX_DISPLAY_CHARS)
     original = raw_len if raw_len is not None else len(text)
     return {
+        "call_id": call_id,
         "tool": name,
         "args": args if isinstance(args, dict) else {},
         "result": shown,

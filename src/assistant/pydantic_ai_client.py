@@ -60,6 +60,21 @@ ENGINE_ENV = "ASSISTANT_ENGINE"
 ENGINE_NAME = "pydantic-ai"
 
 
+def drain_traces(traced: list | None) -> list[str]:
+    """SSE events for tool calls that finished since the last check.
+
+    Same arrangement as drain_navigations, and for the same reason: the tool
+    closures cannot yield. Popping rather than reading matters — a queue read
+    twice draws the bubble twice.
+    """
+    if not traced:
+        return []
+    out = []
+    while traced:
+        out.append(_sse(tool_trace.EVENT, traced.pop(0)))
+    return out
+
+
 def drain_navigations(pending_nav: list | None) -> list[str]:
     """SSE events for navigations queued since the last check.
 
@@ -125,7 +140,8 @@ class PydanticAIProxyClient:
 
     def _build_tools(self, client: httpx.AsyncClient, tool_cls,
                      specs: list[dict], nav_routes: list, budget: list[int],
-                     studio, pending_nav: list, name_cache: dict):
+                     studio, pending_nav: list, name_cache: dict,
+                     traced: list, audit=None):
         """Wrap our JSON-schema tools over the shared executor.
 
         ``Tool.from_schema`` takes the schema as-is, so the model sees exactly
@@ -142,7 +158,7 @@ class PydanticAIProxyClient:
                     client, _name, kwargs,
                     studio=studio, nav_routes=nav_routes,
                     pending_nav=pending_nav, budget=budget,
-                    name_cache=name_cache,
+                    name_cache=name_cache, traced=traced, audit=audit,
                 )
                 return capped
 
@@ -211,9 +227,13 @@ class PydanticAIProxyClient:
                 # One dict, shared by the tool closures that fill it and the
                 # status events that read it.
                 name_cache: dict[str, str] = {}
+                # Traces queue here for the same reason navigations do: the
+                # tool closures cannot yield.
+                traced: list = []
                 tools = self._build_tools(
                     client, tool_cls, specs, nav_routes, budget,
                     payload.get("studio_ops"), pending_nav, name_cache,
+                    traced, payload.get("audit"),
                 )
                 # The name the SERVER serves, not the id we store. The
                 # production agent runs in router mode and answers to
@@ -228,7 +248,7 @@ class PydanticAIProxyClient:
                     api_key=route.api_key or "none"))
                 agent = agent_cls(model, system_prompt=system, tools=tools)
                 async for event in self._run(
-                    agent, message, start, pending_nav, name_cache,
+                    agent, message, start, pending_nav, name_cache, traced,
                 ):
                     yield event
         except (httpx.HTTPError, ValueError, TypeError, KeyError,
@@ -238,7 +258,8 @@ class PydanticAIProxyClient:
 
     async def _run(self, agent, message: str, start: float,
                    pending_nav: list | None = None,
-                   name_cache: dict | None = None) -> AsyncIterator[str]:
+                   name_cache: dict | None = None,
+                   traced: list | None = None) -> AsyncIterator[str]:
         """Translate PydanticAI's event stream into our SSE vocabulary.
 
         The per-event decision lives in `_translate`, flat, rather than as a
@@ -251,6 +272,10 @@ class PydanticAIProxyClient:
         async with agent.run_stream_events(message) as events:
             async for ev in events:
                 for out in self._translate(ev, state, start):
+                    yield out
+                # Traces before navigations: the panel draws the tool bubble,
+                # then is asked to move.
+                for out in drain_traces(traced):
                     yield out
                 # After the tool result, so the panel has already drawn the
                 # trace bubble by the time it is asked to move.
@@ -272,9 +297,6 @@ class PydanticAIProxyClient:
         if kind == "function_tool_call":
             return [self._tool_status(ev, state["name_cache"], start)]
 
-        if kind == "function_tool_result":
-            return [self._result_trace(ev, start)]
-
         if kind == "agent_run_result":
             state["usage"] = self._usage_of(ev) or state["usage"]
             return []
@@ -293,14 +315,6 @@ class PydanticAIProxyClient:
                 "phase": "streaming", "detail": "Writing response...",
                 "elapsed": round(time.time() - start, 1)}))
         return out
-
-    @staticmethod
-    def _result_trace(ev, start: float) -> str:
-        """A tool_result event built from a finished tool call."""
-        part = getattr(ev, "part", None)
-        return _sse(tool_trace.EVENT, tool_trace.trace(
-            getattr(part, "tool_name", "") or "",
-            {}, getattr(part, "content", "") or "", time.time() - start))
 
     @staticmethod
     def _delta_text(ev) -> str:

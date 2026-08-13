@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.assistant.context import Turn
 from src.assistant.models import AssistConversationModel, AssistMessageModel
+from src.infra.postgres.models import ActivityLogModel
 from src.assistant.repository import (
     AssistConversation,
     AssistMessage,
@@ -81,6 +82,7 @@ class PgAssistRepository(AssistRepository):
         tokens_out: int | None,
         model: str | None,
         extras: dict | None = None,
+        message_id: str | None = None,
     ) -> AssistMessage:
         row = AssistMessageModel(
             conversation_id=conversation_id,
@@ -92,9 +94,28 @@ class PgAssistRepository(AssistRepository):
             tokens_out=tokens_out,
             model=model,
         )
+        if message_id:
+            # Minted where the tool ran, so the audit row a tool wrote and
+            # this conversation row name the same call.
+            row.id = message_id
         self._session.add(row)
         await self._session.flush()
         return _to_msg_dc(row)
+
+    async def set_tokens_in(self, message_id: str, tokens_in: int) -> None:
+        """An UPDATE, not a mutation.
+
+        The previous implementation read the message and assigned to it,
+        which works against the in-memory repo and does nothing here:
+        list_messages returns detached dataclasses. Production therefore
+        stored the character-count estimate on every row it ever wrote,
+        while the tests were green.
+        """
+        await self._session.execute(
+            update(AssistMessageModel)
+            .where(AssistMessageModel.id == message_id)
+            .values(tokens_in=tokens_in)
+        )
 
     async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
         stmt = (
@@ -139,6 +160,21 @@ class PgAssistRepository(AssistRepository):
         )
         result = await self._session.execute(stmt)
         rows = result.all()
+        ids = [r[0] for r in rows]
+
+        # Unlink the activity, do not delete it. The Studio project the agent
+        # created still exists and the story edit still happened; clearing a
+        # chat must not erase the record of what was done in it, or the audit
+        # trail is one anybody can rewrite by pressing Clear.
+        #
+        # This is why conversation_id is not a foreign key: the reference is
+        # allowed to dangle, and here it is deliberately cut.
+        if ids:
+            await self._session.execute(
+                update(ActivityLogModel)
+                .where(ActivityLogModel.conversation_id.in_(ids))
+                .values(conversation_id=None, message_id=None)
+            )
         return len(rows)
 
     async def usage_history_since(

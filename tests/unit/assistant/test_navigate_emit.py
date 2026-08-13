@@ -62,7 +62,7 @@ def _pai_navigate(path):
     specs = [{"function": {"name": NAV, "description": "d", "parameters": {}}}]
     pending: list = []
     tools = client._build_tools(  # pylint: disable=protected-access
-        None, _FakeTool, specs, ROUTES, [10_000], None, pending, {},
+        None, _FakeTool, specs, ROUTES, [10_000], None, pending, {}, [],
     )
     result = _run(tools[0].function(path=path))
     return result, pending

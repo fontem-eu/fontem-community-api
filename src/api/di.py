@@ -358,9 +358,11 @@ class ServiceProvider(Provider):
         authz: AuthorizationService,
         grants: ResourceGrantRepository,
         users: UserRepository,
+        activity: ActivityService,
     ) -> DataProjectService:
         return DataProjectService(
-            repo=repo, investigations=investigations, authz=authz, grants=grants, users=users,
+            repo=repo, investigations=investigations, authz=authz, grants=grants,
+            users=users, activity=activity,
         )
 
     @provide(scope=Scope.APP)

@@ -39,7 +39,14 @@ class DataProjectService:
         authz: AuthorizationService,
         grants: ResourceGrantRepository,
         users: UserRepository,
+        activity=None,
     ) -> None:
+        # Optional so the many places that build this service in tests do not
+        # all have to grow an argument to record something they never read.
+        # In the app it is always wired: this is the agent's entire write
+        # surface, and until now none of it was logged at all — a Studio
+        # project created by a model looked exactly like nothing happening.
+        self._activity = activity
         self._repo = repo
         self._inv = investigations
         self._authz = authz
@@ -139,21 +146,39 @@ class DataProjectService:
             await self._require_inv(
                 user_id, investigation_id, Action.INVESTIGATIONS_ADD_DATA_PROJECT
             )
-        return await self._repo.create_project(DataProject(
+        project = await self._repo.create_project(DataProject(
             name=_clean(name, "Untitled project"), created_by=user_id,
             investigation_id=investigation_id,
         ))
+        await self._record(user_id, "created", project.id, project.name)
+        return project
 
     async def rename_project(self, user_id: str, project_id: str, name: str) -> DataProject:
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
         project.name = _clean(name, project.name)
-        return await self._repo.update_project(project)
+        updated = await self._repo.update_project(project)
+        await self._record(user_id, "updated", project.id, updated.name)
+        return updated
 
     async def delete_project(self, user_id: str, project_id: str) -> None:
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_DELETE)
+        # Refuses before the delete when an agent is driving: AGENT_FORBIDDEN
+        # is checked in record(), and a delete that happened but could not be
+        # recorded is the one outcome worth preventing outright.
+        await self._record(user_id, "deleted", project_id, project.name)
         await self._repo.delete_project(project_id)
+
+    async def _record(self, user_id: str, action: str,
+                      entity_id: str, summary: str = "") -> None:
+        """One place, so every write here is logged the same way."""
+        if self._activity is None:
+            return
+        await self._activity.record(
+            actor_id=user_id, entity_type="data_project",
+            entity_id=entity_id, action=action, summary=summary or "",
+        )
 
     # ── investigation attach / sharing ──────────────────────────
     async def attach(self, user_id: str, project_id: str, investigation_id: str) -> None:
@@ -215,10 +240,12 @@ class DataProjectService:
     ) -> DataQuery:
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
-        return await self._repo.add_query(DataQuery(
+        created = await self._repo.add_query(DataQuery(
             project_id=project_id, name=_clean(name, f"Query {len(project.queries) + 1}"),
             lang=lang or "cypher", query=query or "", sort_order=len(project.queries),
         ))
+        await self._record_child(user_id, "query", "added", project_id, created.name)
+        return created
 
     async def update_query(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, user_id: str, project_id: str, query_id: str,
@@ -233,31 +260,52 @@ class DataProjectService:
             existing.lang = lang
         if query is not None:
             existing.query = query
-        return await self._repo.update_query(existing)
+        updated = await self._repo.update_query(existing)
+        await self._record_child(user_id, "query", "updated", project_id,
+                                 updated.name)
+        return updated
+
+    async def _record_child(self, user_id: str, kind: str, action: str,
+                            project_id: str, name: str) -> None:
+        """Queries and plots are logged against their project.
+
+        The project is the thing a person recognises in a feed, and it is
+        what the Studio UI can actually open — "added query 'Russian
+        suppliers' to Public Spending" beats an id nobody has seen before.
+        """
+        await self._record(
+            user_id, f"{kind}_{action}", project_id,
+            name or "", )
 
     async def delete_query(self, user_id: str, project_id: str, query_id: str) -> None:
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
-        self._find_query(project, query_id)
+        existing = self._find_query(project, query_id)
+        await self._record_child(user_id, "query", "deleted", project_id,
+                                 existing.name)
         await self._repo.delete_query(query_id)
 
     async def duplicate_query(self, user_id: str, project_id: str, query_id: str) -> DataQuery:
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
         src = self._find_query(project, query_id)
-        return await self._repo.add_query(DataQuery(
+        created = await self._repo.add_query(DataQuery(
             project_id=project_id, name=f"{src.name} copy", lang=src.lang, query=src.query,
             sort_order=len(project.queries),
         ))
+        await self._record_child(user_id, "query", "added", project_id, created.name)
+        return created
 
     # ── plots ───────────────────────────────────────────────────
     async def add_plot(self, user_id: str, project_id: str, name: str, spec: dict) -> DataPlot:
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
-        return await self._repo.add_plot(DataPlot(
+        created = await self._repo.add_plot(DataPlot(
             project_id=project_id, name=_clean(name, f"Plot {len(project.plots) + 1}"),
             spec=spec or {}, sort_order=len(project.plots),
         ))
+        await self._record_child(user_id, "plot", "added", project_id, created.name)
+        return created
 
     async def update_plot(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, user_id: str, project_id: str, plot_id: str, name: str | None, spec: dict | None,
@@ -269,10 +317,15 @@ class DataProjectService:
             existing.name = _clean(name, existing.name)
         if spec is not None:
             existing.spec = spec
-        return await self._repo.update_plot(existing)
+        updated = await self._repo.update_plot(existing)
+        await self._record_child(user_id, "plot", "updated", project_id,
+                                 updated.name)
+        return updated
 
     async def delete_plot(self, user_id: str, project_id: str, plot_id: str) -> None:
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
-        self._find_plot(project, plot_id)
+        existing = self._find_plot(project, plot_id)
+        await self._record_child(user_id, "plot", "deleted", project_id,
+                                 existing.name)
         await self._repo.delete_plot(plot_id)

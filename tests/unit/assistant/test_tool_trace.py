@@ -72,4 +72,8 @@ def test_every_engine_emits_the_same_event_name():
     for mod in (langgraph_client, pydantic_ai_client):
         src = pathlib.Path(mod.__file__).read_text("utf-8")
         assert "tool_trace.EVENT" in src, f"{mod.__name__} does not emit it"
-        assert "tool_trace.trace(" in src, f"{mod.__name__} builds no payload"
+        # The payload is built once, in the shared dispatch, so both engines
+        # describe a call identically — including the call_id that ties it to
+        # whatever the tool wrote. Asking each engine to build its own again
+        # would be the regression.
+        assert "drain_traces(" in src, f"{mod.__name__} never drains them"
