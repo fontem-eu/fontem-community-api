@@ -38,7 +38,6 @@ quantised window is the better tool here and stays in charge upstream.
 """
 from __future__ import annotations
 
-import json
 
 import os
 import time
@@ -62,7 +61,6 @@ from src.assistant.tool_runtime import (
     resolve_route,
     ToolRuntime,
 )
-from src.assistant.entities import _capture_names
 from src.assistant.language import _language_directive
 
 #: Matches the native loop, so a comparison measures the engine and not a
@@ -172,9 +170,9 @@ class LangGraphProxyClient:
 
             def run(_name=name, **kwargs):
                 seen.append((_name, kwargs))
-                # The Studio ops are async and this bridge is not; every
-                # Studio tool is registered with `coroutine=arun`, so this
-                # path is never the one that serves them.
+                # The Studio ops and every fontem-api tool are async and this
+                # bridge is not; they are registered with `coroutine=arun`, so
+                # this path only ever serves navigate — which answers locally.
                 if _name == navigation.NAVIGATE_TOOL_NAME:
                     return self._navigate(
                         kwargs.get("path", ""), nav_routes, pending_nav)
@@ -184,31 +182,18 @@ class LangGraphProxyClient:
 
             async def arun(_name=name, **kwargs):
                 seen.append((_name, kwargs))
-                if _name in studio_tools.STUDIO_ACTIONS:
-                    # Server-side, as the asking user. The service checks
-                    # access on every call, so this cannot reach a project
-                    # the user could not open themselves.
-                    if studio is None:
-                        return json.dumps({
-                            "error": "the Data Studio is not available "
-                                     "for this turn"})
-                    return await studio.execute(_name, kwargs)
-                if _name == navigation.NAVIGATE_TOOL_NAME:
-                    return self._navigate(
-                        kwargs.get("path", ""), nav_routes, pending_nav)
-                raw = await self._tools.execute_tool(client, _name, kwargs)
-                capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
-                # Stash for the trace event: this closure cannot yield, so
-                # the result rides along and _announce emits it.
-                traced.append((_name, kwargs, capped, len(raw)))
-                # Keep the id->name mapping fresh from every result, so the
-                # status line says "Investigating Siemens Energy AG/ADR"
-                # rather than a UUID. Read from the FULL result, not the
-                # capped copy.
-                try:
-                    _capture_names(name_cache, json.loads(raw))
-                except (ValueError, TypeError):
-                    pass
+                capped, raw_len = await self._tools.dispatch(
+                    client, _name, kwargs,
+                    studio=studio, nav_routes=nav_routes,
+                    pending_nav=pending_nav, budget=budget,
+                    name_cache=name_cache,
+                )
+                # Stash for the trace event: this closure cannot yield, so the
+                # result rides along and _announce emits it. Studio and
+                # navigate answer locally (raw_len 0) and get no bubble, which
+                # is what they did before.
+                if raw_len:
+                    traced.append((_name, kwargs, capped, raw_len))
                 return capped
 
             tools.append(structured_tool(

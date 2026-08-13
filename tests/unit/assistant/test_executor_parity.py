@@ -35,9 +35,20 @@ INVESTIGATE_RESULT = {
 
 
 @pytest.mark.parametrize("mod", EXECUTORS, ids=lambda m: m.__name__.split(".")[-1])
-def test_the_executor_fills_the_name_cache_from_tool_results(mod):
+def test_the_executor_routes_tools_through_the_shared_dispatch(mod):
+    # Which is what fills the name cache. Asserted here rather than by
+    # grepping for _capture_names: the capture moved into ToolRuntime so both
+    # engines get it from one place, and duplicating it back would be the
+    # regression, not the fix.
     src = pathlib.Path(mod.__file__).read_text("utf-8")
-    assert "_capture_names(" in src, (
+    assert "dispatch(" in src
+    assert "name_cache" in src
+
+
+def test_the_shared_dispatch_is_what_fills_the_cache():
+    runtime = pathlib.Path(
+        "src/assistant/tool_runtime.py").read_text("utf-8")
+    assert "_capture_names(" in runtime, (
         "the name cache is passed to the status formatter; if nothing fills "
         "it the panel shows UUIDs"
     )
@@ -113,3 +124,79 @@ def test_the_language_directive_is_a_no_op_without_a_locale():
 def test_the_language_directive_names_the_language_when_there_is_one():
     out = _language_directive("pt")
     assert out, "a locale the platform ships must produce a directive"
+
+
+# ── The shared dispatch, exercised directly ────────────────────
+#
+# Both engines now route every tool call through ToolRuntime.dispatch, so
+# it is worth driving rather than only grepping for.
+
+
+def _dispatch(name, args, *, studio=None, routes=None, raw='{"ok": true}'):
+    """Run one dispatch against a runtime whose execute_tool is stubbed."""
+    from src.assistant.tool_runtime import ToolRuntime  # pylint: disable=import-outside-toplevel
+    runtime = ToolRuntime(gmr_api_url="http://fake")
+
+    async def _fake_execute(_client, _name, _args):
+        return raw
+    runtime.execute_tool = _fake_execute  # type: ignore[method-assign]
+
+    pending, cache, budget = [], {}, [10_000]
+    result, raw_len = _run(runtime.dispatch(
+        None, name, args, studio=studio, nav_routes=routes or ROUTES,
+        pending_nav=pending, budget=budget, name_cache=cache,
+    ))
+    return result, raw_len, pending, cache
+
+
+def _run(coro):
+    import asyncio  # pylint: disable=import-outside-toplevel
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+ROUTES = [{"path": "/map", "description": "Atlas"}]
+
+
+def test_dispatch_fills_the_name_cache_from_a_real_result():
+    _, _, _, cache = _dispatch(
+        "mcp__gmr__investigate_entity", {"entity_id": ENTITY_ID},
+        raw=json.dumps(INVESTIGATE_RESULT),
+    )
+    assert cache.get(ENTITY_ID) == "Siemens Energy AG/ADR"
+
+
+def test_dispatch_queues_a_navigation_and_reports_no_raw_length():
+    result, raw_len, pending, _ = _dispatch("navigate", {"path": "/map"})
+    assert pending == [{"path": "/map"}]
+    assert '"ok": true' in result.lower()
+    # 0 means "answered locally" — the trace bubble is for fontem-api calls.
+    assert raw_len == 0
+
+
+def test_dispatch_refuses_a_studio_call_with_no_ops_rather_than_crashing():
+    result, raw_len, _, _ = _dispatch(
+        "mcp__gmr__studio_list_projects", {}, studio=None)
+    assert "not available" in result
+    assert raw_len == 0
+
+
+def test_dispatch_reports_the_raw_length_so_a_trace_can_be_emitted():
+    body = json.dumps({"companies": [{"gmr_id": "c-1", "name": "ACME"}]})
+    _, raw_len, _, cache = _dispatch("mcp__gmr__search_entities", {"q": "a"},
+                                     raw=body)
+    assert raw_len == len(body)
+    assert cache == {"c-1": "ACME"}
+
+
+def test_dispatch_survives_a_tool_result_that_is_not_json():
+    # Legacy tools and error paths can return prose; the cache update must
+    # not take the turn down with it.
+    result, raw_len, _, cache = _dispatch(
+        "mcp__gmr__search_entities", {"q": "a"}, raw="not json at all")
+    assert result == "not json at all"
+    assert raw_len == len("not json at all")
+    assert not cache

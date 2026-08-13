@@ -39,7 +39,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from src.assistant import navigation, studio_tools, tool_budget, tool_trace
+from src.assistant import studio_tools, tool_budget, tool_trace
 from src.assistant.engine_tools import turn_tool_specs
 from src.assistant import generated_tools
 from src.assistant.tool_runtime import (
@@ -50,7 +50,6 @@ from src.assistant.tool_runtime import (
     resolve_route,
     ToolRuntime,
 )
-from src.assistant.entities import _capture_names
 from src.assistant.language import _language_directive
 
 #: Matches the other engines so a comparison measures the loop, not a
@@ -139,42 +138,12 @@ class PydanticAIProxyClient:
             name = fn["name"]
 
             async def run(_name=name, **kwargs):
-                if _name in studio_tools.STUDIO_ACTIONS:
-                    # Server-side, as the asking user. The service checks
-                    # access on every call, so this cannot reach a project
-                    # the user could not open themselves.
-                    if studio is None:
-                        return json.dumps({
-                            "error": "the Data Studio is not available "
-                                     "for this turn"})
-                    return await studio.execute(_name, kwargs)
-                if _name == navigation.NAVIGATE_TOOL_NAME:
-                    # Runs in the browser, not here. The model is told
-                    # whether the path was accepted — but that result is only
-                    # its receipt. The panel moves because a `navigate` SSE
-                    # event reaches it, and this closure cannot yield one, so
-                    # the emit rides along in `pending_nav` and the stream
-                    # loop sends it (same shape as LangGraph's tool traces).
-                    #
-                    # Dropping the emit here is what made the assistant say
-                    # "I've taken you to the Atlas" while the page stayed
-                    # exactly where it was.
-                    result, emit = navigation.navigate_result(
-                        kwargs.get("path", ""), nav_routes,
-                    )
-                    if emit:
-                        pending_nav.append(emit)
-                    return result
-                raw = await self._tools.execute_tool(client, _name, kwargs)
-                # Keep the id->name mapping fresh from every result, so the
-                # status line says "Investigating Siemens Energy AG/ADR"
-                # rather than a UUID. Read from the FULL result, before the
-                # budget cap truncates it.
-                try:
-                    _capture_names(name_cache, json.loads(raw))
-                except (ValueError, TypeError):
-                    pass
-                capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
+                capped, _raw_len = await self._tools.dispatch(
+                    client, _name, kwargs,
+                    studio=studio, nav_routes=nav_routes,
+                    pending_nav=pending_nav, budget=budget,
+                    name_cache=name_cache,
+                )
                 return capped
 
             tools.append(tool_cls.from_schema(

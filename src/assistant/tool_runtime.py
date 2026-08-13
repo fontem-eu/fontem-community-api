@@ -44,8 +44,10 @@ from src.assistant import generated_tools, legacy_tools
 from src.assistant.freshness import _format_freshness_summary
 from src.assistant.catalogue import CatalogueCache
 
-from src.assistant import local_models, navigation, studio_tools
-from src.assistant.entities import _build_summary, entity_name
+from src.assistant import (
+    local_models, navigation, studio_tools, tool_budget,
+)
+from src.assistant.entities import _build_summary, _capture_names, entity_name
 
 
 # ── Tool schemas (OpenAI / Mistral function-calling format) ────────────
@@ -304,6 +306,11 @@ def resolve_route(
                      local=True, timeout=300.0), ""
 
     return None, "no model is available: set LOCAL_LLM_URL or supply a key"
+
+
+#: Cluster-internal service address. Plain http on purpose: this never
+#: leaves the cluster, the hop is inside the service mesh, and there is no
+#: TLS terminator in front of it to speak to.
 _DEFAULT_GMR_API = "http://fontem-api"
 # Bumped 5 → 10. Five is too tight for "investigate this multi-subsidiary
 # corporate group" prompts; ten is enough for most real questions and is
@@ -497,6 +504,55 @@ class ToolRuntime:
             summary = ""
         self._freshness_cache = (now, summary)
         return summary
+
+    async def dispatch(
+        self, client, name: str, args: dict, *,
+        studio, nav_routes: list, pending_nav: list,
+        budget: list[int], name_cache: dict,
+    ) -> tuple[str, int]:
+        """Run one tool call. Returns (what the model sees, raw result length).
+
+        Both executors call this, so a tool behaves identically whichever is
+        driving — and the three special cases below stop being copy-pasted
+        into two closures that then drift.
+
+        A raw length of 0 means "nothing came back from fontem-api": the
+        Studio and navigate paths answer locally and are not worth a trace
+        bubble.
+        """
+        if name in studio_tools.STUDIO_ACTIONS:
+            # Server-side, as the asking user. The service checks access on
+            # every call, so this cannot reach a project the user could not
+            # open themselves.
+            if studio is None:
+                return json.dumps({
+                    "error": "the Data Studio is not available for this turn",
+                }), 0
+            return await studio.execute(name, args), 0
+
+        if name == navigation.NAVIGATE_TOOL_NAME:
+            # Runs in the browser, not here. The result is only the model's
+            # receipt; the panel moves because of the `navigate` SSE event,
+            # and the closures cannot yield one — so the emit rides along in
+            # `pending_nav` and the stream loop sends it. Dropping it is what
+            # made the assistant claim to navigate while the page stayed put.
+            result, emit = navigation.navigate_result(
+                args.get("path", ""), nav_routes,
+            )
+            if emit:
+                pending_nav.append(emit)
+            return result, 0
+
+        raw = await self.execute_tool(client, name, args)
+        # Keep the id->name mapping fresh from every result, so the status
+        # line says "Investigating Siemens Energy AG/ADR" rather than a UUID.
+        # Read from the FULL result, before the budget cap truncates it.
+        try:
+            _capture_names(name_cache, json.loads(raw))
+        except (ValueError, TypeError):
+            pass
+        capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
+        return capped, len(raw)
 
     async def execute_tool(
         self, client: httpx.AsyncClient, name: str, args: dict,
