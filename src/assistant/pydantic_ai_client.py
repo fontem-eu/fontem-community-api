@@ -123,7 +123,8 @@ class PydanticAIProxyClient:
 
     def __init__(self, *, model: str = "",
                  gmr_api_url: str = _DEFAULT_GMR_API,
-                 local_url: str = "", local_model: str = "") -> None:
+                 local_url: str = "", local_model: str = "",
+                 mock_url: str = "") -> None:
         self._tools = ToolRuntime(gmr_api_url=gmr_api_url)
         # No platform key: a turn either carries the caller's own
         # credential or is answered by the cluster-local model. The
@@ -133,6 +134,7 @@ class PydanticAIProxyClient:
         self._gmr_api_url = gmr_api_url
         self._local_url = local_url
         self._local_model = local_model
+        self._mock_url = mock_url
 
     @staticmethod
     def _drain_navigations(pending_nav: list) -> list[str]:
@@ -190,6 +192,7 @@ class PydanticAIProxyClient:
             local_url=self._local_url,
             local_model_id=payload.get("local_model_id") or self._local_model,
             default_model=self._model,
+            mock_url=self._mock_url,
         )
         if route is None:
             yield _sse("error", {"error": route_error})

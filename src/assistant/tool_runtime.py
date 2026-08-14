@@ -46,7 +46,7 @@ from src.assistant.freshness import _format_freshness_summary
 from src.assistant.catalogue import CatalogueCache
 
 from src.assistant import (
-    local_models, navigation, studio_tools, tool_budget, tool_trace,
+    local_models, mock_llm, navigation, studio_tools, tool_budget, tool_trace,
 )
 from src.assistant.entities import _build_summary, _capture_names, entity_name
 from src.services import audit_context
@@ -264,6 +264,7 @@ def resolve_route(
     local_url: str,
     local_model_id: str | None,
     default_model: str,
+    mock_url: str = "",
 ) -> tuple[Route | None, str]:
     """Pick the endpoint for a turn. Returns (route, error) — one or the other.
 
@@ -296,6 +297,19 @@ def resolve_route(
         # minutes, which is why the timeouts differ by an order of magnitude.
         return Route(base, key, cred.get("model") or default_model,
                      local=False, timeout=120.0), ""
+
+    # The scripted e2e model stands in for the cluster-local one, so it sits
+    # here — after the credential branch, never before it. Ahead of it, a
+    # user with their own provider key whose stored id happened to be the
+    # mock's would have their turn answered by a script instead of the
+    # provider they are paying for; a test says so.
+    #
+    # Requires the flag AND a URL, so a half-configured environment falls
+    # through to the real models rather than to a dead address.
+    if (local_model_id or "").strip().lower() == mock_llm.MOCK_MODEL_ID \
+            and mock_url and mock_llm.enabled():
+        return Route(mock_url.rstrip("/") + "/v1", "", mock_llm.MOCK_MODEL_ID,
+                     local=True, timeout=60.0), ""
 
     if local_url:
         # The caller picks from a curated list of ids, never a model name.

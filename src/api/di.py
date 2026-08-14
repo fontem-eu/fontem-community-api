@@ -546,6 +546,10 @@ class AssistantProvider(Provider):
                 # keeps its default.
                 "local_url": os.environ.get("LOCAL_LLM_URL", ""),
                 "local_model": os.environ.get("LOCAL_LLM_MODEL", "qwen3-4b"),
+                # Where the scripted e2e model answers. Empty in production,
+                # and `resolve_route` also requires ASSIST_MOCK_MODEL, so the
+                # id cannot route anywhere there.
+                "mock_url": os.environ.get("ASSIST_MOCK_URL", ""),
             }
             if langgraph_client.engine_selected():
                 return langgraph_client.LangGraphProxyClient(**kwargs)
