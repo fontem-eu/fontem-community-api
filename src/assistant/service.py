@@ -385,29 +385,12 @@ class AssistantService:
         return {
             "conversation_id": msg.conversation_id,
             "message_id": message_id,
-            "prompt": {
-                "content": prompt.content,
-                "created_at": prompt.created_at.isoformat() if prompt and prompt.created_at else None,
-            } if prompt else None,
+            "prompt": _prompt_of(prompt),
             "calls": [
-                {
-                    "id": m.id,
-                    "tool": m.content,
-                    "args": (m.extras or {}).get("args") or {},
-                    "elapsed": (m.extras or {}).get("elapsed"),
-                    "bytes": (m.extras or {}).get("bytes"),
-                    "truncated": bool((m.extras or {}).get("truncated")),
-                    "created_at": m.created_at.isoformat() if m.created_at else None,
-                    # Which one the caller came in on.
-                    "is_subject": m.id == message_id,
-                }
+                _call_of(m, subject=message_id)
                 for m in window if m.role == "tool"
             ],
-            "answer": {
-                "content": answer.content,
-                "model": answer.model,
-                "created_at": answer.created_at.isoformat() if answer.created_at else None,
-            } if answer else None,
+            "answer": _answer_of(answer),
         }
 
     # ─────────── Usage queries ────────────
@@ -441,6 +424,46 @@ class AssistantService:
         now = now or datetime.now(timezone.utc)
         since = now - timedelta(days=days)
         return await self._repo.usage_history_since(user_id, since)
+
+
+def _at(message) -> str | None:
+    """An ISO timestamp, for rows that may predate one."""
+    return message.created_at.isoformat() if message.created_at else None
+
+
+def _prompt_of(message) -> dict | None:
+    """What the user asked. None for a turn whose prompt is gone."""
+    if message is None:
+        return None
+    return {"content": message.content, "created_at": _at(message)}
+
+
+def _answer_of(message) -> dict | None:
+    """What the assistant replied, and which model wrote it. None when the
+    turn errored before answering — which is exactly when someone asks."""
+    if message is None:
+        return None
+    return {
+        "content": message.content,
+        "model": message.model,
+        "created_at": _at(message),
+    }
+
+
+def _call_of(message, *, subject: str) -> dict:
+    """One tool call. No result: it was never stored."""
+    extras = message.extras or {}
+    return {
+        "id": message.id,
+        "tool": message.content,
+        "args": extras.get("args") or {},
+        "elapsed": extras.get("elapsed"),
+        "bytes": extras.get("bytes"),
+        "truncated": bool(extras.get("truncated")),
+        "created_at": _at(message),
+        # Which one the caller came in on.
+        "is_subject": message.id == subject,
+    }
 
 
 # ── SSE parsing helpers ───────────────────────────────────────
