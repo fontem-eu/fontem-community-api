@@ -19,7 +19,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_current_user
-from src.api.openapi_responses import RESOURCE_RESPONSES
+from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
+from src.services.exceptions import NotFound
 from src.assistant.credential_repository import CredentialRepository, McpTokenRepository
 from src.assistant import local_models
 from src.assistant.model_prefs import ModelPreferenceRepository
@@ -212,6 +213,29 @@ async def delete_all_conversations(
     """Delete all conversation history for the current user."""
     count = await service.delete_user_conversations(user.id)
     return {"deleted": count}
+
+
+@router.get("/provenance/{message_id}")
+@inject
+async def get_provenance(
+    message_id: UuidPath,
+    *,
+    service: FromDishka[AssistantService],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    """What led the agent to do something: the prompt, the tool calls, the answer.
+
+    An activity entry written by the assistant names the tool call that
+    caused it. This turns that id back into the exchange it came from, so a
+    user can read what they asked and what the agent did about it.
+
+    404 for both "no such message" and "not yours" — telling a stranger which
+    ids exist is the whole of what an enumeration attack needs.
+    """
+    turn = await service.turn_for_message(user.id, message_id)
+    if turn is None:
+        raise NotFound("No such tool call")
+    return turn
 
 
 @router.get("/conversations/{conversation_key:path}")

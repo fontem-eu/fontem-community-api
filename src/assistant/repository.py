@@ -90,6 +90,17 @@ class AssistRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_message(self, message_id: str) -> AssistMessage | None:
+        """One message by id, or None.
+
+        Carries user_id and conversation_id, which is what lets the caller
+        check ownership before showing anything: an activity entry names a
+        message id, and a message id is guessable in exactly the way a
+        conversation is not.
+        """
+        ...
+
+    @abstractmethod
     async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
         ...
 
@@ -197,6 +208,12 @@ class InMemoryAssistRepository(AssistRepository):
             if msg.id == message_id:
                 msg.tokens_in = tokens_in
                 return
+
+    async def get_message(self, message_id: str) -> AssistMessage | None:
+        for msg in self._messages:
+            if msg.id == message_id:
+                return msg
+        return None
 
     async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
         return [

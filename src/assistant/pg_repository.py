@@ -117,6 +117,13 @@ class PgAssistRepository(AssistRepository):
             .values(tokens_in=tokens_in)
         )
 
+    async def get_message(self, message_id: str) -> AssistMessage | None:
+        row = (await self._session.execute(
+            select(AssistMessageModel).where(
+                AssistMessageModel.id == message_id)
+        )).scalars().first()
+        return _to_msg_dc(row) if row is not None else None
+
     async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
         stmt = (
             select(AssistMessageModel)

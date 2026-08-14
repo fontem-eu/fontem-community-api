@@ -129,20 +129,41 @@ class TestProfileSecurity:
             assert "u1@test.com" not in json.dumps(body)
             assert "hidden@x.io" not in json.dumps(body)
 
-    def test_activity_never_leaks_private_entity_titles(self, client, services):
+    def test_a_users_activity_is_their_own(self, client, services):
+        """Nobody else sees any of it.
+
+        This used to publish the subset touching the author's PUBLIC stories.
+        The filter worked, but it made every new kind of activity a
+        disclosure decision by default — and the log has since grown to
+        record Data Studio work and which actions an AGENT took on someone's
+        behalf, in which conversation. None of that was considered when the
+        filter was written, and all of it would have been published by it.
+        """
         asyncio.get_event_loop().run_until_complete(self._seed(services))
-        # owner sees the full feed
+        # The owner still sees their full feed.
         owner = self._profile(client, make_headers("u1"))
         owner_titles = {e["summary"] for e in owner["recent_activity"]}
         assert {"PUBLIC-TITLE", "SECRET-PRIVATE", "SECRET-DOSSIER"} <= owner_titles
-        # anonymous + other user: only public-article activity, no private titles
+
+        # Anonymous and other signed-in users see none of it — including the
+        # public-story activity that used to be shown.
         for hdr in (None, make_headers("u2")):
             body = self._profile(client, hdr)
-            titles = {e["summary"] for e in body["recent_activity"]}
-            assert "PUBLIC-TITLE" in titles
-            assert "SECRET-PRIVATE" not in titles and "SECRET-DOSSIER" not in titles
+            assert body["recent_activity"] == []
+            # The private titles must not appear anywhere in the payload.
+            # PUBLIC-TITLE still does — as the article's own title, which is
+            # what a public profile is for. What is gone is the activity
+            # ABOUT it, and with it the shape of when its author works.
             blob = json.dumps(body)
-            assert "SECRET-PRIVATE" not in blob and "SECRET-DOSSIER" not in blob
+            for secret in ("SECRET-PRIVATE", "SECRET-DOSSIER"):
+                assert secret not in blob, f"{secret} leaked to a non-owner"
+
+    def test_the_public_profile_still_lists_public_articles(self, client, services):
+        # Closing the activity feed must not close the profile: the articles
+        # someone published are the point of having one.
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        body = self._profile(client, make_headers("u2"))
+        assert body["articles"], "a public profile with no articles is not a profile"
 
 class TestHomeNutsApi:
     def test_set_home_nuts_then_returned_publicly(self, client, services):

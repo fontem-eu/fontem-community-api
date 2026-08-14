@@ -32,7 +32,7 @@ class TestProfileService:
         with pytest.raises(NotFound):
             await svc.get_profile("ghost", viewer_authed=False)
 
-    async def test_composes_only_own_public_articles_plus_activity(self):
+    async def test_composes_only_own_public_articles(self):
         svc, users, profiles, reports, activity = await _make()
         u = await seed_user(users, "u1")
         other = await seed_user(users, "u2")
@@ -54,7 +54,19 @@ class TestProfileService:
         assert prof["summary"] == "Investigator."
         assert prof["links"] == [{"name": "Mastodon", "url": "https://m.io/x"}]
         assert [a["title"] for a in prof["articles"]] == ["Public one"]
-        assert prof["recent_activity"][0]["entity_id"] == "a1"
+        # A visitor sees the articles, not the activity: a user's activity is
+        # their own. The owner's view is covered below.
+        assert prof["recent_activity"] == []
+
+    async def test_the_owner_still_sees_their_own_activity(self):
+        svc, users, profiles, reports, activity = await _make()
+        u = await seed_user(users, "u1")
+        del profiles, reports
+        await activity.record(ActivityEvent(
+            actor_id=u.id, entity_type="story", entity_id="a1",
+            action="created", summary="Public one"))
+        prof = await svc.get_profile(u.id, viewer_authed=True, caller_id=u.id)
+        assert [e["entity_id"] for e in prof["recent_activity"]] == ["a1"]
 
     async def test_public_auth_visible_only_to_authed_viewer(self):
         svc, users, _, reports, _ = await _make()

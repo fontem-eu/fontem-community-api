@@ -117,17 +117,26 @@ def _public_email(user, show_email: bool, use_custom: bool, custom: str) -> str:
 
 
 def _visible_activity(activity, articles, *, is_owner: bool):
-    """SECURITY: the activity log records each entity's title at event time,
-    including PRIVATE stories/dossiers/investigations/issues. The owner sees
-    their full feed; everyone else sees only activity on this author's PUBLIC
-    articles, so private-entity titles never leak on a public profile."""
-    if is_owner:
-        return activity
-    public_ids = {a.id for a in articles}
-    return [
-        e for e in activity
-        if e.entity_type == "story" and e.entity_id in public_ids
-    ]
+    """A user's activity is their own. Nobody else sees any of it.
+
+    This used to show non-owners the subset that touched the author's PUBLIC
+    stories, on the reasoning that a public artefact's history is public. The
+    reasoning is defensible and the filter worked, but it made every new kind
+    of activity a disclosure decision by default: the log has since grown to
+    record Data Studio work, and now carries which actions an AGENT took on
+    someone's behalf, in which conversation. None of that was considered when
+    the filter was written, and all of it would have been published by it.
+
+    Closed by default instead. Opening it back up for public artefacts is a
+    deliberate act — it needs a per-entry visibility rule rather than an
+    entity_type check, because "activity on a public story" and "activity
+    that is safe to publish" are not the same set.
+
+    `articles` is kept in the signature: the caller has it, and the rule it
+    feeds is exactly what a future selective opening would use.
+    """
+    del articles
+    return activity if is_owner else []
 
 
 class ProfileService:
