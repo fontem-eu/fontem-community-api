@@ -47,3 +47,36 @@ def _client_ip(request: Request) -> str:
 
 
 limiter = Limiter(key_func=_client_ip)
+
+#: What one IP may spend on the signed-out assistant per hour.
+#:
+#: Deliberately not a `@limiter.limit` decorator on the handler. That
+#: decorator counts every call to the route, and the route also serves
+#: signed-in users — including the smoke suite, which runs a whole battery
+#: of assistant turns from one address. Rate-limiting them by IP is how
+#: STORY-12 broke (see `_client_ip`); this is checked in the handler, on
+#: the anonymous branch only.
+#:
+#: The number is set by what an anonymous turn actually costs: a turn on the
+#: shared llama-server, which is memory-bound and has been OOMKilled by
+#: ordinary load before now. Twenty is generous for finding your way around
+#: a site and far too few to be worth pointing a script at.
+ANONYMOUS_ASSIST_LIMIT = "20/hour"
+
+
+def anonymous_assist_allowed(request: Request) -> bool:
+    """Whether this IP may have another signed-out assistant turn.
+
+    Returns True (and records the hit) when there is room, False when the
+    caller has spent the hour's allowance. Honours ``limiter.enabled`` so
+    the suite's bursts behave the same way they do for every other limit.
+    """
+    if not limiter.enabled:
+        return True
+    # Parsed per call rather than at import: `limits.parse` is cheap, and a
+    # module-level parse would need the import to succeed before the app can
+    # start, for a value that is only read on an anonymous request.
+    from limits import parse  # pylint: disable=import-outside-toplevel
+    return limiter.limiter.hit(
+        parse(ANONYMOUS_ASSIST_LIMIT), "anon-assist", _client_ip(request),
+    )

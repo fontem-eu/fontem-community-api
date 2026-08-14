@@ -524,6 +524,7 @@ class ToolRuntime:
         studio, nav_routes: list, pending_nav: list,
         budget: list[int], name_cache: dict,
         traced: list | None = None, audit=None,
+        allowed: frozenset[str] | None = None,
     ) -> tuple[str, int]:
         """Run one tool call. Returns (what the model sees, raw result length).
 
@@ -543,6 +544,21 @@ class ToolRuntime:
         """
         started = time.time()
         call_id = uuid.uuid4().hex
+        # A second lock on the same door. `turn_tool_specs` already withholds
+        # everything but navigate from a signed-out caller, so a well-behaved
+        # turn never arrives here with anything else — but the spec list is
+        # built partly from tools fetched over HTTP from fontem-api at turn
+        # time, and "the model was only offered safe tools" is an argument
+        # about a prompt, not a guarantee about execution. This is the
+        # guarantee, and it sits ahead of every dispatch branch below so no
+        # later reordering can get in front of it.
+        if allowed is not None and name not in allowed:
+            out = json.dumps({
+                "error": f"{name} is not available to signed-out visitors",
+                "hint": "sign in to use this tool",
+            })
+            _record_call(traced, call_id, name, args, out, started, 0)
+            return out, 0
         # Anything the tool writes from here is attributable to this call,
         # not merely to the turn. Scoped, so the id comes off again when the
         # call ends — a later write belongs to the turn, not to whichever
