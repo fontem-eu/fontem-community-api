@@ -30,7 +30,11 @@ from src.assistant.credentials import (
     CredentialEncryptionUnavailable,
     validate_provider,
 )
-from src.assistant.service import AssistantService, ChatRequest
+from src.assistant.service import (
+    ANONYMOUS_MAX_PROMPT_CHARS,
+    AssistantService,
+    ChatRequest,
+)
 from src.domain.user import User
 
 
@@ -137,6 +141,19 @@ async def chat_stream(
     and which address is asking.
     """
     if user is None:
+        # Checked before the rate limit, so an over-long message costs the
+        # caller nothing: being told the rule and being charged for breaking
+        # it at the same time is a bad way to meet a limit.
+        if len(body.message) > ANONYMOUS_MAX_PROMPT_CHARS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Message too long for a signed-out visitor "
+                    f"({len(body.message)} characters; the limit is "
+                    f"{ANONYMOUS_MAX_PROMPT_CHARS}). Sign in to ask longer "
+                    f"questions."
+                ),
+            )
         # Per IP, and only on this branch — signed-in callers are accounted
         # for by account elsewhere and must not share a bucket with the
         # internet at large.

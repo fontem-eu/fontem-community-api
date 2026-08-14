@@ -21,7 +21,7 @@ from src.assistant import local_models, navigation
 from src.assistant.context import TurnLimits
 from src.assistant.engine_tools import ANONYMOUS_TOOLS, turn_tool_specs
 from src.assistant.repository import InMemoryAssistRepository
-from src.assistant.service import AssistantService
+from src.assistant.service import ANONYMOUS_MAX_PROMPT_CHARS, AssistantService
 from src.assistant.tool_runtime import ToolRuntime
 from tests.conftest import make_headers, seed_user
 
@@ -394,6 +394,80 @@ class TestAnonymousAssistant:
         assert resp.status_code in (401, 403), (
             f"{path} must not be reachable without an account"
         )
+
+
+class TestAnonymousPromptCap:
+    """How much a stranger may ask at once.
+
+    Its own class rather than more methods on TestAnonymousAssistant: the
+    other limits shape what the turn IS, and this one is a rule about the
+    request, checked before the turn exists at all.
+    """
+
+    def test_the_cap_is_the_number_the_panel_mirrors(self):
+        # AssistPanel.vue in fontem-web hardcodes 1000 as its `maxlength`,
+        # and its own test pins that. There is no shared source for the
+        # number, so every other test here reads the constant symbolically
+        # and would happily pass if it were raised to 100_000. This is the
+        # one that notices — change it here and the panel needs changing
+        # too, or the input and the server disagree about the same rule.
+        assert ANONYMOUS_MAX_PROMPT_CHARS == 1_000
+
+    def test_a_message_at_the_limit_is_accepted(self, client, recording):
+        resp = _anon_post(client, message="x" * ANONYMOUS_MAX_PROMPT_CHARS)
+        assert resp.status_code == 200
+
+    def test_a_message_over_the_limit_is_refused(self, client, recording):
+        resp = _anon_post(client, message="x" * (ANONYMOUS_MAX_PROMPT_CHARS + 1))
+        assert resp.status_code == 422
+
+    def test_the_refusal_says_what_the_limit_is(self, client, recording):
+        # The panel mirrors this number, so a caller that hits the server
+        # limit has already got past the input's own cap — the message has
+        # to be enough to act on without reading our source.
+        resp = _anon_post(client, message="x" * (ANONYMOUS_MAX_PROMPT_CHARS + 50))
+        detail = str(resp.json().get("detail", ""))
+        assert str(ANONYMOUS_MAX_PROMPT_CHARS) in detail
+        assert "sign in" in detail.lower()
+
+    def test_an_over_long_message_never_reaches_the_model(self, client, recording):
+        _anon_post(client, message="x" * (ANONYMOUS_MAX_PROMPT_CHARS + 1))
+        proxy, _ = recording
+        assert not proxy.payloads, (
+            "a refused message must not be sent upstream — the point of the "
+            "cap is the turn it prevents, not the status code"
+        )
+
+    def test_a_signed_in_user_has_no_such_cap(self, client, services, recording):
+        # The cap is a property of the anonymous turn. A signed-in user is
+        # metered by account and may paste an article at it.
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1")
+        )
+        resp = client.post(
+            "/assist/chat/stream",
+            json={"message": "x" * (ANONYMOUS_MAX_PROMPT_CHARS * 3),
+                  "conversation_key": "k", "context_block": ""},
+            headers=make_headers("user-1"),
+        )
+        assert resp.status_code == 200
+
+    def test_the_cap_is_checked_before_the_rate_limit(self, client, recording):
+        # An over-long message must not spend the hour's allowance. Pinned
+        # because the two checks are adjacent and the order is the whole
+        # difference between "you were told" and "you were charged".
+        limiter.enabled = True
+        limiter.reset()
+        try:
+            for _ in range(int(ANONYMOUS_ASSIST_LIMIT.split("/", maxsplit=1)[0]) + 5):
+                resp = _anon_post(
+                    client, message="x" * (ANONYMOUS_MAX_PROMPT_CHARS + 1))
+                assert resp.status_code == 422
+            # The allowance is untouched, so a normal question still works.
+            assert _anon_post(client).status_code == 200
+        finally:
+            limiter.reset()
+            limiter.enabled = False
 
 
 class _SpyClient:

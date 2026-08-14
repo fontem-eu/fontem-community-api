@@ -79,6 +79,23 @@ class ChatRequest:
     local_model_id: str | None = None
 
 
+#: How long a signed-out visitor's message may be.
+#:
+#: The reduced assistant answers questions about the platform and moves the
+#: caller around it. Those questions are short. A cap keeps the shape of the
+#: turn honest — an unauthenticated caller cannot use the prompt as a way to
+#: buy a large context on the shared llama-server, which the 20/hour limit
+#: alone would not stop (one request can be as long as the body allows).
+#:
+#: `context_block` needs no equivalent: it is already truncated to the
+#: service's own char budget before it reaches the model.
+#:
+#: fontem-web mirrors this number in AssistPanel.vue so the input stops the
+#: user before the request does. Rejected rather than truncated: a silently
+#: shortened question gets a confident answer to something nobody asked.
+ANONYMOUS_MAX_PROMPT_CHARS = 1_000
+
+
 @dataclass(frozen=True)
 class UsageSnapshot:
     tokens_1h: int
