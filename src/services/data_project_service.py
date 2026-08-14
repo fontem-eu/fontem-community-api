@@ -10,6 +10,8 @@ re-runnable recipes.
 """
 from __future__ import annotations
 
+import json
+
 from src.domain.data_project import DataPlot, DataProject, DataQuery
 from src.repositories.data_project_repository import DataProjectRepository
 from src.repositories.investigation_repository import InvestigationRepository
@@ -27,8 +29,59 @@ _RESOURCE = "data_project"
 OWNER_FLAGS = {"level": "owner", "can_edit": True, "can_delete": True, "can_share": True}
 
 
+#: The limits this service enforces, wherever the call came from.
+#:
+#: They used to live only in the router's Pydantic models, which made them
+#: rules about HTTP requests rather than rules about data. The assistant
+#: calls this service directly — correctly, it is the domain boundary — and
+#: so did not get them: an agent could store a query of any length while the
+#: same operation over HTTP was capped at 8000 characters.
+#:
+#: The router keeps its Field(max_length=...) declarations. That is not
+#: duplication with a different job: rejecting early gives an HTTP caller a
+#: 422 naming the field, while these make the rule true for every caller.
+MAX_NAME_CHARS = 300
+MAX_QUERY_CHARS = 8_000
+MAX_SPEC_BYTES = 64_000
+#: The languages a query may be written in. The tool schema already offers
+#: only these, so the agent was in fact MORE constrained than the HTTP API,
+#: which accepted any string up to 20 characters.
+QUERY_LANGS = ("cypher", "sql", "sparql")
+
+
 def _clean(name: str, fallback: str) -> str:
-    return (name or "").strip()[:300] or fallback
+    return (name or "").strip()[:MAX_NAME_CHARS] or fallback
+
+
+def _check_query(query: str | None) -> None:
+    """Reject rather than truncate.
+
+    A name cut short is still that thing with a shorter label; a query cut
+    short is a different query, and one that silently returns different rows
+    is worse than one that was refused.
+    """
+    if query is not None and len(query) > MAX_QUERY_CHARS:
+        raise InvalidInput(
+            f"query is {len(query)} characters; the limit is {MAX_QUERY_CHARS}"
+        )
+
+
+def _check_lang(lang: str | None) -> None:
+    if lang and lang not in QUERY_LANGS:
+        raise InvalidInput(
+            f"unsupported query language {lang!r}; expected one of "
+            + ", ".join(QUERY_LANGS)
+        )
+
+
+def _check_spec(spec: dict | None) -> None:
+    if spec is None:
+        return
+    size = len(json.dumps(spec, default=str))
+    if size > MAX_SPEC_BYTES:
+        raise InvalidInput(
+            f"plot spec is {size} bytes; the limit is {MAX_SPEC_BYTES}"
+        )
 
 
 class DataProjectService:
@@ -238,6 +291,8 @@ class DataProjectService:
     async def add_query(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, user_id: str, project_id: str, name: str, lang: str, query: str,
     ) -> DataQuery:
+        _check_query(query)
+        _check_lang(lang)
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
         created = await self._repo.add_query(DataQuery(
@@ -251,6 +306,8 @@ class DataProjectService:
         self, user_id: str, project_id: str, query_id: str,
         name: str | None, lang: str | None, query: str | None,
     ) -> DataQuery:
+        _check_query(query)
+        _check_lang(lang)
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
         existing = self._find_query(project, query_id)
@@ -298,6 +355,7 @@ class DataProjectService:
 
     # ── plots ───────────────────────────────────────────────────
     async def add_plot(self, user_id: str, project_id: str, name: str, spec: dict) -> DataPlot:
+        _check_spec(spec)
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
         created = await self._repo.add_plot(DataPlot(
@@ -310,6 +368,7 @@ class DataProjectService:
     async def update_plot(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, user_id: str, project_id: str, plot_id: str, name: str | None, spec: dict | None,
     ) -> DataPlot:
+        _check_spec(spec)
         project = await self._load(project_id)
         await self._require_project(user_id, project, Action.DATA_PROJECTS_EDIT)
         existing = self._find_plot(project, plot_id)
