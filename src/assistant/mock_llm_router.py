@@ -7,11 +7,17 @@ ships in the production image, so the gate is explicit and tested: without
 ``ASSIST_MOCK_MODEL`` the routes are not mounted at all and the model id is
 not selectable.
 
-Unauthenticated on purpose. The only caller is this same pod's assistant
-turn, reaching it over the cluster-internal service address, and requiring a
-token would mean minting one for the agent to call itself. It is reachable
-only where the flag is on, it reads nothing and writes nothing, and it can
-answer no question that was not already in the request body.
+Unauthenticated, and cluster-internal. The only caller is this same pod's
+assistant turn over the service address, so requiring a token would mean
+minting one for the agent to call itself.
+
+That argument only holds if the outside cannot reach it, and at first it
+could: fontem-web proxies /capi/ to this service, so the endpoint was
+answering 200 on the public testing host until an nginx block was added for
+`/capi/mock-llm` (fontem-web nginx.conf, asserted by a smoke test). It reads
+nothing, writes nothing, and can answer no question that was not already in
+the request body — but an unauthenticated POST endpoint on a public host is
+not something to leave standing on those grounds alone.
 """
 from __future__ import annotations
 

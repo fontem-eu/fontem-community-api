@@ -136,6 +136,49 @@ class TestQueryValidation:
         assert not verdict.ok
         assert "syntax error" in verdict.errors[0]
 
+    def test_a_misspelled_label_is_an_error_even_though_cypher_accepts_it(self):
+        # The failure that motivated reading notifications at all:
+        # MATCH (c:Compnay) parses, plans, runs, and matches nothing
+        # forever. Neo4j says so as a notification, not an error.
+        verdict = _run(studio_validation.validate_query(
+            _Client({"cypher": _Resp(200, {"columns": [], "notifications": [{
+                "code": "Neo.ClientNotification.Statement.UnknownLabelWarning",
+                "title": "The provided label is not in the database.",
+                "description": "One of the labels does not exist: (:Compnay)",
+                "severity": "WARNING"}]})}),
+            "http://api", "cypher", "MATCH (c:Compnay) RETURN c"))
+        assert not verdict.ok
+        assert "Compnay" in verdict.errors[0]
+
+    @pytest.mark.parametrize("code", [
+        "Neo.ClientNotification.Statement.UnknownRelationshipTypeWarning",
+        "Neo.ClientNotification.Statement.UnknownPropertyKeyWarning",
+    ])
+    def test_other_unknown_schema_names_are_errors_too(self, code):
+        verdict = _run(studio_validation.validate_query(
+            _Client({"cypher": _Resp(200, {"notifications": [
+                {"code": code, "description": "nope", "severity": "WARNING"}]})}),
+            "http://api", "cypher", "MATCH (c)-[:NOPE]->() RETURN c"))
+        assert not verdict.ok
+
+    def test_a_performance_hint_is_only_a_warning(self):
+        # A cartesian product is worth mentioning and not worth refusing —
+        # plenty of correct queries produce one.
+        verdict = _run(studio_validation.validate_query(
+            _Client({"cypher": _Resp(200, {"notifications": [{
+                "code": "Neo.ClientNotification.Statement.CartesianProductWarning",
+                "description": "This query builds a cartesian product",
+                "severity": "INFORMATION"}]})}),
+            "http://api", "cypher", "MATCH (a),(b) RETURN a,b"))
+        assert verdict.ok
+        assert verdict.warnings
+
+    def test_no_notifications_means_nothing_to_say(self):
+        verdict = _run(studio_validation.validate_query(
+            _Client({"cypher": _Resp(200, {"columns": [], "notifications": []})}),
+            "http://api", "cypher", "MATCH (c:Company) RETURN c"))
+        assert verdict.ok and not verdict.warnings and not verdict.errors
+
     def test_sparql_columns_come_back_for_the_plot_checker(self):
         verdict = _run(studio_validation.validate_query(
             _Client({"sparql": _Resp(200, {"head": {"vars": ["a", "b"]}})}),
