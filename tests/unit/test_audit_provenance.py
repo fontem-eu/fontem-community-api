@@ -136,7 +136,9 @@ def test_the_id_the_activity_names_is_the_id_the_conversation_stores(log):
     _as_agent()
 
     class _Studio:
-        async def execute(self, _name, args):
+        # **_ so this keeps matching StudioOps.execute, which now also takes
+        # the turn's HTTP client and API url for validating what it writes.
+        async def execute(self, _name, args, **_):
             await svc.record("u-1", "data_project", "p-9", "created",
                              args.get("name", ""))
             return json.dumps({"id": "p-9"})

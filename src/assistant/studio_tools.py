@@ -147,7 +147,11 @@ STUDIO_TOOLS: list[dict] = [
                 "(companies, contracts, ownership), 'sql' is the statistics "
                 "warehouse (Eurostat observations by region and year), "
                 "'sparql' is the RDF store (ontology and transitive "
-                "ownership). Each store speaks only its own language."
+                "ownership). Each store speaks only its own language. "
+                "The query is checked against the engine before it is "
+                "saved: if it does not parse, or names a label or column "
+                "that does not exist, NOTHING is saved and you get the "
+                "engine's error back — fix the query and call this again."
             ),
             "parameters": {
                 "type": "object",
@@ -185,7 +189,9 @@ STUDIO_TOOLS: list[dict] = [
             "name": "mcp__gmr__studio_update_query",
             "description": (
                 "Changes an existing source query's name, language or "
-                "text. Omitted fields are left unchanged."
+                "text. Omitted fields are left unchanged. A new query text "
+                "is checked against the engine first: if it does not work, "
+                "the stored query is left alone and you get the error back."
             ),
             "parameters": {
                 "type": "object",
@@ -212,7 +218,11 @@ STUDIO_TOOLS: list[dict] = [
                 "DuckDB SQL transform that runs in the browser, and the "
                 "chart settings. The transform is DuckDB SQL whatever "
                 "language produced the sources; each source arrives in it "
-                "as a table named after the source."
+                "as a table named after the source. The spec is checked "
+                "before it is saved — chart type, each source query against "
+                "its engine, and (when there is no transform) that the axes "
+                "name columns the sources actually return. Nothing is saved "
+                "if it fails; you get the reasons back."
             ),
             "parameters": {
                 "type": "object",
@@ -231,7 +241,9 @@ STUDIO_TOOLS: list[dict] = [
             "name": "mcp__gmr__studio_update_plot",
             "description": (
                 "Changes an existing plot's name or chart spec. Omitted "
-                "fields are left unchanged."
+                "fields are left unchanged. A new spec is checked first; if "
+                "it fails the stored plot is left alone and you get the "
+                "reasons back."
             ),
             "parameters": {
                 "type": "object",

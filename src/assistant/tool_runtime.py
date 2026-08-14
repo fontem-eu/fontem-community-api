@@ -607,7 +607,11 @@ class ToolRuntime:
                 })
                 _record_call(traced, call_id, name, args, out, started, 0)
                 return out, 0
-            out = await studio.execute(name, args)
+            # The turn's own client and the API it already talks to, handed
+            # over so a Studio write can be checked against the same engines
+            # the user's Run button uses before it is saved.
+            out = await studio.execute(name, args, client=client,
+                                       api_url=self._gmr_api_url)
             _record_call(traced, call_id, name, args, out, started, 0)
             return out, 0
 
