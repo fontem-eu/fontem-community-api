@@ -99,33 +99,58 @@ def _tool_results(messages: list[dict]) -> list[tuple[str, str]]:
     return out
 
 
+#: Where search_entities puts its hits, most useful first. It does not
+#: return one list — it returns one per entity type:
+#:   {"query": …, "companies": [...], "authorities": [...],
+#:    "persons": [...], "lobbyists": [...]}
+#: Learned by running the tool against testing, after a first version
+#: guessed "results"/"entities" and the e2e failed with the real payload
+#: attached. Which is what the e2e is for.
+_HIT_LISTS = ("companies", "authorities", "persons", "lobbyists",
+              "results", "entities", "matches", "items")
+
+#: Whatever the id is called in a hit, in order of specificity.
+_ID_KEYS = ("gmr_id", "entity_id", "authority_id", "id")
+
+
 def _first_entity_id(raw: str) -> str:
     """Pull an id out of whatever search_entities answered.
 
-    Tolerant on shape and strict on outcome: several shapes have shipped
-    (a bare list, {"results": [...]}, {"entities": [...]}), and an empty
-    string here becomes a visible failure in the answer rather than a
-    fabricated id — which is the bug this whole battery exists to catch.
+    Tolerant on shape and strict on outcome: an empty string here becomes a
+    visible MOCK-FAIL in the answer rather than a fabricated id — which is
+    the behaviour this whole battery exists to catch a model doing.
     """
     try:
         data = json.loads(raw)
     except (TypeError, ValueError):
         return ""
-    if isinstance(data, dict):
-        for key in ("results", "entities", "matches", "items"):
-            if isinstance(data.get(key), list):
-                data = data[key]
-                break
-    if not isinstance(data, list) or not data:
-        return ""
-    head = data[0]
-    if not isinstance(head, dict):
-        return ""
-    for key in ("gmr_id", "entity_id", "id", "authority_id"):
-        value = head.get(key)
-        if isinstance(value, str) and value:
-            return value
+    for hit in _candidate_hits(data):
+        for key in _ID_KEYS:
+            value = hit.get(key)
+            if isinstance(value, str) and value:
+                return value
     return ""
+
+
+def _candidate_hits(data) -> list[dict]:
+    """Every result object in the payload, best list first."""
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)]
+    if not isinstance(data, dict):
+        return []
+    hits: list[dict] = []
+    for key in _HIT_LISTS:
+        value = data.get(key)
+        if isinstance(value, list):
+            hits += [x for x in value if isinstance(x, dict)]
+    if hits:
+        return hits
+    # Nothing recognised: take any list of objects rather than fail on a
+    # key we have not seen before. The id lookup below still decides.
+    for value in data.values():
+        if isinstance(value, list):
+            hits += [x for x in value if isinstance(x, dict)]
+    return hits
 
 
 def _contract_count(raw: str) -> str:
