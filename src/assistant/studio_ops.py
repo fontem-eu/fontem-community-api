@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from src.services import studio_validation
+
 #: Query text is long and rarely needed in full when listing. Reading one
 #: query in full is what get_project's `query_id` filter is for.
 _QUERY_PREVIEW_CHARS = 400
@@ -37,6 +39,52 @@ class StudioOps:
     def __init__(self, service: Any, user_id: str) -> None:
         self._svc = service
         self._user = user_id
+        # Set per call by `execute`. The HTTP client belongs to the turn, not
+        # to this object: it is the one the tool dispatch already opened, and
+        # opening a second one per validation would double the connections a
+        # turn holds.
+        self._client: Any = None
+        self._api_url: str = ""
+
+    # ── validation ─────────────────────────────────────────────
+    #
+    # An agent that is told "created" learns nothing from a query that does
+    # not parse, so it moves on and the project keeps a broken query. These
+    # check before writing and hand the engine's own words back.
+
+    async def _check_query(self, lang: str, query: str):
+        """Validate, or return None when there is nothing to validate with."""
+        if self._client is None:
+            return None
+        return await studio_validation.validate_query(
+            self._client, self._api_url, lang, query)
+
+    async def _check_plot(self, spec: dict):
+        if self._client is None:
+            return None
+        return await studio_validation.validate_plot(
+            self._client, self._api_url, spec or {})
+
+    @staticmethod
+    def _refusal(verdict, subject: str) -> dict:
+        return {
+            "error": f"the {subject} was not saved because it does not work",
+            **verdict.as_dict(),
+            "hint": f"fix the {subject} and call this tool again",
+        }
+
+    @staticmethod
+    def _with_notes(result: dict, verdict) -> dict:
+        """Attach anything worth knowing about a write that did go through.
+
+        Only when there is something to say: a clean check adds nothing to
+        the payload, because "valid: true" on every successful call is noise
+        the model pays for on every turn.
+        """
+        if verdict is not None and (verdict.warnings or not verdict.checked):
+            result = dict(result)
+            result["validation"] = verdict.as_dict()
+        return result
 
     # ── shaping ────────────────────────────────────────────────
     @staticmethod
@@ -96,27 +144,62 @@ class StudioOps:
 
     async def add_query(self, project_id: str = "", name: str = "",
                         lang: str = "cypher", query: str = "", **_) -> dict:
+        verdict = await self._check_query(lang, query)
+        if verdict is not None and not verdict.ok:
+            return self._refusal(verdict, "query")
         created = await self._svc.add_query(
             self._user, project_id, name, lang, query)
-        return self._query_dict(created, full=True)
+        return self._with_notes(self._query_dict(created, full=True), verdict)
 
     async def update_query(self, project_id: str = "", query_id: str = "",
                            name: str | None = None, lang: str | None = None,
                            query: str | None = None, **_) -> dict:
+        verdict = None
+        if query is not None:
+            # The language may not be changing, in which case the stored one
+            # is what this query will run under — validating against the
+            # default instead would check something nobody will execute.
+            effective_lang = lang
+            if effective_lang is None:
+                existing = await self._existing_query(project_id, query_id)
+                effective_lang = getattr(existing, "lang", None) or "cypher"
+            verdict = await self._check_query(effective_lang, query)
+            if verdict is not None and not verdict.ok:
+                return self._refusal(verdict, "query")
         updated = await self._svc.update_query(
             self._user, project_id, query_id, name, lang, query)
-        return self._query_dict(updated, full=True)
+        return self._with_notes(self._query_dict(updated, full=True), verdict)
+
+    async def _existing_query(self, project_id: str, query_id: str):
+        """The stored query, or None. Best-effort: a lookup that fails must
+        not block a write the service itself would have allowed."""
+        try:
+            project = await self._svc.get_project(self._user, project_id)
+        except Exception:  # pylint: disable=broad-except
+            return None
+        for q in getattr(project, "queries", []) or []:
+            if getattr(q, "id", None) == query_id:
+                return q
+        return None
 
     async def add_plot(self, project_id: str = "", name: str = "",
                        spec: dict | None = None, **_) -> dict:
+        verdict = await self._check_plot(spec or {})
+        if verdict is not None and not verdict.ok:
+            return self._refusal(verdict, "plot")
         created = await self._svc.add_plot(self._user, project_id, name, spec or {})
-        return self._plot_dict(created)
+        return self._with_notes(self._plot_dict(created), verdict)
 
     async def update_plot(self, project_id: str = "", plot_id: str = "",
                           name: str | None = None, spec: dict | None = None, **_) -> dict:
+        verdict = None
+        if spec is not None:
+            verdict = await self._check_plot(spec)
+            if verdict is not None and not verdict.ok:
+                return self._refusal(verdict, "plot")
         updated = await self._svc.update_plot(
             self._user, project_id, plot_id, name, spec)
-        return self._plot_dict(updated)
+        return self._with_notes(self._plot_dict(updated), verdict)
 
     # ── dispatch ───────────────────────────────────────────────
     #: Tool name -> method. No delete: an agent that can remove a user's work
@@ -132,7 +215,8 @@ class StudioOps:
         "mcp__gmr__studio_update_plot": "update_plot",
     }
 
-    async def execute(self, name: str, args: dict) -> str:
+    async def execute(self, name: str, args: dict, *,
+                      client: Any = None, api_url: str = "") -> str:
         """Run one Studio tool. Always returns a JSON string, never raises.
 
         A raised exception here would abort the turn mid-stream; the model
@@ -142,6 +226,11 @@ class StudioOps:
         method = self.OPS.get(name)
         if method is None:
             return json.dumps({"error": f"unknown studio tool: {name}"})
+        # Borrowed for this call only. Without a client there is nothing to
+        # validate against, and the write proceeds as it always did — that
+        # is the case for every existing unit test, and for any caller that
+        # has no fontem-api to ask.
+        self._client, self._api_url = client, api_url
         try:
             result = await getattr(self, method)(**(args or {}))
             return json.dumps(result, default=str)

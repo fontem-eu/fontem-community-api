@@ -21,6 +21,7 @@ from src.api.rate_limit import limiter
 from src.api.routers import (
     activity, auth, data_projects, dossiers, feed_catalogue, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
 )
+from src.assistant import mock_llm
 from src.assistant import router as assistant_router
 from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
 
@@ -136,6 +137,23 @@ async def _activity_for(request):
         return await container.get(ActivityService)
     except Exception:  # pylint: disable=broad-exception-caught
         return None
+
+
+def _mount_mock_llm(application: FastAPI) -> None:
+    """Mount the scripted e2e model, where there is one.
+
+    Only where ASSIST_MOCK_MODEL is set, so the routes do not exist in
+    production even though the code ships in the image. That is the entire
+    safety argument for shipping it, so it has its own test — a flag is a
+    claim about configuration, and configuration drifts.
+    """
+    if not mock_llm.enabled():
+        return
+    # Imported here rather than at module scope: nothing should load the
+    # mock's router in an environment that does not serve it.
+    # pylint: disable-next=import-outside-toplevel
+    from src.assistant import mock_llm_router
+    application.include_router(mock_llm_router.router)
 
 
 def build_app(database_url: str | None = None) -> FastAPI:
@@ -289,6 +307,7 @@ def build_app(database_url: str | None = None) -> FastAPI:
     # pylint: enable=unused-argument
 
     application.include_router(assistant_router.router)
+    _mount_mock_llm(application)
     application.include_router(auth.router)
     # Data stories — canonical path. The /reports alias below keeps
     # existing API clients working through the rename window; remove

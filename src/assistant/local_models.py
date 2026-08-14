@@ -100,8 +100,19 @@ def resolve(model_id: str | None) -> LocalModel:
 
 def is_known(model_id: str | None) -> bool:
     """Whether an id is one we offer. Used to reject writes rather than
-    silently storing something we will never honour."""
-    return (model_id or "").strip().lower() in _BY_ID
+    silently storing something we will never honour.
+
+    The scripted e2e model counts only where it exists. Anywhere else the id
+    is unknown, so it cannot be stored and `resolve` hands back the default
+    — a preference row copied from a test environment into production must
+    not quietly select a model that is not there.
+    """
+    wanted = (model_id or "").strip().lower()
+    # pylint: disable-next=import-outside-toplevel
+    from src.assistant import mock_llm
+    if wanted == mock_llm.MOCK_MODEL_ID:
+        return mock_llm.enabled()
+    return wanted in _BY_ID
 
 
 def as_dicts() -> list[dict]:

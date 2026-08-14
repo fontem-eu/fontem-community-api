@@ -72,6 +72,15 @@ spec:
             # the LangGraph path does and does not yet carry.
             - name: ASSISTANT_ENGINE
               value: {{ .Values.assistantEngine | default "" | quote }}
+            # The scripted model the assistant e2e tests drive. Both must be
+            # set for it to exist: the flag mounts the endpoint and makes the
+            # id selectable, the URL is where a turn asking for it is sent.
+            # Empty in production — see src/assistant/mock_llm.py for why the
+            # code ships there anyway and what stops it being reachable.
+            - name: ASSIST_MOCK_MODEL
+              value: {{ .Values.assistMockModel | default "" | quote }}
+            - name: ASSIST_MOCK_URL
+              value: {{ .Values.assistMockUrl | default "" | quote }}
             - name: MISTRAL_MODEL
               value: {{ .Values.mistralModel | default "mistral-small-latest" | quote }}
             - name: MISTRAL_API_KEY
