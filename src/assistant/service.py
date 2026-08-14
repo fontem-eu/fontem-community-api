@@ -334,6 +334,65 @@ class AssistantService:
             message_id=payload.get("call_id") or None,
         )
 
+    # ─────────── Provenance ────────────
+
+    async def turn_for_message(
+        self, user_id: str, message_id: str
+    ) -> dict | None:
+        """The turn a given message belongs to: prompt, tool calls, answer.
+
+        This is what makes an activity entry explainable. The entry names the
+        tool call that caused it; this reassembles what the user actually
+        asked and everything the agent did in that turn, so "the assistant
+        created this project" can be read back as a sequence rather than
+        taken on faith.
+
+        Returns None when the message does not exist OR does not belong to
+        the caller — the same answer for both, because distinguishing them
+        tells a stranger whether an id is real.
+
+        The turn is delimited by messages, not by a stored turn id: the rows
+        for one exchange are the user message, every tool call after it, and
+        the assistant message that ends it. That is inherent to the ordering
+        rather than a convention someone has to maintain.
+        """
+        msg = await self._repo.get_message(message_id)
+        if msg is None or msg.user_id != user_id:
+            return None
+
+        messages = await self._repo.list_messages(msg.conversation_id)
+        try:
+            here = next(i for i, m in enumerate(messages) if m.id == message_id)
+        except StopIteration:  # pragma: no cover - it was just fetched
+            return None
+
+        # Walk back to the prompt that opened this turn.
+        start = 0
+        for i in range(here, -1, -1):
+            if messages[i].role == "user":
+                start = i
+                break
+        # ...and forward to the answer that closed it.
+        end = len(messages)
+        for i in range(here + 1, len(messages)):
+            if messages[i].role == "user":
+                end = i
+                break
+
+        window = messages[start:end]
+        prompt = next((m for m in window if m.role == "user"), None)
+        answer = next((m for m in window if m.role == "assistant"), None)
+        return {
+            "conversation_id": msg.conversation_id,
+            "message_id": message_id,
+            "prompt": _prompt_of(prompt),
+            "calls": [
+                _call_of(m, subject=message_id)
+                for m in window if m.role == "tool"
+            ],
+            "answer": _answer_of(answer),
+        }
+
     # ─────────── Usage queries ────────────
 
     async def usage_for_user(
@@ -365,6 +424,46 @@ class AssistantService:
         now = now or datetime.now(timezone.utc)
         since = now - timedelta(days=days)
         return await self._repo.usage_history_since(user_id, since)
+
+
+def _at(message) -> str | None:
+    """An ISO timestamp, for rows that may predate one."""
+    return message.created_at.isoformat() if message.created_at else None
+
+
+def _prompt_of(message) -> dict | None:
+    """What the user asked. None for a turn whose prompt is gone."""
+    if message is None:
+        return None
+    return {"content": message.content, "created_at": _at(message)}
+
+
+def _answer_of(message) -> dict | None:
+    """What the assistant replied, and which model wrote it. None when the
+    turn errored before answering — which is exactly when someone asks."""
+    if message is None:
+        return None
+    return {
+        "content": message.content,
+        "model": message.model,
+        "created_at": _at(message),
+    }
+
+
+def _call_of(message, *, subject: str) -> dict:
+    """One tool call. No result: it was never stored."""
+    extras = message.extras or {}
+    return {
+        "id": message.id,
+        "tool": message.content,
+        "args": extras.get("args") or {},
+        "elapsed": extras.get("elapsed"),
+        "bytes": extras.get("bytes"),
+        "truncated": bool(extras.get("truncated")),
+        "created_at": _at(message),
+        # Which one the caller came in on.
+        "is_subject": message.id == subject,
+    }
 
 
 # ── SSE parsing helpers ───────────────────────────────────────
