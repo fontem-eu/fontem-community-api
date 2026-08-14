@@ -19,6 +19,18 @@ from dataclasses import dataclass
 #: Stable id used in the API and stored against the user. Never a filename.
 DEFAULT_MODEL_ID = "qwen3-4b"
 
+#: What a signed-out visitor gets. The smallest model we offer, named
+#: explicitly rather than taken as ``LOCAL_MODELS[0]``: that tuple is ordered
+#: for the UI ("fastest first"), and a reordering to put a recommended model
+#: at the top would silently hand anonymous traffic a bigger one. A test pins
+#: this to the smallest of LOCAL_MODELS so the two cannot drift.
+#:
+#: Anonymous turns are unauthenticated and not metered against an account, so
+#: the cheapest model is also the one whose cost an abusive caller cannot run
+#: up — and the shared llama-server is memory-bound enough to have been
+#: OOMKilled by ordinary load before now.
+ANONYMOUS_MODEL_ID = "qwen3-1.7b"
+
 
 @dataclass(frozen=True)
 class LocalModel:

@@ -14,11 +14,12 @@ import os
 from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from src.api.auth import get_current_user
+from src.api.auth import get_current_user, get_optional_user
+from src.api.rate_limit import anonymous_assist_allowed
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.services.exceptions import NotFound
 from src.assistant.credential_repository import CredentialRepository, McpTokenRepository
@@ -113,40 +114,78 @@ class HistoryMessage(BaseModel):
 # without involving schema generation.
 @router.post("/chat/stream", response_class=StreamingResponse)
 @inject
+# One more argument than pylint's default since `request` joined for the
+# rate-limit key. Same call as the auth handlers, which take it for the same
+# reason: the client address is only knowable from the request.
+# pylint: disable-next=too-many-arguments
 async def chat_stream(
+    request: Request,
     body: AssistChatBody,
     *,
     service: FromDishka[AssistantService],
     credentials: FromDishka[CredentialRepository],
     model_prefs: FromDishka[ModelPreferenceRepository],
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User | None, Depends(get_optional_user)],
 ):
-    """Stream an assistant reply via SSE."""
-    # Resolved here, per request, and handed to the turn. The proxy client
-    # is an APP-scoped singleton shared by every user, so the key must
-    # travel with the request rather than live on the client.
-    try:
-        credential = await credentials.get_secret_for_turn(user.id)
-    except CredentialEncryptionUnavailable:
-        # Misconfigured master key: fall back to the platform key if there
-        # still is one, rather than taking the assistant down entirely.
-        credential = None
+    """Stream an assistant reply via SSE.
 
-    # Read per request for the same reason as the credential: the proxy
-    # client is an APP-scoped singleton, so anything user-specific has to
-    # travel with the turn rather than live on it.
-    local_model_id = await model_prefs.get(user.id)
+    Open to signed-out visitors, who get a reduced assistant: the smallest
+    model, `navigate` as its only tool, and nothing persisted. The service
+    decides all of that from ``user_id is None`` — the shape of a reduced
+    turn is a property of the turn, not of this transport. What belongs here
+    is only what the request itself knows: whether there is a user at all,
+    and which address is asking.
+    """
+    if user is None:
+        # Per IP, and only on this branch — signed-in callers are accounted
+        # for by account elsewhere and must not share a bucket with the
+        # internet at large.
+        if not anonymous_assist_allowed(request):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Too many assistant requests from this address. Sign in "
+                    "to continue, or try again later."
+                ),
+            )
+        req = ChatRequest(
+            user_id=None,
+            conversation_key=body.conversation_key,
+            message=body.message,
+            context_block=body.context_block,
+            # Deliberately not taken from the body: an anonymous turn has no
+            # editing surface and no stored model preference, and honouring
+            # either from an unauthenticated request would let the caller
+            # choose the model that answers it.
+            has_editor=False,
+            nav=body.nav,
+        )
+    else:
+        # Resolved here, per request, and handed to the turn. The proxy client
+        # is an APP-scoped singleton shared by every user, so the key must
+        # travel with the request rather than live on the client.
+        try:
+            credential = await credentials.get_secret_for_turn(user.id)
+        except CredentialEncryptionUnavailable:
+            # Misconfigured master key: fall back to the platform key if there
+            # still is one, rather than taking the assistant down entirely.
+            credential = None
 
-    req = ChatRequest(
-        user_id=user.id,
-        conversation_key=body.conversation_key,
-        message=body.message,
-        context_block=body.context_block,
-        has_editor=body.has_editor,
-        nav=body.nav,
-        credential=credential,
-        local_model_id=local_model_id,
-    )
+        # Read per request for the same reason as the credential: the proxy
+        # client is an APP-scoped singleton, so anything user-specific has to
+        # travel with the turn rather than live on it.
+        local_model_id = await model_prefs.get(user.id)
+
+        req = ChatRequest(
+            user_id=user.id,
+            conversation_key=body.conversation_key,
+            message=body.message,
+            context_block=body.context_block,
+            has_editor=body.has_editor,
+            nav=body.nav,
+            credential=credential,
+            local_model_id=local_model_id,
+        )
 
     async def generator() -> AsyncGenerator[str, None]:
         async for line in service.turn(req):

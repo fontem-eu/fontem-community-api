@@ -40,7 +40,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from src.assistant import studio_tools, tool_budget, tool_trace
-from src.assistant.engine_tools import turn_tool_specs
+from src.assistant.engine_tools import ANONYMOUS_TOOLS, turn_tool_specs
 from src.assistant import generated_tools
 from src.assistant.tool_runtime import (
     _DEFAULT_GMR_API,
@@ -141,7 +141,8 @@ class PydanticAIProxyClient:
     def _build_tools(self, client: httpx.AsyncClient, tool_cls,
                      specs: list[dict], nav_routes: list, budget: list[int],
                      studio, pending_nav: list, name_cache: dict,
-                     traced: list, audit=None):
+                     traced: list, audit=None,
+                     allowed: frozenset[str] | None = None):
         """Wrap our JSON-schema tools over the shared executor.
 
         ``Tool.from_schema`` takes the schema as-is, so the model sees exactly
@@ -159,6 +160,7 @@ class PydanticAIProxyClient:
                     studio=studio, nav_routes=nav_routes,
                     pending_nav=pending_nav, budget=budget,
                     name_cache=name_cache, traced=traced, audit=audit,
+                    allowed=allowed,
                 )
                 return capped
 
@@ -212,6 +214,7 @@ class PydanticAIProxyClient:
         nav = payload.get("nav") or {}
         nav_routes = nav.get("routes") or []
         has_editor = bool(payload.get("has_editor"))
+        anonymous = bool(payload.get("anonymous"))
 
         yield _sse("status", {"phase": "connecting",
                               "detail": "Starting assistant...", "elapsed": 0})
@@ -220,7 +223,8 @@ class PydanticAIProxyClient:
                 gen_tools = await generated_tools.fetch_tools(
                     client, self._gmr_api_url,
                 )
-                specs = turn_tool_specs(gen_tools, has_editor, nav_routes)
+                specs = turn_tool_specs(gen_tools, has_editor, nav_routes,
+                                        anonymous=anonymous)
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 # Navigate emits queue here; the tool closures cannot yield.
                 pending_nav: list = []
@@ -232,8 +236,9 @@ class PydanticAIProxyClient:
                 traced: list = []
                 tools = self._build_tools(
                     client, tool_cls, specs, nav_routes, budget,
-                    payload.get("studio_ops"), pending_nav, name_cache,
-                    traced,
+                    None if anonymous else payload.get("studio_ops"),
+                    pending_nav, name_cache, traced,
+                    allowed=ANONYMOUS_TOOLS if anonymous else None,
                 )
                 # The name the SERVER serves, not the id we store. The
                 # production agent runs in router mode and answers to

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator as TypingAsyncIterator, Protocol
 
-from src.assistant import navigation
+from src.assistant import local_models, navigation
 from src.services import audit_context
 from src.assistant.context import (
     TurnLimits,
@@ -50,7 +50,14 @@ from src.assistant.tokens import (
 # which model. Splitting it into sub-objects would only move the count.
 # pylint: disable=too-many-instance-attributes
 class ChatRequest:
-    user_id: str
+    #: None for a signed-out visitor. Every persistence path in `turn` keys
+    #: off this being set: an anonymous turn writes no conversation, no
+    #: messages, no tool rows, no usage and no activity. That is the point
+    #: rather than a simplification — `assist_conversations.user_id` is NOT
+    #: NULL, and the alternative (mint a synthetic id per visitor) would let
+    #: unauthenticated traffic write unbounded rows into the tables the usage
+    #: reports read.
+    user_id: str | None
     conversation_key: str
     message: str
     context_block: str
@@ -126,7 +133,18 @@ class AssistantService:
         turns are visible in usage reports), then persists an assistant
         row on stream completion with real token counts if the proxy
         forwarded them, otherwise with estimates.
+
+        A signed-out visitor takes a different route entirely — see
+        `_anonymous_turn`. Branching here rather than threading `if user_id`
+        through the body keeps the two shapes legible: the authenticated turn
+        is largely about persistence and provenance, and the anonymous one
+        has neither.
         """
+        if req.user_id is None:
+            async for line in self._anonymous_turn(req):
+                yield line
+            return
+
         conv = await self._repo.find_or_create_conversation(
             req.user_id, req.conversation_key
         )
@@ -297,6 +315,53 @@ class AssistantService:
 
         if errored and not assistant_buf:
             return
+
+    async def _anonymous_turn(self, req: ChatRequest) -> AsyncIterator[str]:
+        """One turn for a visitor who is not signed in.
+
+        A wayfinder rather than the assistant: it can talk about the platform
+        and move the caller around it, and that is the whole of it. Three
+        things make it that, and each is decided here rather than asked of
+        the model:
+
+        * `anonymous` in the payload, which collapses the tool surface to
+          `navigate` alone in whichever engine is driving, and is checked
+          again when a call is dispatched.
+        * the smallest model we offer, whatever the caller asked for. There
+          is no credential path either: an unauthenticated request must not
+          be able to name the model that answers it, or the cheap tier is a
+          suggestion.
+        * no writes. Nothing is persisted, so there is no conversation to
+          resume — each turn stands alone, and what the visitor sees of their
+          own history lives in the browser for as long as the tab does.
+
+        No audit context is installed. Nothing here can write, so there would
+        be nothing to attribute; leaving the ambient context alone also means
+        an anonymous turn cannot be mistaken for an agent acting on some
+        user's behalf.
+        """
+        budgeted_context = budget_context_block(
+            req.context_block, char_budget=self._context_budget
+        )
+        system_prompt = build_system_prompt(
+            self._base_prompt,
+            budgeted_context,
+            # No history, because none is stored and none can be: the model
+            # is told the truth about what it knows.
+            [],
+            site_map=navigation.system_context(req.nav),
+        )
+        payload = {
+            "system": system_prompt,
+            "message": req.message,
+            "nav": req.nav,
+            # Nothing to propose into, and no account to propose for.
+            "has_editor": False,
+            "anonymous": True,
+            "local_model_id": local_models.ANONYMOUS_MODEL_ID,
+        }
+        async for line in self._proxy.stream(payload):
+            yield line
 
     async def _persist_tool_call(
         self, conversation_id: str, user_id: str, data: str

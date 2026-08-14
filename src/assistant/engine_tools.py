@@ -58,8 +58,16 @@ OFFERED_BUILTINS = (
 OFFERED_GENERATED = ("get_doc",)
 
 
+#: The only tool a signed-out visitor is offered. Everything else either
+#: writes to an account (Studio, propose_edit) or spends fontem-api calls on
+#: an unauthenticated caller's behalf (search, investigate, get_doc).
+#: Navigating is the one thing that needs no account and costs us nothing:
+#: the site map came from the client and the answer goes back to the client.
+ANONYMOUS_TOOLS = frozenset({navigation.NAVIGATE_TOOL_NAME})
+
+
 def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
-                    nav_routes: list) -> list[dict]:
+                    nav_routes: list, *, anonymous: bool = False) -> list[dict]:
     """Tool schemas for one turn, in the order the model should see them.
 
     The Studio tools are unconditional. They run server-side against the
@@ -71,7 +79,18 @@ def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
     `propose_edit` stays gated, because it genuinely needs a surface to
     propose into. That is the difference: approval and application are UI
     concerns, reading and writing the user's own projects are not.
+
+    `anonymous` collapses all of that to navigate alone. It is an allowlist
+    rather than a set of subtractions on purpose: a tool added later is
+    withheld from signed-out callers until someone decides otherwise, which
+    is the direction an unauthenticated surface should fail in.
     """
+    if anonymous:
+        # No site map, no tools: navigate is meaningless without routes to
+        # validate against, and offering a tool that cannot succeed only
+        # gives a small model something to fail at.
+        return [navigation.navigate_tool_schema()] if nav_routes else []
+
     builtins = [t for t in _builtin_tools()
                 if t["function"]["name"] in OFFERED_BUILTINS]
     specs = list(navigation.scope_tools(builtins, has_editor=has_editor))
