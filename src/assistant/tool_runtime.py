@@ -48,7 +48,10 @@ from src.assistant.catalogue import CatalogueCache
 from src.assistant import (
     local_models, mock_llm, navigation, studio_tools, tool_budget, tool_trace,
 )
-from src.assistant.entities import _build_summary, _capture_names, entity_name
+from src.assistant.entities import (
+    _build_summary, _capture_names, entity_name,
+    slim_contract, slim_graph, slim_props,
+)
 from src.services import audit_context
 
 
@@ -775,7 +778,18 @@ class ToolRuntime:
             contracts = []
         if isinstance(contracts, dict) and "contracts" in contracts:
             contracts = contracts["contracts"]
-        contract_count = len(contracts) if isinstance(contracts, list) else 0
+        contracts_shown = len(contracts) if isinstance(contracts, list) else 0
+        # The graph's OWN total, not the size of the page we just fetched.
+        #
+        # This used to be len(contracts), which is capped by contract_limit —
+        # so the assistant told a user "Siemens AG … with 5 EU procurement
+        # contract(s) in the graph" when the graph said 8, and understated
+        # every entity with more contracts than the limit. The true figure
+        # was already sitting in props["contract_count"], unread. On a
+        # platform whose claim is that figures trace to a source, a
+        # confidently wrong figure is the worst defect available.
+        total = props.get("contract_count") if isinstance(props, dict) else None
+        contract_count = total if isinstance(total, int) else contracts_shown
 
         # Graph neighbourhood (depth 1 unless caller bumped).
         graph_resp = await client.get(
@@ -793,11 +807,15 @@ class ToolRuntime:
         return json.dumps({
             "label": label,
             "entity_id": entity_id,
-            "props": props,
+            "props": slim_props(props),
             "summary": _build_summary(label, props, contract_count),
-            "contracts": contracts,
+            "contracts": ([slim_contract(c) for c in contracts]
+                          if isinstance(contracts, list) else contracts),
+            # Both numbers, because they differ and the difference matters:
+            # the model must not describe a page as the whole set.
             "contract_count": contract_count,
-            "graph": graph,
+            "contracts_shown": contracts_shown,
+            "graph": slim_graph(graph),
         })
 
 
