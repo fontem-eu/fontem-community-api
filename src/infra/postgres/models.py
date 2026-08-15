@@ -488,6 +488,13 @@ class RefreshTokenFamilyModel(Base):
     # SHA-256 hash of the current refresh token's secret. Plaintext is
     # NEVER stored — a DB dump shouldn't hand attackers live sessions.
     current_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    #: What `current_token_hash` was before the last rotation.
+    #:
+    #: Two jobs, told apart by `rotated_at`: inside the grace window a hit
+    #: here is a second tab refreshing a moment late, and is answered
+    #: normally; outside it, a hit is a replayed token and the family is
+    #: revoked. Null until a family has rotated at least once.
+    previous_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     # When the *current* token was minted. Combined with the per-family
     # TTL window this gives us "if no refresh in 14 days, expire."
     rotated_at: Mapped[datetime] = mapped_column(

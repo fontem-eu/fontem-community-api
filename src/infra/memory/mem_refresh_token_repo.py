@@ -41,6 +41,12 @@ class InMemoryRefreshTokenRepository(RefreshTokenRepository):
                 return replace(f)
         return None
 
+    async def find_by_previous_hash(self, token_hash: str):
+        for f in self._families.values():
+            if f.previous_token_hash == token_hash:
+                return f
+        return None
+
     async def rotate(
         self,
         family_id: str,
@@ -52,6 +58,7 @@ class InMemoryRefreshTokenRepository(RefreshTokenRepository):
             return False
         self._families[family_id] = replace(
             f,
+            previous_token_hash=f.current_token_hash,
             current_token_hash=new_token_hash,
             rotated_at=_now(),
             expires_at=new_expires_at,
