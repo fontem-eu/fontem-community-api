@@ -139,7 +139,9 @@ class TestTheScriptedChain:
         )
         step = mock_llm.next_step(msgs)
         assert step["tool"] == "navigate"
-        assert step["args"]["path"] == "/companies"
+        # A route the app actually has. /companies is not one, and asking
+        # for it meant the panel correctly refused to draw a consent prompt.
+        assert step["args"]["path"] == mock_llm.NAVIGATE_TARGET
 
     def test_the_final_answer_carries_the_count_the_tool_reported(self):
         msgs = _history(
