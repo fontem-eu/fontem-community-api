@@ -621,14 +621,27 @@ async def refresh(
     # killing at refresh time.
     sanction = await user_repo.get_active_sanction(user.id)
     if sanction is not None and sanction.type == "ban":
-        await refresh_service.revoke(issued.plaintext)
+        # A ban revokes the family. With no plaintext (a grace-window
+        # refresh) there is nothing to offer the revoke call, so revoke the
+        # family directly — a banned user must not keep a session either way.
+        if issued.plaintext is not None:
+            await refresh_service.revoke(issued.plaintext)
+        else:
+            await refresh_service.revoke_family(issued.family.id, "banned")
         _clear_refresh_cookie(response)
         raise HTTPException(status_code=401, detail=_BANNED_DETAIL)
 
-    ttl_seconds = int(
-        (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
-    )
-    _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
+    # `plaintext is None` means this refresh was accepted inside the grace
+    # window without rotating: another tab in this same browser rotated
+    # moments ago and its Set-Cookie already carries the current token.
+    # Setting a cookie here would either repeat that value or, worse,
+    # overwrite it with a stale one. Leave it alone and hand back the
+    # access token, which is all the caller actually asked for.
+    if issued.plaintext is not None:
+        ttl_seconds = int(
+            (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
+        )
+        _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
     return _to_token_response(user, _mint_access_jwt(user), storage)
 
 

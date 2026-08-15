@@ -25,6 +25,7 @@ def _to_domain(m: RefreshTokenFamilyModel) -> RefreshTokenFamily:
         id=m.id,
         user_id=m.user_id,
         current_token_hash=m.current_token_hash,
+        previous_token_hash=m.previous_token_hash,
         rotated_at=m.rotated_at,
         expires_at=m.expires_at,
         revoked_at=m.revoked_at,
@@ -66,6 +67,16 @@ class PgRefreshTokenRepository(RefreshTokenRepository):
         m = result.scalar_one_or_none()
         return _to_domain(m) if m is not None else None
 
+    async def find_by_previous_hash(
+        self, token_hash: str,
+    ) -> RefreshTokenFamily | None:
+        stmt = select(RefreshTokenFamilyModel).where(
+            RefreshTokenFamilyModel.previous_token_hash == token_hash,
+        )
+        result = await self._session.execute(stmt)
+        m = result.scalar_one_or_none()
+        return _to_domain(m) if m is not None else None
+
     async def rotate(
         self,
         family_id: str,
@@ -87,6 +98,10 @@ class PgRefreshTokenRepository(RefreshTokenRepository):
                 RefreshTokenFamilyModel.revoked_at.is_(None),
             )
             .values(
+                # Keep what we are replacing: it is what a second tab will
+                # offer a moment from now, and what a thief would replay
+                # much later. `rotated_at` is how those are told apart.
+                previous_token_hash=RefreshTokenFamilyModel.current_token_hash,
                 current_token_hash=new_token_hash,
                 rotated_at=_utcnow(),
                 expires_at=new_expires_at,

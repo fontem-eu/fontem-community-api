@@ -50,6 +50,23 @@ from src.repositories.refresh_token_repository import (
 REFRESH_TOKEN_TTL = timedelta(days=14)
 
 
+#: How long the just-replaced token keeps working after a rotation.
+#:
+#: Rotation is single-use, which is right, but "single-use" and "the only
+#: request in flight" are different claims. A browser has one cookie jar
+#: and several tabs: when one rotates, the others may already have a
+#: request out carrying the token that was current a moment ago. Without a
+#: window those requests are indistinguishable from a replay, and the
+#: honest ones get logged out — measured at 14 × 401 in one e2e run, and
+#: felt by any user with two tabs open.
+#:
+#: The industry name for this is a reuse interval (Auth0), and the shape is
+#: the same everywhere: accept the immediately-previous token briefly,
+#: treat it as theft after that. Ten seconds is far longer than a racing
+#: request needs and far shorter than a stolen token is useful for.
+REFRESH_GRACE = timedelta(seconds=10)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -66,10 +83,15 @@ def _mint_plaintext() -> str:
 
 @dataclass(frozen=True)
 class IssuedRefresh:
-    """What :meth:`issue_for_login` / :meth:`rotate` hand back: the
-    plaintext refresh token (for the cookie) + the family row."""
+    """What :meth:`issue_for_login` / :meth:`rotate` hand back.
 
-    plaintext: str
+    `plaintext` is None when a refresh was accepted inside the grace window
+    without rotating: there is no new token to set, because the rotation
+    that beat this request already set one in the same browser. Callers
+    must treat None as "leave the cookie alone", not as "clear it".
+    """
+
+    plaintext: str | None
     family: RefreshTokenFamily
 
 
@@ -120,7 +142,10 @@ class RefreshTokenService:
         offered_hash = _hash(offered_plaintext)
         family = await self._repo.find_by_current_hash(offered_hash)
         if family is None:
-            raise InvalidRefreshToken("unknown refresh token")
+            # Not the current token. It may be the one we replaced moments
+            # ago — a second tab, or a request that was already in flight —
+            # or it may be a replay. `rotated_at` is the difference.
+            return await self._reused(offered_hash)
         if family.revoked_at is not None:
             raise InvalidRefreshToken("refresh family revoked")
         if family.expires_at <= _now():
@@ -146,12 +171,41 @@ class RefreshTokenService:
         assert refreshed is not None
         return IssuedRefresh(plaintext=new_plaintext, family=refreshed)
 
+    async def _reused(self, offered_hash: str) -> IssuedRefresh:
+        """Decide what an already-replaced token means.
+
+        Inside REFRESH_GRACE: a concurrent refresh. The caller is given a
+        session without rotating again — deliberately no new plaintext,
+        because the winner's rotation already set the cookie this browser
+        holds, and minting another would start a third generation for no
+        reason.
+
+        Outside it: this is the unambiguous reuse signal the module has
+        always claimed to act on, and now does. The family is revoked, so a
+        stolen token cannot be traded for a session and neither can the
+        victim's — which is the intended, visible consequence of theft.
+        """
+        family = await self._repo.find_by_previous_hash(offered_hash)
+        if family is None:
+            raise InvalidRefreshToken("unknown refresh token")
+        if family.revoked_at is not None:
+            raise InvalidRefreshToken("refresh family revoked")
+        if _now() - family.rotated_at > REFRESH_GRACE:
+            await self._repo.revoke_family(family.id, "refresh token reuse")
+            raise InvalidRefreshToken("refresh token reuse detected")
+        return IssuedRefresh(plaintext=None, family=family)
+
     async def revoke(self, offered_plaintext: str) -> None:
         """Logout — kill exactly this family. Idempotent."""
         family = await self._repo.find_by_current_hash(_hash(offered_plaintext))
         if family is None:
             return  # nothing to revoke; treat as success
         await self._repo.revoke_family(family.id, "logout")
+
+    async def revoke_family(self, family_id: str, reason: str) -> None:
+        """Revoke by id, for callers holding a family but no plaintext —
+        a grace-window refresh has no token to offer."""
+        await self._repo.revoke_family(family_id, reason)
 
     async def revoke_all_for_user(self, user_id: str) -> int:
         """Sign-out-everywhere. Returns number of families killed."""

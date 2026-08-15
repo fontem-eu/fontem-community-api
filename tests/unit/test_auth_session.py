@@ -95,22 +95,62 @@ class TestSessionCookieContract:
         assert client.post("/auth/logout").status_code == 200
         assert client.post("/auth/logout").status_code == 200
 
-    def test_refresh_replaying_old_cookie_fails(self, client, services):
-        """The novel security property — refresh-token-reuse must be
-        caught. Replaying the *original* cookie after the legitimate
-        user has refreshed once must 401."""
+    def test_replaying_an_old_cookie_after_the_window_is_caught(self, client, services):
+        """The security property: refresh-token reuse must be caught.
+
+        A replay seconds after the rotation is indistinguishable from a
+        second tab, and is now answered rather than punished — see
+        REFRESH_GRACE. What must still fail is a replay after that window,
+        which is what a stolen cookie actually looks like: taken, carried
+        somewhere else, used later.
+        """
+        # pylint: disable-next=import-outside-toplevel
+        from dataclasses import replace as _replace
+        # pylint: disable-next=import-outside-toplevel
+        from datetime import datetime, timedelta, timezone
+        # pylint: disable-next=import-outside-toplevel
+        from src.services.refresh_token_service import REFRESH_GRACE
+
         _register(services["user_repo"], "reuse@test.com", "password123")
         first = _login(client, "reuse@test.com", "password123")
         stolen = first.cookies.get("fontem_refresh")
-        # Legitimate user refreshes.
         ok = client.post("/auth/refresh")
         assert ok.status_code == 200
-        # Attacker replays the stolen cookie. Wipe what TestClient
-        # auto-tracks; set explicitly to the stolen value.
+
+        # Age the rotation past the grace window: the same replay a minute
+        # later rather than a millisecond later.
+        repo = services["refresh_token_repo"]
+        # pylint: disable-next=protected-access
+        for fid, fam in list(repo._families.items()):
+            # pylint: disable-next=protected-access
+            repo._families[fid] = _replace(
+                fam,
+                rotated_at=datetime.now(timezone.utc) - REFRESH_GRACE
+                - timedelta(seconds=1),
+            )
+
         client.cookies.clear()
         client.cookies.set("fontem_refresh", stolen)
         r = client.post("/auth/refresh")
         assert r.status_code == 401
+
+    def test_a_second_tab_refreshing_is_not_logged_out(self, client, services):
+        """Two tabs, one cookie jar. The one that loses the race used to be
+        told its session was dead and sent to /login. It now gets a working
+        access token, and no new cookie — the winner already set one."""
+        _register(services["user_repo"], "tabs@test.com", "password123")
+        first = _login(client, "tabs@test.com", "password123")
+        original = first.cookies.get("fontem_refresh")
+
+        assert client.post("/auth/refresh").status_code == 200
+
+        client.cookies.clear()
+        client.cookies.set("fontem_refresh", original)
+        second = client.post("/auth/refresh")
+        assert second.status_code == 200, "the losing tab must keep its session"
+        assert second.json().get("access_token")
+        assert "fontem_refresh" not in second.cookies, (
+            "a grace refresh must not set a cookie; the winner's is current")
 
 
 class TestSignOutEverywhere:

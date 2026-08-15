@@ -37,11 +37,13 @@ class RefreshTokenFamily:
     user_id: str
     current_token_hash: str
     rotated_at: datetime
+    #: The hash this family carried before its last rotation, or None.
     expires_at: datetime
     revoked_at: datetime | None = None
     revoked_reason: str | None = None
     created_user_agent_hash: str | None = None
     created_ip_hash: str | None = None
+    previous_token_hash: str | None = None
 
 
 class RefreshTokenRepository(ABC):
@@ -51,6 +53,16 @@ class RefreshTokenRepository(ABC):
         ...
 
     @abstractmethod
+    async def find_by_previous_hash(
+        self, token_hash: str,  # pylint: disable=unused-argument
+    ) -> RefreshTokenFamily | None:
+        """The family whose PREVIOUS hash this was, if any.
+
+        Used to tell a concurrent refresh from a replayed token: the same
+        lookup answers both questions, and `rotated_at` decides which.
+        """
+        ...
+
     async def find_by_current_hash(self, token_hash: str) -> RefreshTokenFamily | None:
         """Return the family whose **current** token hash matches.
 
