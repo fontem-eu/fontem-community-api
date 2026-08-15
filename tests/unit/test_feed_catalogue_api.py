@@ -305,3 +305,27 @@ def test_a_group_with_nothing_published_is_omitted_not_shown_empty(client, admin
     client.put(f"/admin/query-groups/{group_id}/queries",
                json={"query_ids": [query_id]}, headers=make_headers(ADMIN))
     assert client.get("/query-groups").json() == []
+
+
+def test_a_query_with_extra_binds_can_be_validated(client, admin, services):
+    """Relevance-scoped queries need a third and fourth bind. Before declared
+    defaults were passed through, validating one failed on the engine's
+    "Expected parameter(s)" and it could never be published."""
+    executor = services["query_executor"]
+    body = {
+        "slug": "scoped", "name": "Scoped", "lang": "cypher",
+        "query": ("MATCH (c) WHERE c.geo IN $nuts AND c.t > $since "
+                  "AND c.v >= $threshold AND c.t > $reference_since RETURN c"),
+        "params": [
+            {"name": "percentile", "type": "number", "default": 0.95},
+            {"name": "reference_since", "type": "timestamp", "default": "2025-08-14T00:00:00+00:00"},
+        ],
+    }
+    query_id = client.post("/admin/named-queries", json=body,
+                           headers=make_headers(ADMIN)).json()["id"]
+    client.post(f"/admin/named-queries/{query_id}/validate", headers=make_headers(ADMIN))
+
+    sent = executor.calls[-1]["params"]
+    assert sent["percentile"] == 0.95
+    assert sent["reference_since"] == "2025-08-14T00:00:00+00:00"
+    assert set(sent) >= {"nuts", "since"}

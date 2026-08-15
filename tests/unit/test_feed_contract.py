@@ -161,3 +161,34 @@ def test_sample_params_supply_both_standard_binds():
     params = feed_contract.sample_params()
     assert set(params) == {"nuts", "since"}
     assert isinstance(params["nuts"], list)
+
+
+def test_declared_defaults_are_supplied_to_validation():
+    """A query needing a third bind used to fail validation with the engine's
+    "Expected parameter(s)", which reads like a broken query rather than a
+    catalogue that never asked what the parameter should be."""
+    from src.domain.named_query import QueryParam  # pylint: disable=import-outside-toplevel
+    declared = [
+        QueryParam(name="percentile", type="number", default=0.95),
+        QueryParam(name="reference_since", type="timestamp", default="2025-08-14T00:00:00+00:00"),
+    ]
+    params = feed_contract.sample_params(declared)
+    assert params["percentile"] == 0.95
+    assert params["reference_since"] == "2025-08-14T00:00:00+00:00"
+    assert set(params) >= {"nuts", "since"}
+
+
+def test_a_declared_parameter_without_a_default_is_left_absent():
+    """The resulting failure names the parameter, which is the useful message."""
+    from src.domain.named_query import QueryParam  # pylint: disable=import-outside-toplevel
+    params = feed_contract.sample_params([QueryParam(name="cohort", type="text")])
+    assert "cohort" not in params
+
+
+def test_a_query_cannot_redefine_the_standard_binds():
+    from src.domain.named_query import QueryParam  # pylint: disable=import-outside-toplevel
+    declared = [QueryParam(name="nuts", type="text[]", default=["XX"]),
+                QueryParam(name="since", type="timestamp", default="1999-01-01")]
+    params = feed_contract.sample_params(declared)
+    assert params["nuts"] == list(feed_contract.SAMPLE_NUTS)
+    assert params["since"] != "1999-01-01"

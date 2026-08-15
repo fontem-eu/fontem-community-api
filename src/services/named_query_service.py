@@ -224,7 +224,7 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
                 error="not executed — the query fails a static check",
             )
 
-        params = feed_contract.sample_params()
+        params = feed_contract.sample_params(query.params)
         first = await self._executor.run(query.lang, query.query, params)
         second = None
         if not first.error:
@@ -255,7 +255,7 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
         self._validate_lang(draft.lang)
         report = await self._build_report(draft)
 
-        merged = {**feed_contract.sample_params(), **(params or {})}
+        merged = {**feed_contract.sample_params(draft.params), **(params or {})}
         result = await self._executor.run(draft.lang, draft.query, merged)
         return {
             "columns": result.columns,

@@ -39,7 +39,13 @@ from datetime import datetime, timedelta, timezone
 from src.domain.named_query import ContractCheck, LANGS, NamedQuery
 
 REQUIRED_COLUMNS = ("item_id", "item_time", "nuts", "title", "link")
-OPTIONAL_COLUMNS = ("summary",)
+
+# ``rank_value`` is how a feed decides what is *notable* rather than merely
+# recent: a numeric magnitude (a contract's value, a fine's size) that the
+# feed layer ranks within whichever region the subscriber picked. It is
+# optional because not every domain has one — a legal act has no magnitude —
+# and a query without it is ordered by time alone.
+OPTIONAL_COLUMNS = ("summary", "rank_value")
 
 # The two standard binds. Named without punctuation here; the per-engine
 # placeholder syntax is applied by _bind_pattern.
@@ -66,9 +72,30 @@ SAMPLE_NUTS = ["PT", "PRT"]
 SAMPLE_SINCE_DAYS = 30
 
 
-def sample_params() -> dict:
+def sample_params(declared=None) -> dict:
+    """Binds to validate with: the two standard ones, plus a default for every
+    extra parameter the query declares.
+
+    Without the declared defaults, any query needing a third bind fails
+    validation with the engine's "Expected parameter(s)" — which reads like a
+    broken query rather than a catalogue that never asked what the parameter
+    should be. Declaring a parameter is the query author saying "here is what
+    to pass"; this is where that promise is kept.
+
+    A declared parameter with no default is left absent on purpose: the
+    resulting failure names the parameter, which is the useful message.
+    """
     since = datetime.now(timezone.utc) - timedelta(days=SAMPLE_SINCE_DAYS)
-    return {"nuts": list(SAMPLE_NUTS), "since": since.isoformat()}
+    out: dict = {}
+    for param in declared or []:
+        name = getattr(param, "name", None)
+        default = getattr(param, "default", None)
+        if name and default is not None:
+            out[name] = default
+    # The standard binds win: a query cannot redefine what nuts/since mean.
+    out["nuts"] = list(SAMPLE_NUTS)
+    out["since"] = since.isoformat()
+    return out
 
 
 def _bind_pattern(lang: str, name: str) -> re.Pattern | None:
