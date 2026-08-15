@@ -5,11 +5,25 @@ gives no way to avoid re-notifying the same row forever. The contract is the
 minimum that makes a query safe to put on a schedule and render as a feed:
 
   item_id    stable, unique per item      -> RSS <guid>
-  item_time  when the thing happened      -> RSS <pubDate>
+  item_time  when the thing happened      -> RSS <pubDate>, chronology
   nuts       the item's region            -> the subscriber's region filter
+  rank_value numeric magnitude            -> how much of the feed it earns
   title      plain language               -> RSS <title>
   link       absolute URL to the record   -> RSS <link>
   summary    optional                     -> RSS <description>
+
+``rank_value`` is what makes a feed *notable* rather than merely *recent*.
+A subscriber asks for a volume — "about ten a week for my region" — and the
+feed layer takes the top N by rank_value within the regions they picked. That
+calculation belongs downstream, not in the query: measured on prod, the 95th
+percentile of contract value is EUR 5.7M in Coimbra and EUR 10.8M across the
+EU, so a single threshold written into a query starves a small region and
+floods a large one at the same time. The query's job is to emit the magnitude
+and a generous superset; deciding what clears the bar is the feed's.
+
+A domain with no natural magnitude (a legal act has no size) returns a
+constant, which degrades exactly as it should: ranking becomes a no-op and
+the feed is ordered by time alone.
 
 plus two binds every query accepts — ``nuts`` (the subscriber's regions) and
 ``since`` (their watermark). Those two are what let one curated query serve
@@ -38,14 +52,10 @@ from datetime import datetime, timedelta, timezone
 
 from src.domain.named_query import ContractCheck, LANGS, NamedQuery
 
-REQUIRED_COLUMNS = ("item_id", "item_time", "nuts", "title", "link")
-
-# ``rank_value`` is how a feed decides what is *notable* rather than merely
-# recent: a numeric magnitude (a contract's value, a fine's size) that the
-# feed layer ranks within whichever region the subscriber picked. It is
-# optional because not every domain has one — a legal act has no magnitude —
-# and a query without it is ordered by time alone.
-OPTIONAL_COLUMNS = ("summary", "rank_value")
+# The three axes a feed filters and orders on are nuts, rank_value and
+# item_time; item_id, title and link are what RSS needs to render an item.
+REQUIRED_COLUMNS = ("item_id", "item_time", "nuts", "rank_value", "title", "link")
+OPTIONAL_COLUMNS = ("summary",)
 
 # The two standard binds. Named without punctuation here; the per-engine
 # placeholder syntax is applied by _bind_pattern.
@@ -228,8 +238,31 @@ def runtime_checks(first, second) -> list[ContractCheck]:
 
     ids = _column(first, "item_id")
     out.extend(_value_checks(ids, _column(first, "item_time")))
+    out.append(_rank_check(_column(first, "rank_value")))
     out.append(_stability_check(ids, second))
     return out
+
+
+def _rank_check(values: list) -> ContractCheck:
+    """rank_value has to be a number, because the feed sorts by it.
+
+    A query that returns it as text sorts lexicographically — 9 above 10, and
+    a EUR 9m contract outranking a EUR 10m one — which looks like a ranking
+    and is not one. Booleans are rejected too: `True` is arithmetically 1 in
+    Python and would pass a naive numeric test while meaning nothing.
+    """
+    bad = [v for v in values
+           if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)))]
+    if not values:
+        return _check("rank_value_numeric", True,
+                      "no rows to check rank_value against")
+    if bad:
+        return _check(
+            "rank_value_numeric", False,
+            f"rank_value is not numeric (e.g. {bad[0]!r}) — the feed sorts by it, "
+            "and text sorts lexicographically, ranking 9 above 10",
+        )
+    return _check("rank_value_numeric", True, "rank_value is numeric on every row")
 
 
 def _column(result, name: str) -> list:

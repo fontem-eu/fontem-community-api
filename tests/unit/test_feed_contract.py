@@ -82,8 +82,8 @@ def test_missing_required_columns_are_named():
 
 def test_duplicate_item_ids_fail_because_readers_would_collapse_them():
     rows = [
-        ["same", "2026-08-01T00:00:00+00:00", "PT", "A", "https://x/1"],
-        ["same", "2026-08-02T00:00:00+00:00", "PT", "B", "https://x/2"],
+        ["same", "2026-08-01T00:00:00+00:00", "PT", 10, "A", "https://x/1"],
+        ["same", "2026-08-02T00:00:00+00:00", "PT", 20, "B", "https://x/2"],
     ]
     checks = _checks_by_id(feed_contract.runtime_checks(ok_result(rows), ok_result(rows)))
     assert not checks["item_id_unique"].passed
@@ -92,8 +92,8 @@ def test_duplicate_item_ids_fail_because_readers_would_collapse_them():
 def test_a_positional_item_id_is_caught_by_the_second_run():
     """A row_number() masquerading as an id looks perfect on one run and
     re-notifies every subscriber the moment a row is inserted above it."""
-    first = ok_result([["1", "2026-08-01T00:00:00+00:00", "PT", "A", "https://x/1"]])
-    second = ok_result([["2", "2026-08-01T00:00:00+00:00", "PT", "A", "https://x/1"]])
+    first = ok_result([["1", "2026-08-01T00:00:00+00:00", "PT", 10, "A", "https://x/1"]])
+    second = ok_result([["2", "2026-08-01T00:00:00+00:00", "PT", 10, "A", "https://x/1"]])
     checks = _checks_by_id(feed_contract.runtime_checks(first, second))
     assert checks["item_id_unique"].passed        # a single run says nothing
     assert not checks["item_id_stable"].passed
@@ -101,7 +101,7 @@ def test_a_positional_item_id_is_caught_by_the_second_run():
 
 
 def test_an_unparseable_item_time_fails():
-    rows = [["a", "not-a-date", "PT", "A", "https://x/1"]]
+    rows = [["a", "not-a-date", "PT", 10, "A", "https://x/1"]]
     checks = _checks_by_id(feed_contract.runtime_checks(ok_result(rows), ok_result(rows)))
     assert not checks["item_time_parses"].passed
 
@@ -138,8 +138,8 @@ def test_a_waiver_needs_a_written_reason():
 def test_only_the_bind_checks_can_be_waived():
     """A feed without a stable id is not a feed, it is a re-notification bug.
     No amount of explanation makes it subscribable."""
-    rows = [["same", "2026-08-01T00:00:00+00:00", "PT", "A", "https://x/1"],
-            ["same", "2026-08-02T00:00:00+00:00", "PT", "B", "https://x/2"]]
+    rows = [["same", "2026-08-01T00:00:00+00:00", "PT", 10, "A", "https://x/1"],
+            ["same", "2026-08-02T00:00:00+00:00", "PT", 20, "B", "https://x/2"]]
     checks = feed_contract.runtime_checks(ok_result(rows), ok_result(rows))
     waived = _checks_by_id(feed_contract.apply_waivers(
         checks, {"item_id_unique": "we are fine with duplicates honestly"}))
@@ -192,3 +192,39 @@ def test_a_query_cannot_redefine_the_standard_binds():
     params = feed_contract.sample_params(declared)
     assert params["nuts"] == list(feed_contract.SAMPLE_NUTS)
     assert params["since"] != "1999-01-01"
+
+
+def test_rank_value_must_be_numeric():
+    """The feed sorts by it. Returned as text it sorts lexicographically —
+    9 above 10, a EUR 9m contract outranking a EUR 10m one — which looks like
+    a ranking and is not one."""
+    rows = [["a", "2026-08-01T00:00:00+00:00", "PT", "1194208", "A", "https://x/1"]]
+    checks = _checks_by_id(feed_contract.runtime_checks(ok_result(rows), ok_result(rows)))
+    assert not checks["rank_value_numeric"].passed
+    assert "lexicographically" in checks["rank_value_numeric"].reason
+
+
+def test_a_boolean_rank_value_is_rejected():
+    """True is arithmetically 1 in Python and would slip past a naive
+    numeric test while meaning nothing."""
+    rows = [["a", "2026-08-01T00:00:00+00:00", "PT", True, "A", "https://x/1"]]
+    checks = _checks_by_id(feed_contract.runtime_checks(ok_result(rows), ok_result(rows)))
+    assert not checks["rank_value_numeric"].passed
+
+
+def test_a_constant_rank_value_is_fine():
+    """A domain with no natural magnitude — a legal act has no size — returns
+    a constant, and ranking degrades to pure chronological order."""
+    rows = [["a", "2026-08-01T00:00:00+00:00", "EU", 1, "Act A", "https://x/1"],
+            ["b", "2026-08-02T00:00:00+00:00", "EU", 1, "Act B", "https://x/2"]]
+    checks = _checks_by_id(feed_contract.runtime_checks(ok_result(rows), ok_result(rows)))
+    assert checks["rank_value_numeric"].passed
+    assert feed_contract.is_subscribable(list(checks.values()))
+
+
+def test_rank_value_is_required_not_optional():
+    result = ok_result(columns=["item_id", "item_time", "nuts", "title", "link"],
+                       rows=[["a", "2026-08-01T00:00:00+00:00", "PT", "A", "https://x/1"]])
+    checks = _checks_by_id(feed_contract.runtime_checks(result, result))
+    assert not checks["columns"].passed
+    assert "rank_value" in checks["columns"].reason
