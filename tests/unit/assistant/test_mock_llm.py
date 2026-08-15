@@ -70,15 +70,46 @@ class TestTheScriptedChain:
         assert step["tool"] == "mcp__gmr__investigate_entity"
         assert step["args"]["entity_id"] == "abc-123"
 
+    def test_it_reads_the_shape_search_entities_actually_returns(self):
+        # Recorded from fontem-testing. The first version of this guessed
+        # "results"/"entities" and the e2e failed on the real payload —
+        # search_entities returns one list PER ENTITY TYPE, not one list.
+        real = {
+            "query": "Siemens AG",
+            "companies": [{"gmr_id": "b559559e-6158-5868-a28c-90b4805bc7f0",
+                           "name": "Siemens AG", "country": "DE",
+                           "ticker": "SIE", "exchange": "XETR",
+                           "currency": "EUR", "is_active": True,
+                           "symbol": "SIE.DE"}],
+            "authorities": [], "persons": [], "lobbyists": [],
+        }
+        msgs = _history(("mcp__gmr__search_entities", json.dumps(real)))
+        step = mock_llm.next_step(msgs)
+        assert step["args"]["entity_id"] == "b559559e-6158-5868-a28c-90b4805bc7f0"
+
+    def test_it_falls_back_to_an_authority_when_no_company_matched(self):
+        payload = {"query": "Metro", "companies": [],
+                   "authorities": [{"authority_id": "a-4", "name": "Metro"}]}
+        msgs = _history(("mcp__gmr__search_entities", json.dumps(payload)))
+        assert mock_llm.next_step(msgs)["args"]["entity_id"] == "a-4"
+
     @pytest.mark.parametrize("payload,expected", [
         ([{"gmr_id": "g-1"}], "g-1"),
         ({"results": [{"entity_id": "e-2"}]}, "e-2"),
         ({"entities": [{"id": "i-3"}]}, "i-3"),
         ([{"authority_id": "a-4"}], "a-4"),
+        # A key nobody has seen: still better to find the id than to fail.
+        ({"somethingNew": [{"gmr_id": "n-5"}]}, "n-5"),
     ])
-    def test_it_reads_every_search_shape_that_has_shipped(self, payload, expected):
+    def test_it_tolerates_other_shapes_too(self, payload, expected):
         msgs = _history(("mcp__gmr__search_entities", json.dumps(payload)))
         assert mock_llm.next_step(msgs)["args"]["entity_id"] == expected
+
+    def test_all_lists_empty_is_still_a_visible_failure(self):
+        payload = {"query": "x", "companies": [], "authorities": [],
+                   "persons": [], "lobbyists": []}
+        msgs = _history(("mcp__gmr__search_entities", json.dumps(payload)))
+        assert mock_llm.next_step(msgs)["text"].startswith("MOCK-FAIL")
 
     def test_an_empty_search_becomes_a_visible_failure(self):
         # Never invent an id. A test reading this text fails with the reason

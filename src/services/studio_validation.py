@@ -10,12 +10,24 @@ button uses (fontem-api `/query/cypher`, `/query/sql`, `/sparql`), so what
 is checked is what the user will actually execute — not a second opinion
 from a parser that might disagree with the engine.
 
-Cypher and SQL are checked with EXPLAIN: the engine parses, resolves labels
-and columns, and plans, without running anything or returning rows. That
-catches syntax errors and the more useful class beneath them — a mistyped
-label, a column that does not exist — at roughly the cost of a round trip.
-SPARQL has no EXPLAIN, so it is executed; the proxy caps rows and times out
-at 8s, which is what the user's own Run button already lives with.
+Cypher and SQL are checked with EXPLAIN: the engine parses and plans,
+without running anything or returning rows, at roughly the cost of a round
+trip.
+
+What that catches differs by engine, and the difference matters:
+
+* SQL rejects an unknown table or column outright, so EXPLAIN catches both
+  syntax and the names.
+* Cypher does not. `MATCH (c:Compnay)` is valid Cypher — it parses, plans,
+  runs, and matches nothing forever. The engine reports it as a
+  *notification* rather than an error, so those are read too and an unknown
+  label, relationship type or property key is treated as an error here. A
+  query that can never match is precisely the broken query this exists to
+  stop. (fontem-api's proxy used to discard notifications; it now returns
+  them.)
+* SPARQL has no EXPLAIN and no notifications, so it is executed and only
+  real failures surface. A predicate that matches nothing looks like an
+  empty result, and this cannot tell those apart.
 
 **Failing open on infrastructure, closed on errors.** A query the engine
 rejects is not saved and the reason goes back to the agent. A query we could
@@ -102,7 +114,7 @@ async def validate_query(client, api_url: str, lang: str, query: str) -> Verdict
             f"({type(exc).__name__}); it was saved unchecked"])
 
     if resp.status_code < 400:
-        return Verdict(columns=_columns_of(resp))
+        return _accepted(resp, lang)
 
     detail = _detail_of(resp)
     if resp.status_code in (502, 503, 504):
@@ -110,6 +122,45 @@ async def validate_query(client, api_url: str, lang: str, query: str) -> Verdict
             f"the {lang} engine did not answer in time, so this query was "
             f"saved unchecked ({detail})"])
     return Verdict(ok=False, errors=[f"{lang} engine rejected the query: {detail}"])
+
+
+#: Neo4j notification codes that mean "you named something the graph does
+#: not have". These are the reason a Cypher typo is worse than a syntax
+#: error: `MATCH (c:Compnay)` parses, plans, runs, and matches nothing
+#: forever. The engine knows; before this it was the one thing nobody was
+#: told. Treated as errors, because a query that can never match is exactly
+#: the broken query this whole check exists to stop being saved.
+_UNKNOWN_SCHEMA_CODES = (
+    "UnknownLabelWarning",
+    "UnknownRelationshipTypeWarning",
+    "UnknownPropertyKeyWarning",
+)
+
+
+def _accepted(resp, lang: str) -> Verdict:
+    """A query the engine did not reject — but may still have warned about."""
+    columns = _columns_of(resp)
+    errors, warnings = [], []
+    for note in _notifications_of(resp):
+        code = note.get("code", "")
+        text = note.get("description") or note.get("title") or code
+        if any(marker in code for marker in _UNKNOWN_SCHEMA_CODES):
+            errors.append(
+                f"{lang}: {_clip(text)} — the query would parse and then "
+                f"match nothing. Check the spelling against the schema.")
+        else:
+            warnings.append(f"{lang}: {_clip(text)}")
+    return Verdict(ok=not errors, errors=errors, warnings=warnings,
+                   columns=columns)
+
+
+def _notifications_of(resp) -> list[dict]:
+    try:
+        body = resp.json()
+    except (ValueError, TypeError):
+        return []
+    notes = body.get("notifications") if isinstance(body, dict) else None
+    return [n for n in (notes or []) if isinstance(n, dict)]
 
 
 def _detail_of(resp) -> str:
