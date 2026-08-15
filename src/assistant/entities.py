@@ -5,6 +5,8 @@ but these belong together anyway: every function here is about the
 shapes fontem-api returns and the traps in them.
 """
 
+import json
+
 
 #: Where an entity's display name lives, per endpoint. /companies returns
 #: `company_name`, /authorities returns `authority_name`, and search
@@ -80,10 +82,17 @@ def _capture_names(name_cache: dict[str, str], payload: dict | list) -> None:
 # agent said "investigate_entity reported no contract count" and attached
 # the payload, because the JSON it was handed ended mid-object.
 
-#: Neighbourhood caps. Generous enough to describe who is adjacent, small
-#: enough that the whole result fits the budget with room for the contracts.
-_MAX_GRAPH_NODES = 40
-_MAX_GRAPH_EDGES = 60
+#: How many characters of the result the neighbourhood may spend.
+#:
+#: A COUNT cap does not work here: a node costs a 36-character UUID plus a
+#: company name, so 31 neighbours came to 9,158 characters — under a 40-node
+#: cap and still over the per-result ceiling. Budgeting by size holds
+#: whatever the names look like.
+#:
+#: The ceiling that binds is MAX_TOOL_RESULT_CHARS (8,000 for ONE result),
+#: not the 14,000 the whole turn may spend. Sized to leave room for the
+#: contracts and props alongside it.
+_GRAPH_CHAR_BUDGET = 4_500
 
 
 def slim_contract(row):
@@ -102,30 +111,49 @@ def slim_graph(graph):
     """The shape of the neighbourhood, not every neighbour's property bag.
 
     Keeps who is adjacent and how, and drops the per-node properties: the
-    model can investigate any id it finds interesting, which is cheaper
-    than carrying every neighbour's full record into every turn. Says what
-    it dropped, so the model knows the list is a sample rather than the
-    whole neighbourhood.
+    model can investigate any id it finds interesting, which is cheaper than
+    carrying every neighbour's full record into every turn.
+
+    Then fills up to `_GRAPH_CHAR_BUDGET` and stops, reporting the real
+    totals either way — so a partial neighbourhood is never mistaken for the
+    whole one. That distinction is the same one the truncation marker makes
+    elsewhere: an explicit gap beats a confident partial.
     """
     if not isinstance(graph, dict):
         return graph
     nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
     edges = graph.get("edges") if isinstance(graph.get("edges"), list) else []
+
+    def _trim(items, keys, budget):
+        kept, spent = [], 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            small = {k: item.get(k) for k in keys if item.get(k) is not None}
+            cost = len(json.dumps(small, default=str)) + 1
+            if spent + cost > budget:
+                break
+            kept.append(small)
+            spent += cost
+        return kept, spent
+
+    # Edges are cheaper and say more about structure, so they are served
+    # first; nodes take what is left.
+    kept_edges, spent = _trim(edges, ("source", "target", "type"),
+                              _GRAPH_CHAR_BUDGET // 2)
+    kept_nodes, _ = _trim(nodes, ("id", "label", "type"),
+                          _GRAPH_CHAR_BUDGET - spent)
     out = {
         "center": graph.get("center"),
-        "nodes": [
-            {k: n.get(k) for k in ("id", "label", "type") if n.get(k) is not None}
-            for n in nodes[:_MAX_GRAPH_NODES] if isinstance(n, dict)
-        ],
-        "edges": [
-            {k: e.get(k) for k in ("source", "target", "type") if e.get(k) is not None}
-            for e in edges[:_MAX_GRAPH_EDGES] if isinstance(e, dict)
-        ],
+        "nodes": kept_nodes,
+        "edges": kept_edges,
         "node_count": len(nodes),
         "edge_count": len(edges),
     }
-    if len(nodes) > _MAX_GRAPH_NODES or len(edges) > _MAX_GRAPH_EDGES:
+    if len(kept_nodes) < len(nodes) or len(kept_edges) < len(edges):
         out["truncated"] = True
+        out["note"] = ("neighbourhood sampled to fit the tool budget; "
+                       "investigate a specific id for its detail")
     return out
 
 

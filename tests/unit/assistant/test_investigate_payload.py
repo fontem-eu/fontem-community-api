@@ -146,13 +146,24 @@ class TestTheCountIsTheGraphsNotThePages:
 
 class TestItFitsWhatTheModelCanRead:
 
-    def test_the_whole_result_is_inside_the_per_turn_budget(self):
-        # The defect in one assertion: over budget, the dispatch truncates
-        # and the model is handed JSON that ends mid-object.
+    def test_the_result_fits_the_cap_on_a_single_tool_result(self):
+        # THE binding ceiling, and the one the first fix missed. There are
+        # two: MAX_TOOL_RESULT_CHARS caps ONE result (8,000);
+        # MAX_TOOL_RESULT_CHARS_PER_TURN caps all of them together
+        # (14,000). Asserting the larger one passed while the real dispatch
+        # still truncated at 8,000 — the payload was 10,898 and reached the
+        # model ending mid-object, which is exactly the failure this test
+        # was written to stop.
         raw, _ = _investigate(contract_limit=5)
-        assert len(raw) < tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN, (
-            f"{len(raw)} chars against a "
-            f"{tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN} budget")
+        assert len(raw) < tool_budget.MAX_TOOL_RESULT_CHARS, (
+            f"{len(raw)} chars against the {tool_budget.MAX_TOOL_RESULT_CHARS} "
+            "per-result cap — the dispatch would truncate this mid-JSON")
+
+    def test_it_also_leaves_room_in_the_turn_for_other_calls(self):
+        # A turn is search + investigate + whatever follows. If one call
+        # eats the turn's budget the rest come back as "budget spent".
+        raw, _ = _investigate(contract_limit=5)
+        assert len(raw) < tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN * 0.7
 
     def test_it_is_still_valid_json_at_that_size(self):
         raw, out = _investigate(contract_limit=5)
@@ -181,8 +192,21 @@ class TestItFitsWhatTheModelCanRead:
             "a neighbour's full record belongs in its own investigate call")
         assert "properties" not in graph["edges"][0]
 
-    def test_a_capped_neighbourhood_says_so(self):
+    def test_a_sampled_neighbourhood_says_so_and_still_reports_the_totals(self):
+        # 31 nodes with UUIDs and company names do not fit the graph's
+        # character budget, so some are dropped — and the model is told,
+        # with the real totals, rather than left to read a sample as the
+        # whole neighbourhood.
         _, out = _investigate(contract_limit=5)
-        # 31 nodes is under the cap; 30 edges under theirs. Nothing dropped,
-        # so nothing claimed.
-        assert out["graph"].get("truncated") is not True
+        graph = out["graph"]
+        assert graph["node_count"] == 31 and graph["edge_count"] == 30
+        if len(graph["nodes"]) < 31 or len(graph["edges"]) < 30:
+            assert graph["truncated"] is True
+            assert "investigate a specific id" in graph["note"]
+
+    def test_the_neighbourhood_is_budgeted_by_size_not_by_count(self):
+        # A count cap is what failed: 31 neighbours sat under a 40-node cap
+        # and still came to 9,158 characters, because a node costs a
+        # 36-character UUID plus a name.
+        _, out = _investigate(contract_limit=5)
+        assert len(json.dumps(out["graph"])) < 5_000
