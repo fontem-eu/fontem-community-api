@@ -309,10 +309,19 @@ class PydanticAIProxyClient:
             state["usage"] = self._usage_of(ev) or state["usage"]
             return []
 
-        if kind != "part_delta":
+        # `part_start` carries the FIRST piece of a text part; the deltas
+        # that follow carry the rest. Handling only the deltas dropped the
+        # opening of every single answer — "I cannot provide…" reached the
+        # panel as " cannot provide…", and nobody noticed for as long as the
+        # missing piece was a plausible word. It took a scripted model, whose
+        # exact sentence is known in advance, to make a missing prefix
+        # visible: the answer began "urement contract(s)…" and the test
+        # could say what it should have been.
+        if kind not in ("part_delta", "part_start"):
             return []
 
-        text = self._delta_text(ev)
+        text = (self._start_text(ev) if kind == "part_start"
+                else self._delta_text(ev))
         if not text:
             return []
         state["text_len"] += len(text)
@@ -329,6 +338,17 @@ class PydanticAIProxyClient:
         """Prose from a delta, empty for the tool-argument deltas that share
         the same event kind."""
         return getattr(getattr(ev, "delta", None), "content_delta", None) or ""
+
+    @staticmethod
+    def _start_text(ev) -> str:
+        """Prose a part opened with, empty for tool-call parts.
+
+        Reads `part.content` only when it is a string: a tool-call part
+        carries structured arguments there, and streaming those to the panel
+        as prose would print JSON into the conversation.
+        """
+        content = getattr(getattr(ev, "part", None), "content", None)
+        return content if isinstance(content, str) else ""
 
     @staticmethod
     def _tool_status(ev, name_cache: dict, start: float) -> str:
