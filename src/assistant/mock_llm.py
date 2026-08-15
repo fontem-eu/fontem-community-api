@@ -172,6 +172,10 @@ def _contract_count(raw: str) -> str:
 # ── the scripts ────────────────────────────────────────────────
 
 
+#: A route that exists in fontem-web's manifest. Pinned here so the script
+#: cannot ask for somewhere the app cannot go.
+NAVIGATE_TARGET = "/about"
+
 #: What the toolchain script looks for. Named once so the script and its
 #: tests cannot disagree about the spelling of a tool.
 SEARCH = "mcp__gmr__search_entities"
@@ -217,8 +221,14 @@ def _toolchain_after_search(results: list[tuple[str, str]],
     if "get_doc" not in done:
         return {"tool": "get_doc", "args": {"article_id": "methodology"}}
     if "navigate" not in done:
+        # `/about` because it exists. The first version used `/companies`,
+        # which is not a route in the manifest — so navigation was correctly
+        # refused, no consent prompt was drawn, and the e2e failed on the
+        # platform doing the right thing. The server validates the path
+        # against the routes the CLIENT sent, which is exactly the check
+        # that caught this.
         return {"tool": "navigate",
-                "args": {"path": "/companies",
+                "args": {"path": NAVIGATE_TARGET,
                          "reason": "showing where these figures come from"}}
     return {"text": f"Siemens AG has {count} EU procurement contract(s) in "
                     f"the graph (entity {entity_id})."}
