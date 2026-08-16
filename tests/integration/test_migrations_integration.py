@@ -26,6 +26,7 @@ import sqlalchemy as sa
 from testcontainers.postgres import PostgresContainer
 
 CATALOGUE_TABLES = ("named_queries", "query_groups", "query_group_members")
+BRIEFING_TABLES = ("feed_items", "feed_runs", "watches")
 
 
 def _alembic(url: str, *args: str) -> None:
@@ -68,6 +69,20 @@ def test_upgrade_to_head_creates_the_catalogue_tables(inspector):
     names = set(inspector.get_table_names())
     for table in CATALOGUE_TABLES:
         assert table in names, f"{table} missing after upgrade"
+
+
+def test_upgrade_to_head_creates_the_briefing_tables(inspector):
+    names = set(inspector.get_table_names())
+    for table in BRIEFING_TABLES:
+        assert table in names, f"{table} missing after upgrade"
+
+
+def test_an_item_is_unique_per_query_which_is_what_makes_dedup_work(inspector):
+    """The runner re-reads an overlapping window every run and relies on this
+    constraint to discard what it has already seen."""
+    uniques = {tuple(sorted(u["column_names"]))
+               for u in inspector.get_unique_constraints("feed_items")}
+    assert ("item_id", "query_id") in uniques
 
 
 def test_membership_is_a_composite_key_so_a_query_can_join_many_groups(inspector):

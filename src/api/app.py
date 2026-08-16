@@ -19,7 +19,7 @@ from src.api.di import make_container
 from src.services.activity_service import ActivityService
 from src.api.rate_limit import limiter
 from src.api.routers import (
-    activity, auth, data_projects, dossiers, feed_catalogue, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
+    activity, auth, briefings, data_projects, dossiers, feed_catalogue, flowers, groups, investigations, issues, moderation, reports, sharing, sitemap, tags, users, visualizations,
 )
 from src.assistant import mock_llm
 from src.assistant import router as assistant_router
@@ -340,6 +340,9 @@ def build_app(database_url: str | None = None) -> FastAPI:
     # GET /query-groups the feed picker reads. No prefix: the admin paths are
     # already namespaced by their own routes.
     application.include_router(feed_catalogue.router)
+    # Briefings — the public face of the catalogue: browse anonymously,
+    # watch with a session, and poll the Atom feed with a token.
+    application.include_router(briefings.router)
 
     @application.get("/health", tags=["Health"])
     async def health() -> dict:
