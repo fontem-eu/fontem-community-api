@@ -215,3 +215,12 @@ def test_revoking_a_watch_kills_its_feed(client, briefing):
     assert client.get(path).status_code == 200
     client.delete(f"/me/watches/{watch_id}", headers=make_headers(MEMBER))
     assert client.get(path).status_code == 404
+
+
+def test_a_briefing_exposes_the_id_a_watch_refers_to(client, briefing):
+    """A watch names a group_id. Without the id here, a client holding both
+    lists cannot say which briefing it watches without a round trip each."""
+    listed = client.get("/briefings").json()[0]
+    watch = client.put("/briefings/public-investment/watch", json={},
+                       headers=make_headers(MEMBER)).json()
+    assert listed["id"] == watch["group_id"]

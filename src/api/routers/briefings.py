@@ -45,6 +45,10 @@ def _item_json(item) -> dict:
 
 def _briefing_json(group) -> dict:
     return {
+        # The id is exposed because a watch names a group_id, and without it
+        # a client holding both lists cannot tell which briefing it watches
+        # without a second round trip per watch.
+        "id": group.id,
         "slug": group.slug,
         "name": group.name,
         "description": group.description,
