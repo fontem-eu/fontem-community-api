@@ -10,12 +10,13 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     PrimaryKeyConstraint,
     Text,
     text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -967,3 +968,91 @@ class QueryGroupMemberModel(Base):
         primary_key=True, nullable=False,
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+# ── Briefings: the materialised feed ────────────────────────────────
+
+
+class FeedItemModel(Base):
+    """One materialised result row of a published named query.
+
+    ``first_seen_at`` is the system's only ingestion timestamp. Nothing
+    upstream records when we learned a fact, so the unique constraint on
+    (query_id, item_id) plus this column is what makes "new since you last
+    looked" answerable at all.
+    """
+
+    __tablename__ = "feed_items"
+    __table_args__ = (
+        UniqueConstraint("query_id", "item_id", name="feed_items_query_item_unique"),
+        Index("ix_feed_items_query_time", "query_id", "item_time"),
+        Index("ix_feed_items_first_seen", "first_seen_at"),
+        Index("ix_feed_items_nuts", "nuts", postgresql_using="gin"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    query_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("named_queries.id", ondelete="CASCADE"), nullable=False,
+    )
+    item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    item_time: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    nuts: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    rank_value: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    link: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    first_seen_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+
+
+class FeedRunModel(Base):
+    __tablename__ = "feed_runs"
+    __table_args__ = (Index("ix_feed_runs_query_started", "query_id", "started_at"),)
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    query_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("named_queries.id", ondelete="CASCADE"), nullable=False,
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
+    partitions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_new: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    truncated_partitions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class WatchModel(Base):
+    """Someone watching a briefing, in their regions, at their volume."""
+
+    __tablename__ = "watches"
+    __table_args__ = (
+        UniqueConstraint("user_id", "group_id", name="watches_user_group_unique"),
+        Index("ix_watches_user", "user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+    )
+    group_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("query_groups.id", ondelete="CASCADE"), nullable=False,
+    )
+    nuts: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, default=lambda: ["EU"])
+    volume_per_week: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    token: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
+    )
+    last_polled_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+    )

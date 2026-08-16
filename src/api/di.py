@@ -38,6 +38,7 @@ from src.infra.postgres.pg_dossier_repo import PgDossierRepository
 from src.infra.postgres.pg_visualization_repo import PgVisualizationRepository
 from src.infra.postgres.pg_data_project_repo import PgDataProjectRepository
 from src.infra.postgres.pg_named_query_repo import PgNamedQueryRepository
+from src.infra.postgres.pg_feed_repo import PgFeedRepository
 from src.infra.postgres.pg_resource_grant_repo import PgResourceGrantRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
 from src.infra.postgres.pg_activity_repo import PgActivityRepository
@@ -56,6 +57,7 @@ from src.repositories.dossier_repository import DossierRepository
 from src.repositories.visualization_repository import VisualizationRepository
 from src.repositories.data_project_repository import DataProjectRepository
 from src.repositories.named_query_repository import NamedQueryRepository
+from src.repositories.feed_repository import FeedRepository
 from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.activity_repository import ActivityRepository
@@ -75,6 +77,8 @@ from src.services.investigation_service import InvestigationService
 from src.services.visualization_service import VisualizationService
 from src.services.data_project_service import DataProjectService
 from src.services.named_query_service import NamedQueryService
+from src.services.briefing_service import BriefingService
+from src.services.feed_runner import FeedRunner
 from src.services.query_executor import HttpQueryExecutor, QueryExecutor
 from src.services.dossier_service import DossierService
 from src.services.issue_service import IssueService
@@ -181,6 +185,10 @@ class RepositoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def named_query_repo(self, session: AsyncSession) -> NamedQueryRepository:
         return PgNamedQueryRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def feed_repo(self, session: AsyncSession) -> FeedRepository:
+        return PgFeedRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def resource_grant_repo(self, session: AsyncSession) -> ResourceGrantRepository:
@@ -380,6 +388,21 @@ class ServiceProvider(Provider):
         executor: QueryExecutor,
     ) -> NamedQueryService:
         return NamedQueryService(repo=repo, authz=authz, executor=executor)
+
+    @provide(scope=Scope.REQUEST)
+    def briefing_service(
+        self, catalogue: NamedQueryRepository, feed: FeedRepository,
+    ) -> BriefingService:
+        return BriefingService(catalogue=catalogue, feed=feed)
+
+    @provide(scope=Scope.REQUEST)
+    def feed_runner(
+        self,
+        queries: NamedQueryRepository,
+        feed: FeedRepository,
+        executor: QueryExecutor,
+    ) -> FeedRunner:
+        return FeedRunner(queries=queries, feed=feed, executor=executor)
 
     @provide(scope=Scope.REQUEST)
     def report_service(  # pylint: disable=too-many-arguments,too-many-positional-arguments
