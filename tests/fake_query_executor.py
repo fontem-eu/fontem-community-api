@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from src.services.query_executor import ExecResult
 
-CONTRACT_COLUMNS = ["item_id", "item_time", "nuts", "title", "link"]
+CONTRACT_COLUMNS = ["item_id", "item_time", "nuts", "rank_value", "title", "link"]
 
 
 def ok_result(rows=None, columns=None, duration_ms: int = 12) -> ExecResult:
     rows = rows if rows is not None else [
-        ["contract:1", "2026-08-01T00:00:00+00:00", "PT17", "A contract", "https://x/1"],
+        ["contract:1", "2026-08-01T00:00:00+00:00", "PT17", 1_194_208, "A contract",
+         "https://x/1"],
     ]
     return ExecResult(
         columns=list(columns or CONTRACT_COLUMNS),

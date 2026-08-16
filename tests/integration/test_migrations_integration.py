@@ -92,8 +92,12 @@ def test_status_and_lang_are_constrained_at_the_database(migrated_url):
         engine.dispose()
 
 
-def test_the_newest_downgrade_is_real(migrated_url):
-    _alembic(migrated_url, "downgrade", "-1")
+def test_the_catalogue_downgrade_is_real(migrated_url):
+    """Named by revision, not by "-1". This originally downgraded one step
+    because 012 was head at the time; the moment anything landed on top, the
+    test was downgrading somebody else's migration and asserting about tables
+    it had not touched."""
+    _alembic(migrated_url, "downgrade", "011")
     engine = sa.create_engine(migrated_url)
     try:
         names = set(sa.inspect(engine).get_table_names())
