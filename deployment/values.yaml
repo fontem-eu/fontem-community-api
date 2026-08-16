@@ -2,3 +2,11 @@ version: "v5d46c0d"
 databaseUrl: "postgresql+asyncpg://postgres:$(POSTGRES_PASSWORD)@postgresql:5432/gmr_app"
 claudeProxyUrl: "http://claude-proxy:8090"
 replicas: 1
+
+# Briefings feed refresh. Upstream publishes daily, so six hours already
+# over-samples the source four times over; drop it to "20 */3 * * *" if a
+# briefing ever needs to be fresher than that.
+feedRefresh:
+  enabled: true
+  schedule: "20 */6 * * *"
+  timeoutSeconds: 1800

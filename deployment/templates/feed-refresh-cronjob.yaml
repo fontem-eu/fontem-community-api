@@ -1,0 +1,83 @@
+{{- /*
+Briefings feed refresh.
+
+A CronJob rather than an asyncio task inside the API, for two reasons. An
+in-process timer fires once per replica, so two replicas would run the same
+window concurrently — the unique constraint on (query_id, item_id) makes that
+harmless but it doubles the load on the query proxy for nothing. And a
+CronJob's history answers "did last night's refresh happen", which a task
+buried in a web process cannot.
+
+CADENCE. Upstream publishes daily: TED notices land once a day and our ETL
+pulls them once a day. Six hours therefore already over-samples the source
+four times over, which is the point — it bounds how stale a feed can be
+without pretending the data arrives faster than it does. Cheap either way:
+the runner asks for one whole day at a time and only splits a day into 27
+country requests when that day came back at the proxy's row cap.
+
+Offset to :20 so it does not start on the hour alongside every other cron in
+the cluster.
+*/}}
+{{- if .Values.feedRefresh.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fontem-feed-refresh
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: fontem-feed-refresh
+spec:
+  schedule: {{ .Values.feedRefresh.schedule | quote }}
+  timeZone: "Europe/Paris"
+  # Forbid, not Replace: a run that is still going is re-reading a window the
+  # next one would re-read anyway. Starting a second one races it for the same
+  # proxy budget and finishes no sooner.
+  concurrencyPolicy: Forbid
+  # A refresh that missed its slot is not worth catching up on — the next run
+  # re-reads the same overlapping window and picks up whatever was missed.
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One retry. A transient proxy error is worth a second attempt; a
+      # genuinely broken query will fail the same way six hours later, and
+      # that is what the run row is for.
+      backoffLimit: 1
+      activeDeadlineSeconds: {{ .Values.feedRefresh.timeoutSeconds }}
+      template:
+        metadata:
+          labels:
+            app: fontem-feed-refresh
+          annotations:
+            # The sidecar never exits, so a Job with Linkerd injected never
+            # reaches Completed. Same reason the wikidata consumer opts out.
+            linkerd.io/inject: disabled
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: regcred
+          containers:
+            - name: refresh
+              image: contribute.void42.internal/fontem/fontem-community-api:{{ .Values.version }}
+              imagePullPolicy: Always
+              command: ["python", "-m", "src.jobs.run_feeds"]
+              env:
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: fontem-postgres-credentials
+                      key: POSTGRES_PASSWORD
+                - name: DATABASE_URL
+                  value: {{ .Values.databaseUrl | quote }}
+                # The runner reaches the read-only query proxies over this.
+                - name: GMR_API_INTERNAL
+                  value: {{ .Values.gmrApiInternal | default "http://fontem-api" | quote }}
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "1Gi"
+{{- end }}
