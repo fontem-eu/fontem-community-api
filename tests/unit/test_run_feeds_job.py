@@ -53,7 +53,9 @@ def wire(monkeypatch):
     return install
 
 
-def _code(): return asyncio.run(run_feeds._main())  # noqa: SLF001  pylint: disable=protected-access
+def _code() -> int:
+    # pylint: disable-next=protected-access
+    return asyncio.run(run_feeds._main())
 
 
 def test_a_clean_refresh_exits_zero(wire):
