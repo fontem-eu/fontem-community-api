@@ -1,6 +1,10 @@
 # Eval results
 
-One file per run: `<date>-<model>.json`, exactly what `runner.py --out` wrote.
+One file per run: `<date>-<model>-r<rounds>t<tokens>.json`, exactly what
+`runner.py --out` wrote. The caps are in the filename because they are the
+settings most likely to differ between two runs of the same model on the same
+day, and a run compared across them measures the harness rather than the
+model.
 
 They are committed because the question that matters is not "how does the
 assistant score" but "is it better than it was", and that question cannot be
@@ -28,9 +32,16 @@ Negative percentages are penalties, not floors at zero.
 
 ## Notes on individual runs
 
-- `2026-08-17-qwen3-8b-q4_k_m.json` has an empty `code_sha`: it is the run that
-  motivated `--code-sha`, produced before the flag existed. Its harness is the
-  commit that added `evals/results/`.
-- Its mean latency (46s) is not comparable to a quiet-node run: a second eval
-  was hitting the same llama-server throughout. Latency in these files is
-  wall-clock under whatever load the node had, not a benchmark.
+- `2026-08-17-qwen3-8b-q4_k_m-r6t900.json` has an empty `code_sha`: it is the
+  run that motivated `--code-sha`, produced before the flag existed. Its mean
+  latency (46s) also ran against a busy node — a second eval was hitting the
+  same llama-server throughout. Latency in these files is wall-clock under
+  whatever load the node had, not a benchmark.
+- The 8B scores identically at r6t900 and r12t4000, so neither cap was binding
+  for it. They bind hard for the 35B: at r6t900 it scored completion -100%
+  across the fixture, which was the harness truncating it rather than the model
+  declining to answer.
+- The 35B run lost P06 and P09 to HTTP 504s from the provider. Those are
+  provider failures scored as prompt failures; P09 is the only prompt carrying
+  the `language` check, so that layer is untested for the 35B rather than
+  failed.
