@@ -38,6 +38,10 @@ from scorer import (  # noqa: E402  pylint: disable=wrong-import-position
 )
 
 MAX_ROUNDS = 6
+# Enough for the local models, which answer directly. Reasoning models need
+# several times this before they emit a single token of answer -- see
+# --max-tokens.
+MAX_TOKENS = 900
 # Long enough for the 30B, which generates at ~14 tok/s.
 REQUEST_TIMEOUT = 600.0
 
@@ -89,7 +93,8 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                      model: str, spec: dict, tools: list, system: str,
                      api_key: str, nav_context,
                      trace_io: bool = False,
-                     max_rounds: int = MAX_ROUNDS) -> Trace:
+                     max_rounds: int = MAX_ROUNDS,
+                     max_tokens: int = MAX_TOKENS) -> Trace:
     """One prompt, one model, bounded tool loop."""
     trace = Trace(prompt_id=spec["id"], model=model)
     expect = spec.get("expect") or {}
@@ -123,7 +128,7 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                 json={"model": model, "messages": messages, "tools": tools,
                       # Deterministic: a comparison whose result changes on
                       # re-run cannot support a deployment decision.
-                      "temperature": 0.0, "max_tokens": 900},
+                      "temperature": 0.0, "max_tokens": max_tokens},
                 # Empty for llama-server, which this harness was built
                 # against and which wants no auth. A hosted provider does,
                 # and comparing the local models against a hosted one is
@@ -138,10 +143,21 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                 break
             if trace_io:
                 print(f"  RAW REPLY: {resp.text[:2000]}", flush=True)
-            msg = resp.json()["choices"][0]["message"]
+            choice = resp.json()["choices"][0]
+            msg = choice["message"]
             calls = msg.get("tool_calls") or []
             if not calls:
                 trace.answer = (msg.get("content") or "").strip()
+                # A reasoning model spends the token budget on its reasoning
+                # trace first and emits the answer afterwards, so a budget that
+                # is merely tight produces finish_reason="length" with an empty
+                # content -- indistinguishable, to the scorer, from a model
+                # that declined to answer. Qwen3.6-35B scored completion -100%
+                # against a 900-token budget for precisely this reason, and it
+                # answers fine at 4000. Say which happened.
+                if choice.get("finish_reason") == "length" and not trace.answer:
+                    trace.error = (f"reply truncated at max_tokens={max_tokens} "
+                                   f"before any answer was emitted")
                 break
             messages.append(msg)
             for call in calls:
@@ -248,6 +264,7 @@ def run_metadata(args, fixture: dict, origin: str, n_prompts: int) -> dict:
         # compared against a later one with any confidence.
         "code_sha": getattr(args, "code_sha", "") or git_sha(),
         "max_rounds": getattr(args, "max_rounds", MAX_ROUNDS),
+        "max_tokens": getattr(args, "max_tokens", MAX_TOKENS),
         "tool_result_char_budget": MAX_TOOL_RESULT_CHARS,
     }
 
@@ -281,6 +298,12 @@ async def main() -> int:
              "which scores as the model failing to answer when it is really "
              "the harness stopping it. Recorded in the metadata, because runs "
              "with different caps are not comparable.")
+    parser.add_argument(
+        "--max-tokens", type=int, default=MAX_TOKENS,
+        help="per-reply token budget. A reasoning model emits its reasoning "
+             "trace first, so a budget sized for a direct answer is spent "
+             "before the answer starts and the reply comes back empty. "
+             "Recorded in the metadata.")
     parser.add_argument(
         "--code-sha", default="",
         help="commit of the harness being run; recorded in the results. "
@@ -325,7 +348,7 @@ async def main() -> int:
                                          model, spec, tools, system,
                                          args.api_key,
                                          nav_context, args.trace,
-                                         args.max_rounds)
+                                         args.max_rounds, args.max_tokens)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)
                 results.append({
