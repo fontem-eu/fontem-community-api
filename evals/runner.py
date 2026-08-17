@@ -88,7 +88,8 @@ def load_shipped():
 async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                      model: str, spec: dict, tools: list, system: str,
                      api_key: str, nav_context,
-                     trace_io: bool = False) -> Trace:
+                     trace_io: bool = False,
+                     max_rounds: int = MAX_ROUNDS) -> Trace:
     """One prompt, one model, bounded tool loop."""
     trace = Trace(prompt_id=spec["id"], model=model)
     expect = spec.get("expect") or {}
@@ -106,7 +107,7 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                 {"role": "user", "content": str(spec["prompt"]).strip()}]
     started = time.monotonic()
     try:
-        for _ in range(MAX_ROUNDS):
+        for _ in range(max_rounds):
             trace.rounds += 1
             if trace_io:
                 print("=" * 70, flush=True)
@@ -175,7 +176,7 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                                  "tool_call_id": call.get("id", ""),
                                  "name": fname, "content": result})
         else:
-            trace.error = f"did not converge in {MAX_ROUNDS} rounds"
+            trace.error = f"did not converge in {max_rounds} rounds"
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         trace.error = f"{type(exc).__name__}: {str(exc)[:200]}"
     trace.latency_s = round(time.monotonic() - started, 1)
@@ -246,7 +247,7 @@ def run_metadata(args, fixture: dict, origin: str, n_prompts: int) -> dict:
         # caller record what it shipped; an unattributable run cannot be
         # compared against a later one with any confidence.
         "code_sha": getattr(args, "code_sha", "") or git_sha(),
-        "max_rounds": MAX_ROUNDS,
+        "max_rounds": getattr(args, "max_rounds", MAX_ROUNDS),
         "tool_result_char_budget": MAX_TOOL_RESULT_CHARS,
     }
 
@@ -272,6 +273,14 @@ async def main() -> int:
         "--api-key", default="",
         help="Bearer token for a hosted provider. Omit for llama-server, "
              "which takes none. Never logged.")
+    parser.add_argument(
+        "--max-rounds", type=int, default=MAX_ROUNDS,
+        help="tool-loop rounds before a turn is scored as non-converging. "
+             "The default suits models that call one tool at a time; a model "
+             "that fans out several calls per round can be cut off mid-chain, "
+             "which scores as the model failing to answer when it is really "
+             "the harness stopping it. Recorded in the metadata, because runs "
+             "with different caps are not comparable.")
     parser.add_argument(
         "--code-sha", default="",
         help="commit of the harness being run; recorded in the results. "
@@ -315,7 +324,8 @@ async def main() -> int:
                 trace = await run_prompt(http, executor, args.base_url,
                                          model, spec, tools, system,
                                          args.api_key,
-                                         nav_context, args.trace)
+                                         nav_context, args.trace,
+                                         args.max_rounds)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)
                 results.append({

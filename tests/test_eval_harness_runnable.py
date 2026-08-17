@@ -194,3 +194,41 @@ def test_code_sha_can_be_supplied_when_git_cannot_answer():
 
     meta = module.run_metadata(Args(), {"version": 2}, "shipped", 1)
     assert meta["code_sha"] == "deadbee"
+
+
+def test_round_cap_is_configurable_and_recorded():
+    """The cap decides whether a slow-converging model scores as failing.
+
+    A model that fans out several tool calls per round exhausts a cap tuned
+    for one-call-per-round models, and the result is indistinguishable from
+    the model refusing to answer. So the cap has to be movable, and whatever
+    it was has to be in the metadata.
+    """
+    module = _runner_module()
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "m"
+        base_url = "http://llama:8080"
+        gmr_api = "http://fontem-api"
+        max_rounds = 12
+
+    assert module.run_metadata(Args(), {"version": 2}, "shipped", 1)["max_rounds"] == 12
+
+    proc = subprocess.run(
+        [sys.executable, str(RUNNER), "--help"],
+        capture_output=True, text=True, timeout=120, check=False,
+        cwd=str(RUNNER.parent.parent))
+    assert "--max-rounds" in proc.stdout
+
+
+def test_round_cap_defaults_to_the_module_constant():
+    """Runs that do not pass it must stay comparable with the committed ones."""
+    module = _runner_module()
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "m"
+        base_url = "http://llama:8080"
+        gmr_api = "http://fontem-api"
+
+    meta = module.run_metadata(Args(), {"version": 2}, "shipped", 1)
+    assert meta["max_rounds"] == module.MAX_ROUNDS == 6
