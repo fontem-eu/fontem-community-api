@@ -18,11 +18,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime
 import json
 import pathlib
 import re
+import subprocess
 import sys
 import time
+import urllib.parse
 
 import httpx
 import yaml
@@ -206,6 +209,48 @@ def summarise(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def endpoint_host(base_url: str) -> str:
+    """The endpoint, minus anything that could carry a credential."""
+    parsed = urllib.parse.urlsplit(base_url)
+    return f"{parsed.scheme}://{parsed.hostname}" + (
+        f":{parsed.port}" if parsed.port else "")
+
+
+def git_sha() -> str:
+    """The commit the measured code came from, or "" outside a checkout."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(pathlib.Path(__file__).resolve().parent),
+            capture_output=True, text=True, timeout=10, check=False)
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):   # pragma: no cover
+        return ""
+
+
+def run_metadata(args, fixture: dict, origin: str, n_prompts: int) -> dict:
+    """Everything needed to decide whether two result files are comparable."""
+    return {
+        "run_at": datetime.datetime.now(datetime.timezone.utc)
+                  .replace(microsecond=0).isoformat(),
+        "fixture_version": fixture.get("version"),
+        "prompts": n_prompts,
+        "models": [m.strip() for m in args.models.split(",")],
+        # Host only, never args.base_url verbatim: some providers put the key
+        # in the URL, and this file is meant to be committed.
+        "endpoint": endpoint_host(args.base_url),
+        "gmr_api": endpoint_host(args.gmr_api),
+        "system_prompt": origin,
+        # git_sha() finds nothing when the harness runs from an unpacked
+        # tarball in a pod, which is the normal case. --code-sha lets the
+        # caller record what it shipped; an unattributable run cannot be
+        # compared against a later one with any confidence.
+        "code_sha": getattr(args, "code_sha", "") or git_sha(),
+        "max_rounds": MAX_ROUNDS,
+        "tool_result_char_budget": MAX_TOOL_RESULT_CHARS,
+    }
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
@@ -214,7 +259,9 @@ async def main() -> int:
     parser.add_argument(
         "--gmr-api",
         default="http://fontem-api.fontem-staging.svc.cluster.local")
-    parser.add_argument("--out", default="/tmp/eval-results.json")
+    parser.add_argument("--out", default="/tmp/eval-results.json",
+                        help="results file, or \"-\" for stdout "
+                             "(use in pods, whose disk does not outlive them)")
     parser.add_argument("--system-file", default=None,
                         help="override the shipped system prompt (A/B testing)")
     parser.add_argument("--only", default=None,
@@ -225,6 +272,11 @@ async def main() -> int:
         "--api-key", default="",
         help="Bearer token for a hosted provider. Omit for llama-server, "
              "which takes none. Never logged.")
+    parser.add_argument(
+        "--code-sha", default="",
+        help="commit of the harness being run; recorded in the results. "
+             "Needed when running from an unpacked copy, where git cannot "
+             "answer for itself.")
     parser.add_argument("--trace", action="store_true",
                         help="dump the exact request and raw reply per round")
     args = parser.parse_args()
@@ -281,8 +333,26 @@ async def main() -> int:
                 print(f"  {spec['id']}  {trace.latency_s:6.1f}s  "
                       f"tools={len(trace.calls)}  {flags[:110]}", flush=True)
 
-    pathlib.Path(args.out).write_text(json.dumps(results, indent=2), "utf-8")
-    print(f"\nwrote {args.out}", flush=True)
+    # A bare list of scores is not comparable to anything. "Is the assistant
+    # better than last month" needs to know which fixture version produced the
+    # numbers, which commit of the tool schemas and system prompt they were
+    # measured against, and which endpoint served the model -- all of which
+    # move independently of the model name. Stamping it here means a results
+    # file found later can still be read; the previous runs are unusable
+    # precisely because they were bare lists in a pod's /tmp.
+    payload = {"meta": run_metadata(args, fixture, origin, len(prompts)),
+               "results": results}
+    blob = json.dumps(payload, indent=2)
+    if args.out == "-":
+        # Runs happen in throwaway pods, whose filesystem goes away with them.
+        # A file written there is not a result anybody can read afterwards --
+        # the first full 8B run was scraped back out of `kubectl logs` because
+        # of exactly this. On stdout it survives in the log.
+        print("\n===EVAL-RESULTS-JSON===", flush=True)
+        print(blob, flush=True)
+    else:
+        pathlib.Path(args.out).write_text(blob, "utf-8")
+        print(f"\nwrote {args.out}", flush=True)
     print(summarise(results), flush=True)
     return 0
 

@@ -108,3 +108,89 @@ def test_cli_starts_from_the_command_line():
     assert proc.returncode == 0, proc.stderr
     for flag in ("--base-url", "--models", "--api-key", "--only", "--gmr-api"):
         assert flag in proc.stdout, f"{flag} missing from the harness CLI"
+
+
+# --- run metadata -----------------------------------------------------------
+#
+# Results are committed to the repo so runs stay comparable over time. That
+# makes the metadata a disclosure surface: whatever it records ends up in git
+# history, where a leaked credential cannot be taken back.
+
+def test_endpoint_is_recorded_without_credentials():
+    module = _runner_module()
+    leaky = "https://user:sup3rsecret@inference.example.com/api/v1?api_key=abc123"
+    host = module.endpoint_host(leaky)
+    assert "sup3rsecret" not in host
+    assert "abc123" not in host
+    assert "user" not in host
+    assert host == "https://inference.example.com"
+
+
+def test_endpoint_keeps_the_port_that_distinguishes_two_local_servers():
+    module = _runner_module()
+    host = module.endpoint_host("http://llama-server.llm-service.svc.cluster.local:8080")
+    assert host.endswith(":8080")
+
+
+def test_metadata_carries_what_makes_two_runs_comparable():
+    module = _runner_module()
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "qwen3-8b-q4_k_m"
+        base_url = "http://llama:8080"
+        gmr_api = "http://fontem-api"
+
+    meta = module.run_metadata(Args(), {"version": 2}, "shipped", 14)
+    assert meta["fixture_version"] == 2
+    assert meta["prompts"] == 14
+    assert meta["models"] == ["qwen3-8b-q4_k_m"]
+    assert meta["system_prompt"] == "shipped"
+    assert meta["run_at"].endswith("+00:00")
+    # The round cap and the tool-result budget change what a model can score.
+    # A run compared against one with a different cap is comparing harnesses.
+    assert meta["max_rounds"] == module.MAX_ROUNDS
+    assert meta["tool_result_char_budget"] == module.MAX_TOOL_RESULT_CHARS
+
+
+def test_metadata_never_carries_the_api_key():
+    """--api-key is not on the recorded surface at all, by construction."""
+    module = _runner_module()
+
+    secret = "s3cr3t-bearer-value"
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "m"
+        # Both shapes a credential reaches a base URL in: an operator pasting
+        # a provider's copy-paste URL, and userinfo in the authority. The
+        # metadata must survive either without recording it.
+        base_url = f"https://key:{secret}@inference.example.com/api?token={secret}"
+        gmr_api = f"http://svc:{secret}@fontem-api"
+        api_key = secret
+
+    blob = str(module.run_metadata(Args(), {"version": 2}, "shipped", 1))
+    assert secret not in blob, blob
+
+
+def test_results_can_go_to_stdout():
+    """`--out -` is what makes a pod run recoverable; it must stay documented."""
+    module = _runner_module()
+    proc = subprocess.run(
+        [sys.executable, str(RUNNER), "--help"],
+        capture_output=True, text=True, timeout=120, check=False,
+        cwd=str(RUNNER.parent.parent))
+    assert "stdout" in proc.stdout, "--out no longer documents the stdout mode"
+    assert module is not None
+
+
+def test_code_sha_can_be_supplied_when_git_cannot_answer():
+    """Pod runs unpack a tarball, so `git rev-parse` there finds nothing."""
+    module = _runner_module()
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "m"
+        base_url = "http://llama:8080"
+        gmr_api = "http://fontem-api"
+        code_sha = "deadbee"
+
+    meta = module.run_metadata(Args(), {"version": 2}, "shipped", 1)
+    assert meta["code_sha"] == "deadbee"
