@@ -35,6 +35,14 @@ class WatchRequest(BaseModel):
     volume_per_week: int = Field(default=DEFAULT_VOLUME, ge=MIN_VOLUME, le=MAX_VOLUME)
 
 
+class AdjustWatchRequest(BaseModel):
+    """Both optional: changing the volume should not require restating the
+    regions, and vice versa."""
+
+    nuts: list[str] | None = Field(default=None, max_length=60)
+    volume_per_week: int | None = Field(default=None, ge=MIN_VOLUME, le=MAX_VOLUME)
+
+
 def _item_json(item) -> dict:
     out = asdict(item)
     for key in ("item_time", "first_seen_at"):
@@ -84,22 +92,41 @@ async def get_briefing(
 
 
 # ── watching ────────────────────────────────────────────────────
-@router.put("/briefings/{slug}/watch")
+@router.post("/briefings/{slug}/watches", status_code=201)
 @inject
-async def watch_briefing(
+async def add_watch(
     *,
     svc: FromDishka[BriefingService],
     user: Annotated[User, Depends(get_current_user)],
     slug: str,
     body: WatchRequest,
 ) -> dict:
-    """Watch a briefing, or adjust a watch already in place.
+    """Add a watch on a briefing.
 
-    PUT rather than POST because it is idempotent by (user, briefing):
-    watching twice adjusts, it does not mint a second feed URL.
+    POST, not PUT: a reader can hold several watches on one briefing at
+    different scopes — fifty a week from Coimbra, ten from Portugal, ten from
+    the EU — and each is an independent subscription with its own feed URL.
+    An exact duplicate returns the existing watch rather than minting a second
+    identical feed, because that is a double-click and not an intention.
     """
     watch = await svc.watch(user.id, slug, body.nuts, body.volume_per_week)
     return _watch_json(watch, slug)
+
+
+@router.patch("/me/watches/{watch_id}")
+@inject
+async def adjust_watch(
+    *,
+    svc: FromDishka[BriefingService],
+    user: Annotated[User, Depends(get_current_user)],
+    watch_id: UuidPath,
+    body: AdjustWatchRequest,
+) -> dict:
+    """Change one watch, by id — "the watch on Public investment" no longer
+    identifies anything. The feed token is left alone: someone's reader is
+    already polling that URL."""
+    return _watch_json(await svc.adjust_watch(
+        user.id, watch_id, body.nuts, body.volume_per_week))
 
 
 @router.get("/me/watches")

@@ -1032,9 +1032,12 @@ class WatchModel(Base):
     """Someone watching a briefing, in their regions, at their volume."""
 
     __tablename__ = "watches"
+    # No uniqueness on (user_id, group_id): one person watching the same
+    # briefing at three scopes — Coimbra, Portugal, the EU — is the ordinary
+    # case, not an accident to be prevented.
     __table_args__ = (
-        UniqueConstraint("user_id", "group_id", name="watches_user_group_unique"),
         Index("ix_watches_user", "user_id"),
+        Index("ix_watches_user_created", "user_id", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
