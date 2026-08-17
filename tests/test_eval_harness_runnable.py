@@ -357,3 +357,60 @@ def test_the_api_key_reaches_the_wire_and_is_absent_when_unset():
     assert seen["auth"] == "Bearer tok3n"
     asyncio.run(go(""))
     assert seen["auth"] is None, "llama-server must not be sent an empty bearer"
+
+
+# --- provider-specific request knobs ----------------------------------------
+
+def test_extra_body_reaches_the_wire():
+    """Qwen3.6 reasons by default; reasoning_effort=none is a different model
+    in every way that matters. If the knob does not reach the request, the run
+    silently measures the default and the metadata claims otherwise."""
+    import asyncio                    # pylint: disable=import-outside-toplevel
+    import json as _json              # pylint: disable=import-outside-toplevel
+    import httpx                      # pylint: disable=import-outside-toplevel
+
+    module = _runner_module()
+    seen = {}
+
+    def handler(request):
+        seen.update(_json.loads(request.content))
+        return httpx.Response(200, json=_reply("stop", "done"))
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            await module.run_prompt(c, None, "http://stub", "m",
+                                    {"id": "T01", "prompt": "hi"}, [], "sys",
+                                    "", None,
+                                    extra_body={"reasoning_effort": "none"})
+
+    asyncio.run(go())
+    assert seen["reasoning_effort"] == "none", seen
+    # and it must not have clobbered what the harness controls
+    assert seen["temperature"] == 0.0
+    assert "messages" in seen
+
+
+def test_extra_body_is_parsed_and_recorded():
+    module = _runner_module()
+    assert module.parse_extra_body("") == {}
+    assert module.parse_extra_body('{"reasoning_effort": "none"}') == {
+        "reasoning_effort": "none"}
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "m"
+        base_url = "http://llama:8080"
+        gmr_api = "http://fontem-api"
+        extra_body = '{"reasoning_effort": "none"}'
+
+    meta = module.run_metadata(Args(), {"version": 2}, "shipped", 1)
+    assert meta["extra_body"] == {"reasoning_effort": "none"}
+
+
+def test_malformed_extra_body_fails_loudly():
+    """Silently dropping it would produce a run whose metadata is a lie."""
+    import pytest                     # pylint: disable=import-outside-toplevel
+    module = _runner_module()
+    with pytest.raises(Exception):
+        module.parse_extra_body("not json")
+    with pytest.raises(ValueError):
+        module.parse_extra_body('["a", "list"]')
