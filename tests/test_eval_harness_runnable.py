@@ -194,3 +194,166 @@ def test_code_sha_can_be_supplied_when_git_cannot_answer():
 
     meta = module.run_metadata(Args(), {"version": 2}, "shipped", 1)
     assert meta["code_sha"] == "deadbee"
+
+
+def test_round_cap_is_configurable_and_recorded():
+    """The cap decides whether a slow-converging model scores as failing.
+
+    A model that fans out several tool calls per round exhausts a cap tuned
+    for one-call-per-round models, and the result is indistinguishable from
+    the model refusing to answer. So the cap has to be movable, and whatever
+    it was has to be in the metadata.
+    """
+    module = _runner_module()
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "m"
+        base_url = "http://llama:8080"
+        gmr_api = "http://fontem-api"
+        max_rounds = 12
+
+    assert module.run_metadata(Args(), {"version": 2}, "shipped", 1)["max_rounds"] == 12
+
+    proc = subprocess.run(
+        [sys.executable, str(RUNNER), "--help"],
+        capture_output=True, text=True, timeout=120, check=False,
+        cwd=str(RUNNER.parent.parent))
+    assert "--max-rounds" in proc.stdout
+
+
+def test_round_cap_defaults_to_the_module_constant():
+    """Runs that do not pass it must stay comparable with the committed ones."""
+    module = _runner_module()
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "m"
+        base_url = "http://llama:8080"
+        gmr_api = "http://fontem-api"
+
+    meta = module.run_metadata(Args(), {"version": 2}, "shipped", 1)
+    assert meta["max_rounds"] == module.MAX_ROUNDS == 6
+
+
+# --- token budget -----------------------------------------------------------
+#
+# The harness sends a fixed per-reply token budget. A reasoning model spends it
+# on the reasoning trace before emitting any answer, so a budget sized for a
+# direct answer comes back as finish_reason="length" with empty content. The
+# scorer cannot tell that apart from a model that declined, and Qwen3.6-35B
+# scored completion -100% on that basis while answering fine at a larger
+# budget. Both the flag and the truncation report are load-bearing.
+
+def test_token_budget_is_configurable_and_recorded():
+    module = _runner_module()
+
+    class Args:                       # pylint: disable=too-few-public-methods
+        models = "m"
+        base_url = "http://llama:8080"
+        gmr_api = "http://fontem-api"
+        max_tokens = 4000
+
+    assert module.run_metadata(Args(), {"version": 2}, "shipped", 1)["max_tokens"] == 4000
+
+    proc = subprocess.run(
+        [sys.executable, str(RUNNER), "--help"],
+        capture_output=True, text=True, timeout=120, check=False,
+        cwd=str(RUNNER.parent.parent))
+    assert "--max-tokens" in proc.stdout
+
+
+def _reply(finish_reason, content, tool_calls=None):
+    msg = {"role": "assistant", "content": content}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    return {"choices": [{"message": msg, "finish_reason": finish_reason}]}
+
+
+def _run(module, payload, **kw):
+    """Drive run_prompt against a stubbed chat-completions endpoint."""
+    import asyncio                    # pylint: disable=import-outside-toplevel
+    import httpx                      # pylint: disable=import-outside-toplevel
+
+    def handler(request):             # pylint: disable=unused-argument
+        return httpx.Response(200, json=payload)
+
+    async def go():
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await module.run_prompt(
+                client, None, "http://stub", "m",
+                {"id": "T01", "prompt": "hi"}, [], "sys", "", None, **kw)
+
+    return asyncio.run(go())
+
+
+def test_a_truncated_reply_is_reported_not_scored_as_silence():
+    module = _runner_module()
+    trace = _run(module, _reply("length", ""), max_tokens=900)
+    assert trace.answer == ""
+    assert trace.error, "a truncated reply must not look like a refusal"
+    assert "max_tokens=900" in trace.error
+
+
+def test_a_real_empty_answer_is_still_reported_as_empty():
+    """finish_reason=stop with no content is the model declining. Different bug."""
+    module = _runner_module()
+    trace = _run(module, _reply("stop", ""), max_tokens=900)
+    assert trace.answer == ""
+    assert not trace.error
+
+
+def test_an_answer_that_fits_is_untouched():
+    module = _runner_module()
+    trace = _run(module, _reply("stop", "  Four  "), max_tokens=900)
+    assert trace.answer == "Four"
+    assert not trace.error
+
+
+def test_the_budget_reaches_the_wire():
+    """Recording max_tokens in the metadata is worthless if the request ignores it.
+
+    Without this, hardcoding the budget back into the request body leaves every
+    test green and every result file claiming a budget that was never sent.
+    """
+    import asyncio                    # pylint: disable=import-outside-toplevel
+    import json as _json              # pylint: disable=import-outside-toplevel
+    import httpx                      # pylint: disable=import-outside-toplevel
+
+    module = _runner_module()
+    seen = {}
+
+    def handler(request):
+        seen.update(_json.loads(request.content))
+        return httpx.Response(200, json=_reply("stop", "done"))
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            await module.run_prompt(c, None, "http://stub", "m",
+                                    {"id": "T01", "prompt": "hi"}, [], "sys",
+                                    "", None, max_tokens=4000)
+
+    asyncio.run(go())
+    assert seen["max_tokens"] == 4000, seen
+
+
+def test_the_api_key_reaches_the_wire_and_is_absent_when_unset():
+    import asyncio                    # pylint: disable=import-outside-toplevel
+    import httpx                      # pylint: disable=import-outside-toplevel
+
+    module = _runner_module()
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json=_reply("stop", "done"))
+
+    async def go(key):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            await module.run_prompt(c, None, "http://stub", "m",
+                                    {"id": "T01", "prompt": "hi"}, [], "sys",
+                                    key, None)
+
+    asyncio.run(go("tok3n"))
+    assert seen["auth"] == "Bearer tok3n"
+    asyncio.run(go(""))
+    assert seen["auth"] is None, "llama-server must not be sent an empty bearer"
