@@ -49,10 +49,22 @@ REQUEST_TIMEOUT = 600.0
 MAX_TOOL_RESULT_CHARS = 8000
 
 
+# Run as `python evals/runner.py` and sys.path[0] is evals/, so `src` is not
+# importable and every invocation dies before the first request. Prepending the
+# repo root here keeps the harness runnable from anywhere without a PYTHONPATH
+# incantation that is easy to forget and easy to get wrong.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+
 def load_shipped():
     """Pull the real tool schemas, executor and system prompt out of the app."""
     # pylint: disable=import-outside-toplevel
-    from src.assistant.mistral_client import _TOOLS, MistralProxyClient
+    # `mistral_client` became `tool_runtime` in 2b37dcc (2026-08-13,
+    # "decommission the hand-written executor"). The rename took this
+    # harness with it: every run since has died on the import before
+    # reaching a model, which is why there are no results from the last
+    # week rather than no appetite to produce them.
+    from src.assistant.tool_runtime import _TOOLS, ToolRuntime
     from src.assistant.navigation import navigate_tool_schema, system_context
     try:
         from src.api.di import _DEFAULT_SYSTEM_PROMPT
@@ -66,13 +78,14 @@ def load_shipped():
     # sent a site map. The eval supplies the map from the fixture, so the tool
     # has to be offered here too — otherwise P11-P14 measure a tool the model
     # was never given, which is a harness result, not a model result.
-    return (list(_TOOLS) + [navigate_tool_schema()], MistralProxyClient,
+    return (list(_TOOLS) + [navigate_tool_schema()], ToolRuntime,
             prompt, origin, system_context)
 
 
 async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                      model: str, spec: dict, tools: list, system: str,
-                     nav_context, trace_io: bool = False) -> Trace:
+                     api_key: str, nav_context,
+                     trace_io: bool = False) -> Trace:
     """One prompt, one model, bounded tool loop."""
     trace = Trace(prompt_id=spec["id"], model=model)
     expect = spec.get("expect") or {}
@@ -107,6 +120,13 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                       # Deterministic: a comparison whose result changes on
                       # re-run cannot support a deployment decision.
                       "temperature": 0.0, "max_tokens": 900},
+                # Empty for llama-server, which this harness was built
+                # against and which wants no auth. A hosted provider does,
+                # and comparing the local models against a hosted one is
+                # the whole point of being able to point --base-url
+                # somewhere else.
+                headers=({"Authorization": f"Bearer {api_key}"}
+                         if api_key else {}),
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code >= 400:
@@ -201,6 +221,10 @@ async def main() -> int:
                         help="comma-separated prompt ids to run")
     parser.add_argument("--tools-only", default=None,
                         help="restrict the offered tools to these names")
+    parser.add_argument(
+        "--api-key", default="",
+        help="Bearer token for a hosted provider. Omit for llama-server, "
+             "which takes none. Never logged.")
     parser.add_argument("--trace", action="store_true",
                         help="dump the exact request and raw reply per round")
     args = parser.parse_args()
@@ -225,8 +249,10 @@ async def main() -> int:
     print(f"fixture v{fixture['version']}: {len(prompts)} prompts | "
           f"{len(tools)} tools | system prompt: {origin}", flush=True)
 
-    proxy = client_cls(api_key="", gmr_api_url=args.gmr_api)
-    executor = proxy._execute_tool  # pylint: disable=protected-access
+    # ToolRuntime takes no api_key — the executor talks to fontem-api, not
+    # to a model provider — and `execute_tool` is public now.
+    proxy = client_cls(gmr_api_url=args.gmr_api)
+    executor = proxy.execute_tool
     results = []
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as http:
         # Model-outer so the router loads each model once. Prompt-outer would
@@ -236,6 +262,7 @@ async def main() -> int:
             for spec in prompts:
                 trace = await run_prompt(http, executor, args.base_url,
                                          model, spec, tools, system,
+                                         args.api_key,
                                          nav_context, args.trace)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)

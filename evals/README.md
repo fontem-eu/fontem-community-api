@@ -111,10 +111,48 @@ model.
 - Expectations are trajectory-only. Nothing here stores a correct answer,
   because the correct answer changes with the next ETL run.
 
+## Invoking it
+
+```
+# the incumbent, against the shared llama-server
+python evals/runner.py \
+  --base-url http://llama-server.llm-service.svc.cluster.local:8080 \
+  --models qwen3-8b-q4_k_m \
+  --gmr-api http://fontem-api.fontem-staging.svc.cluster.local
+
+# a hosted provider, for the "what would more compute buy us" question
+python evals/runner.py \
+  --base-url https://inference.hetzner.com/api \
+  --api-key "$HETZNER_API_KEY" \
+  --models Qwen/Qwen3.6-35B-A3B-FP8
+```
+
+`--base-url` has `/v1/chat/completions` appended to it, so pass the host and
+prefix only — for an endpoint documented as `.../api/v1`, pass `.../api`.
+
+`--api-key` is optional and sends a bearer token; llama-server wants none.
+It is never printed, including under `--trace`. Read it from the environment
+rather than pasting it into a shell that keeps history.
+
+`--only P01,P02` runs a subset. Worth doing first against any new endpoint:
+a slow provider can take longer for two prompts than the local 8B takes for
+all fourteen, and finding that out after a full run wastes an afternoon.
+
+Tool calls execute against a real `fontem-api` (`--gmr-api`, staging by
+default), so the graph must be reachable from wherever the runner runs.
+
 ## Status
 
-`prompts.yaml` is written and reviewed. The runner is not built yet — Layers 0–2
-are a few hundred lines against the existing trace format, Layer 3 needs an API
-key for the judge. Ten prompts is enough to catch the failures listed above and
-not enough to rank two good models confidently; treat early results as a filter,
-not a leaderboard.
+`prompts.yaml` is at version 2, 14 prompts. Layers 0–2 are implemented in
+`runner.py` and score deterministically; Layer 3 (the blinded pairwise judge)
+is not built — it needs a judge model and a key, and the deterministic layers
+have not yet stopped being the binding constraint.
+
+Fourteen prompts is enough to catch the failures listed above and not enough
+to rank two good models confidently; treat results as a filter, not a
+leaderboard.
+
+`tests/test_eval_harness_runnable.py` keeps the harness importable. It exists
+because the harness imports the shipped assistant rather than copying it, so a
+rename in `src.assistant` silently breaks every run — which is exactly what
+happened for a week after 2b37dcc.
