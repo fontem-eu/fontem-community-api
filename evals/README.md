@@ -141,6 +141,17 @@ all fourteen, and finding that out after a full run wastes an afternoon.
 Tool calls execute against a real `fontem-api` (`--gmr-api`, staging by
 default), so the graph must be reachable from wherever the runner runs.
 
+## Results
+
+Committed under `evals/results/`, one file per run, written by `--out`. Use
+`--out -` when the runner is in a pod: the pod's disk does not outlive it, and
+the first full 8B run had to be scraped back out of `kubectl logs` because the
+results file went away with the pod that wrote it.
+
+Every run stamps a `meta` block — fixture version, endpoint host, round cap,
+tool-result budget, code sha. Runs whose `meta` disagrees are not comparable;
+see `results/README.md`.
+
 ## Status
 
 `prompts.yaml` is at version 2, 14 prompts. Layers 0–2 are implemented in
