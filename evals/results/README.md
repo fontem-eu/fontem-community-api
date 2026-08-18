@@ -45,3 +45,9 @@ Negative percentages are penalties, not floors at zero.
   provider failures scored as prompt failures; P09 is the only prompt carrying
   the `language` check, so that layer is untested for the 35B rather than
   failed.
+- `2026-08-18-...-noreasoning.json` is the same model with
+  `reasoning_effort: "none"`. Compare it only against the r12t4000 run with
+  reasoning on; the `meta.extra_body` field is what distinguishes them.
+- Latency in these files carries large per-request variance from the provider:
+  the same single-round, zero-tool prompt took 17.7s in one run and 166.1s in
+  another. Differences under roughly 2x between runs mean nothing.

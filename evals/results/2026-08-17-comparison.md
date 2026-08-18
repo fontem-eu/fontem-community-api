@@ -40,11 +40,13 @@ r6t900 and r12t4000; neither cap binds for it. The gap is the model.
 
 ## Caveat on every number above
 
-Measured with the 35B's reasoning **on**, which is its default and is not a
-configuration anyone would deploy — see `2026-08-18-hetzner-service-notes.md`.
-With `reasoning_effort: "none"` the same tool decision costs 27 completion
-tokens instead of 216. The scores here are a floor for that model, not a
-verdict on it.
+Measured with the 35B's reasoning **on**, which is its default. The obvious
+next question — whether turning it off buys the same quality for fewer tokens
+— was measured and the answer is no: grounding drops 60% -> 48%, navigation
+100% -> 67%, and three prompts stop converging instead of one, at no
+wall-clock saving, because the model spends the saved tokens on extra rounds.
+See `2026-08-18-hetzner-service-notes.md`. These scores are the model at its
+best, not a floor.
 
 ## What it is good for
 

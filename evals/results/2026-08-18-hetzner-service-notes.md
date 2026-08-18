@@ -21,7 +21,8 @@ prompts, same settings, day against night:
     P04  734s ->  646s     P05  127s ->   40s     P07  160s ->  112s
     mean 595s ->  509s     (~14%, and P02 got worse)
 
-Waiting for a quiet queue is not the lever. `reasoning_effort` is.
+Waiting for a quiet queue is not the lever. Neither, it turns out, is
+`reasoning_effort` — see below.
 
 ## Reasoning is on by default and can be turned off
 
@@ -38,9 +39,37 @@ Tool calling survives with reasoning off: 27 completion tokens instead of 216
 for the same decision, same tool, same arguments. `tool_choice: "required"` is
 honoured.
 
-This is the single most important thing about the endpoint. Every number in
-`2026-08-17-comparison.md` was measured with reasoning on, which is a
-configuration nobody would deploy.
+### ...and turning it off does not pay off
+
+Measured, not assumed. Full fixture, reasoning off
+(`2026-08-18-...-noreasoning.json`) against the same fixture with reasoning on:
+
+| | reasoning ON | reasoning OFF |
+|---|---|---|
+| tool calling | 98% | 95% |
+| completion | 57% | 57% |
+| grounding | **60%** | **48%** |
+| honesty | 48% | 48% |
+| navigation | **100%** | **67%** |
+| mean latency | 342s | 389s |
+| rounds / tool calls | 55 / 77 | 76 / 86 |
+| prompts that never converged | 1 | 3 |
+
+The token saving is real per request and does not survive the loop: without
+reasoning the model compensates with more rounds (55 -> 76), so the turn costs
+as much wall-clock and lands in a worse place. Grounding drops 12 points,
+navigation drops a third, and three prompts fail to converge instead of one.
+
+The latency columns should not be read closely. On this endpoint the *same*
+single-round zero-tool prompt took 17.7s in one run and 166.1s in another, so
+per-request variance swamps a 15% difference between runs. What survives the
+noise is directional and consistent: heavy multi-round prompts did get faster
+with reasoning off (821s -> 603s mean over P01-P04), while trivial ones
+"got slower", which can only be queueing.
+
+So reasoning is doing real work for this model, and the earlier guess — that
+switching it off would give us the 35B's quality at a fraction of the cost —
+is wrong. It gives less quality at about the same cost.
 
 ## Limits and misbehaviour
 
