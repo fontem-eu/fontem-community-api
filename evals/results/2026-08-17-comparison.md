@@ -38,6 +38,16 @@ r6t900 and r12t4000; neither cap binds for it. The gap is the model.
 - **One model, no choice.** The endpoint serves `Qwen/Qwen3.6-35B-A3B-FP8`
   and nothing else.
 
+## Caveat on every number above
+
+Measured with the 35B's reasoning **on**, which is its default. The obvious
+next question — whether turning it off buys the same quality for fewer tokens
+— was measured and the answer is no: grounding drops 60% -> 48%, navigation
+100% -> 67%, and three prompts stop converging instead of one, at no
+wall-clock saving, because the model spends the saved tokens on extra rounds.
+See `2026-08-18-hetzner-service-notes.md`. These scores are the model at its
+best, not a floor.
+
 ## What it is good for
 
 Answering "what would more compute buy us" without buying it. The answer this

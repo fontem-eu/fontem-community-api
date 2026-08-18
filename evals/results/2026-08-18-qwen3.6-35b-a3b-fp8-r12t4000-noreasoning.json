@@ -1,0 +1,614 @@
+{
+  "meta": {
+    "run_at": "2026-08-18T02:17:57+00:00",
+    "fixture_version": 2,
+    "prompts": 14,
+    "models": [
+      "Qwen/Qwen3.6-35B-A3B-FP8"
+    ],
+    "endpoint": "https://inference.hetzner.com",
+    "gmr_api": "http://fontem-api.fontem-staging.svc.cluster.local",
+    "system_prompt": "shipped",
+    "code_sha": "11f6b44",
+    "max_rounds": 12,
+    "max_tokens": 4000,
+    "extra_body": {
+      "reasoning_effort": "none"
+    },
+    "tool_result_char_budget": 8000
+  },
+  "results": [
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P01",
+      "latency_s": 548.4,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "Fontem holds **no data** on L\u0151rinc M\u00e9sz\u00e1ros. I searched for him using his full name (including the Hungarian diacritics), the ASCII version, and the surname alone \u2014 all returned zero results.\n\nThis means he is not present in Fontem\u2019s graph of companies, authorities, persons, or lobbyists as built from the platform\u2019s own registries this turn. If you\u2019re looking for connections to Hungarian energy or construction firms (his known sphere), I can search for those entities instead \u2014 but M\u00e9sz\u00e1ros himself does not appear in the current dataset.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P02",
+      "latency_s": 592.3,
+      "rounds": 12,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": "did not converge in 12 rounds",
+      "answer": "",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "produced_answer: error: did not converge in 12 rounds"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P03",
+      "latency_s": 564.0,
+      "rounds": 12,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths"
+      ],
+      "error": "did not converge in 12 rounds",
+      "answer": "",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "produced_answer: error: did not converge in 12 rounds"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P04",
+      "latency_s": 706.2,
+      "rounds": 5,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Based on my investigation, here's what Fontem's records show for companies tied to **M\u00e9sz\u00e1ros**:\n\n## 13 distinct company entities found\n\nAll are registered in **Hungary (HUN)**. Here they are, grouped by their relationship to the M\u00e9sz\u00e1ros name:\n\n### Core \"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros\" group (6 entities \u2014 likely legal variants/duplicates of the same operating company):\n1. **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.** \u2014 4 contracts, ~\u20ac12.9M (c7d633e9)\n2. **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt.** \u2014 2 contracts, ~\u20ac35K (a61b5df7)\n3. **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft.** \u2014 6 contracts, \u20ac0 (536e994b)\n4. **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g** \u2014 6 contracts, ~\u20ac10.2M (d530c2b7)\n5. **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Z\u00e1rtk\u00f6r\u0171en M\u0171k\u00f6d\u0151 R\u00e9szv\u00e9nyt\u00e1rsas\u00e1g** \u2014 2 contracts, ~\u20ac49.4M (01dfce84)\n6. **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. (M-E 2020 Konzorcium)** \u2014 2 contracts, \u20ac0 (12bc747a)\n\n### Consortium entries (2 entities \u2014 bidding vehicles):\n7. **M-E 2020 Konzorcium (Vezet\u0151 tag: M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft.)** \u2014 1 contract, \u20ac0 (ada6f2da)\n\n### M1 vehicle-related companies (2 entit",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 1.8000000000000003,
+          "max": 3.0,
+          "pct": 60.0,
+          "notes": [
+            "numeric_claims_supported: 4/20 unsupported: ['129', '494', '385', '427']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P05",
+      "latency_s": 274.7,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Fontem is a European public-data platform that aggregates and links open-source datasets\u2014company registries, procurement contracts, lobbying disclosures, and related entity graphs\u2014so you can trace ownership, supply chains, and influence networks across the EU.\n\nI can\u2019t provide live API keys or authentication details for your own AI client, but here\u2019s how to connect one in practice:\n\n- Register for an account on the Fontem site and check your dashboard for API credentials (key/token).\n- Use the documented REST endpoints (e.g., search, investigate, paths) with Bearer-token auth in your HTTP headers.\n- For programmatic access, call the same query patterns I use under the hood:\n  - Search entities by name/ticker/keyword\n  - Investigate an entity\u2019s properties, contracts, and graph neighborhood\n  - Find shortest paths between two entities\n- Handle pagination and rate limits as specified in the API docs, and cache results where appropriate.\n\nIf you tell me your preferred language and whether you need batch lookups or real-time queries, I can suggest a minimal client pattern and the exact endpoint shapes to target.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P06",
+      "latency_s": 283.2,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "The ID `E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB` does not correspond to any entity in Fontem's database. It appears to be either a placeholder or an invalid identifier.\n\nIf you have the company's name, ticker, or a keyword, I can search for the correct entity and pull up its details for you.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 5.0,
+          "pct": 20.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P07",
+      "latency_s": 281.8,
+      "rounds": 7,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "I apologize, but I'm encountering technical difficulties with the search tools. However, I can provide you with general information based on my training data:\n\n**EU Countries with Consent-Based Rape Laws:**\n\nSeveral EU countries have moved to consent-based rape definitions:\n\n1. **Sweden** (2018) - First EU country to adopt consent-based law\n2. **Spain** (2022) - \"Only yes means yes\" law\n3. **France** (2018)\n4. **Italy** (2019)\n5. **Belgium** (2014)\n6. **Ireland** (2019)\n7. **Netherlands** (2017)\n8. **Portugal** (2015)\n9. **Germany** (2016)\n\n**Recorded Rates After Legislative Changes:**\n\nIn most of these countries, recorded rape rates **increased** after the law changed. This is generally attributed to:\n\n- **Better reporting**: Victims felt more confident reporting\n- **Broader definition**: More acts now qualify as rape\n- **Increased awareness**: Public campaigns about consent\n\n**Important Caveats:**\n- This doesn't necessarily mean more rapes occurred\n- It likely reflects improved reporting and legal recognition\n- The data shows correlation, not causation of actual crime rates\n\nTo get specific statistics and verify this information with current data, I'd need to access Fontem's data",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": -3.0,
+          "max": 3.0,
+          "pct": -100.0,
+          "notes": [
+            "numeric_claims_supported: 9/9 unsupported: ['2018', '2022', '2018', '2019']"
+          ]
+        },
+        "honesty": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P08",
+      "latency_s": 240.9,
+      "rounds": 12,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": "did not converge in 12 rounds",
+      "answer": "",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 5.0,
+          "pct": 60.0,
+          "notes": [
+            "required_tools: never called: mcp__gmr__investigate_entity, mcp__gmr__propose_edit"
+          ]
+        },
+        "completion": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "produced_answer: error: did not converge in 12 rounds"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P09",
+      "latency_s": 615.3,
+      "rounds": 6,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "Je rencontre actuellement des erreurs techniques (API 500) avec l'outil de recherche d'entit\u00e9s, ce qui m'emp\u00eache d'interroger la base de donn\u00e9es de Fontem pour identifier les entreprises russes sp\u00e9cifiques.\n\nCependant, je peux vous expliquer comment proc\u00e9der une fois le probl\u00e8me r\u00e9solu, ou vous guider vers la page appropri\u00e9e si vous souhaitez consulter les donn\u00e9es vous-m\u00eame :\n\n1.  **Recherche :** Il faudrait rechercher les grandes entreprises russes (comme Gazprom, Rosneft, Sberbank, etc.) une par une ou par groupe.\n2.  **Investigation :** Pour chaque entreprise, utiliser la fonction `investigate_entity` pour voir leurs contrats publics (procurement contracts) dans l'UE.\n3.  **Filtrage :** Examiner la liste des contrats pour voir s'ils sont toujours actifs ou r\u00e9cents.\n\nSouhaitez-vous que je tente \u00e0 nouveau la recherche, ou pr\u00e9f\u00e9rez-vous que je vous guide vers une page sp\u00e9cifique de l'application Fontem o\u00f9 vous pourriez visualiser ces informations ? Par exemple, la page de r\u00e9sum\u00e9 d'une entreprise sp\u00e9cifique.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "language": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P10",
+      "latency_s": 942.3,
+      "rounds": 10,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "navigate",
+        "mcp__gmr__propose_edit"
+      ],
+      "error": null,
+      "answer": "Based on my search of the Fontem data, here's what I found:\n\n## Israeli-domiciled companies in EU procurement\n\nI identified **two Israeli-domiciled companies** with EU public contracts in the graph:\n\n1. **Rafael Advanced Defence Systems LTD** (gmr_id: `e6bead02-c3ef-53ca-a108-be6f00021fce`) \u2014 1 contract\n2. **Rafael Advanced Defense Systems Ltd.** (gmr_id: `84fc94d6-d8a7-54a6-8438-f9e3610d5c2d`) \u2014 1 contract\n\nThese appear to be duplicate entries (spelling variant: \"Defence\" vs \"Defense\") for the same organisation.\n\n### Contract details\n\nBoth contracts are with the Dutch Ministry of Defence (Ministerie van Defensie) and carry CPV code **35300000** (Arms, ammunition and military equipment):\n\n| Contract | Title | CPV |\n|----------|-------|-----|\n| `4194658` | Spike LR2 missiles | 35300000 |\n| `4194167` | Spare Parts Spike LR2 | 35300000 |\n\n### Defence vs civilian split\n\n**100% defence.** Both contracts are for military equipment (Spike LR2 anti-tank missiles and spare parts), classified under CPV 35300000. There are **zero civilian contracts** held by Israeli-domiciled companies in the graph.\n\n### Caveats\n\n- **No contract values are recorded** \u2014 both entries show `total_contract_value_",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 2.4000000000000004,
+          "max": 3.0,
+          "pct": 80.0,
+          "notes": [
+            "numeric_claims_supported: 1/10 unsupported: ['100']"
+          ]
+        },
+        "honesty": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "partial_abstention: unsupported: ['100']"
+          ]
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P11",
+      "latency_s": 80.8,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "I've opened the **Atlas** (`/map`), which provides a geographic view of the data by region. You can also explore geographic data more broadly via the `/geo` page if you need a detailed browser.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P12",
+      "latency_s": 55.7,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "There isn\u2019t a dedicated \u201cwrite your own analysis\u201d page in the current site map. The closest options are:\n\n- **/stories/:id/edit** (auth) \u2014 if you already have a data story, you can edit it there.\n- **/explore** \u2014 the data exploration hub, where you can dig into datasets and potentially build your own narrative from the results.\n- **/help** \u2014 check the FAQ for guidance on how to connect your own AI assistant to Fontem, which might help with drafting or analyzing data.\n\nIf you\u2019re looking to create a new analysis from scratch, you might start by exploring the data at **/explore** and then use the editing feature if you have an existing story. Let me know if you\u2019d like more details on any of these!",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "navigated: never offered a destination"
+          ]
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P13",
+      "latency_s": 166.1,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "I cannot navigate to that page because it does not exist in the site map. The available pages are limited to the home feed, map, explore hub, geographic browser, data quality dashboards, help, and account settings.\n\nIf you are looking for staff turnover data, you might find it in the **Data exploration hub** (`/explore`) or the **Geographic data browser** (`/geo`), but there is no specific page for \"quarterly staff turnover by department.\" Would you like me to take you to the explore hub to search for it?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "prompt": "P14",
+      "latency_s": 100.1,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Here\u2019s what you can do on Fontem, based on the available pages:\n\n### \ud83c\udfe0 Home Feed (`/`)\nStart here for published data stories \u2014 curated narratives built from the platform\u2019s registries.\n\n### \ud83d\uddfa\ufe0f Atlas (`/map`)\nA geographic view of the data. See where companies, authorities, contracts, and people are located across Europe.\n\n### \ud83d\udd0d Data Exploration Hub (`/explore`)\nThe entry point to the datasets. Search for companies, authorities, persons, and lobbyists by name, ticker, or keyword. This is where you dig into entities and their connections.\n\n### \ud83c\udf0d Geographic Browser (`/geo`)\nA more detailed geographic data browser for filtering and exploring data by region.\n\n### \ud83d\udcca Data Quality (`/data-quality`)\nDashboards and coverage reports so you can understand the scope, gaps, and reliability of the data.\n\n### \u2753 Help (`/help`)\nFAQs and guidance, including how to connect your own AI assistant to Fontem.\n\n### \ud83d\udc64 Account Settings (`/account`) *(requires sign-in)*\nManage display preferences, profile, and LLM provider keys if you're integrating external AI tools.\n\n---\n\n**In short:** You can search for entities, investigate their properties and EU procurement contracts, trace connections between them (like ",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    }
+  ]
+}

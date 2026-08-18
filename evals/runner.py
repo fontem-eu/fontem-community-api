@@ -94,8 +94,10 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                      api_key: str, nav_context,
                      trace_io: bool = False,
                      max_rounds: int = MAX_ROUNDS,
-                     max_tokens: int = MAX_TOKENS) -> Trace:
+                     max_tokens: int = MAX_TOKENS,
+                     extra_body: dict | None = None) -> Trace:
     """One prompt, one model, bounded tool loop."""
+    extra_body = extra_body or {}
     trace = Trace(prompt_id=spec["id"], model=model)
     expect = spec.get("expect") or {}
     routes = list(expect.get("known_routes") or [])
@@ -128,7 +130,8 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                 json={"model": model, "messages": messages, "tools": tools,
                       # Deterministic: a comparison whose result changes on
                       # re-run cannot support a deployment decision.
-                      "temperature": 0.0, "max_tokens": max_tokens},
+                      "temperature": 0.0, "max_tokens": max_tokens,
+                      **extra_body},
                 # Empty for llama-server, which this harness was built
                 # against and which wants no auth. A hosted provider does,
                 # and comparing the local models against a hosted one is
@@ -245,6 +248,16 @@ def git_sha() -> str:
         return ""
 
 
+def parse_extra_body(raw: str) -> dict:
+    """--extra-body as a dict. A malformed value must not be silently dropped."""
+    if not raw:
+        return {}
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("--extra-body must be a JSON object")
+    return value
+
+
 def run_metadata(args, fixture: dict, origin: str, n_prompts: int) -> dict:
     """Everything needed to decide whether two result files are comparable."""
     return {
@@ -265,6 +278,7 @@ def run_metadata(args, fixture: dict, origin: str, n_prompts: int) -> dict:
         "code_sha": getattr(args, "code_sha", "") or git_sha(),
         "max_rounds": getattr(args, "max_rounds", MAX_ROUNDS),
         "max_tokens": getattr(args, "max_tokens", MAX_TOKENS),
+        "extra_body": parse_extra_body(getattr(args, "extra_body", "")),
         "tool_result_char_budget": MAX_TOOL_RESULT_CHARS,
     }
 
@@ -299,6 +313,15 @@ async def main() -> int:
              "the harness stopping it. Recorded in the metadata, because runs "
              "with different caps are not comparable.")
     parser.add_argument(
+        "--extra-body", default="",
+        help="JSON merged into every request body, for provider-specific "
+             "knobs the harness has no opinion about. The reason this exists: "
+             "Qwen3.6 on Hetzner reasons by default and answers in a fraction "
+             "of the tokens with "
+             "'{\"reasoning_effort\": \"none\"}' -- a configuration "
+             "difference big enough that measuring only the default measures "
+             "something nobody would deploy. Recorded in the metadata.")
+    parser.add_argument(
         "--max-tokens", type=int, default=MAX_TOKENS,
         help="per-reply token budget. A reasoning model emits its reasoning "
              "trace first, so a budget sized for a direct answer is spent "
@@ -330,6 +353,7 @@ async def main() -> int:
     if args.only:
         keep = {p.strip() for p in args.only.split(",")}
         prompts = [p for p in prompts if p["id"] in keep]
+    extra_body = parse_extra_body(args.extra_body)
     print(f"fixture v{fixture['version']}: {len(prompts)} prompts | "
           f"{len(tools)} tools | system prompt: {origin}", flush=True)
 
@@ -348,7 +372,8 @@ async def main() -> int:
                                          model, spec, tools, system,
                                          args.api_key,
                                          nav_context, args.trace,
-                                         args.max_rounds, args.max_tokens)
+                                         args.max_rounds, args.max_tokens,
+                                         extra_body)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)
                 results.append({
