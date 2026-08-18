@@ -38,6 +38,14 @@ r6t900 and r12t4000; neither cap binds for it. The gap is the model.
 - **One model, no choice.** The endpoint serves `Qwen/Qwen3.6-35B-A3B-FP8`
   and nothing else.
 
+## Caveat on every number above
+
+Measured with the 35B's reasoning **on**, which is its default and is not a
+configuration anyone would deploy — see `2026-08-18-hetzner-service-notes.md`.
+With `reasoning_effort: "none"` the same tool decision costs 27 completion
+tokens instead of 216. The scores here are a floor for that model, not a
+verdict on it.
+
 ## What it is good for
 
 Answering "what would more compute buy us" without buying it. The answer this
