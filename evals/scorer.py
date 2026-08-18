@@ -97,6 +97,22 @@ def _norm_num(raw: str) -> str:
     return re.sub(r"[.,]", "", raw).lstrip("0") or "0"
 
 
+def numeric_claims_raw(text: str) -> list[str]:
+    """The same numbers as `numeric_claims`, exactly as written.
+
+    `numeric_claims` normalises away the decimal point, which is what a
+    digit-substring comparison needs and what a value comparison cannot
+    survive. Both views are needed: the normalised one to keep the lenient
+    931-in-9310000 behaviour, the raw one to tell a correctly rounded figure
+    from an invented one.
+    """
+    out = []
+    for raw in _DIGITS.findall(text):
+        if _norm_num(raw) != "0" and len(_norm_num(raw)) >= 3:
+            out.append(raw.rstrip(".,"))
+    return out
+
+
 def numeric_claims(text: str) -> list[str]:
     """Every number asserted in the answer, normalised.
 
@@ -114,17 +130,61 @@ def numeric_claims(text: str) -> list[str]:
     return out
 
 
-def _supported(claim: str, evidence_nums: list[str], prompt_nums: list[str]) -> bool:
+def _as_float(raw: str) -> float | None:
+    """The number as written, decimal point intact. None if it is not one."""
+    cleaned = raw.rstrip(".,")
+    # Thousands separators, decimal comma, decimal point: "1.234.567,89",
+    # "1,234,567.89" and "12874355.33" all have to survive this.
+    if cleaned.count(",") and cleaned.count("."):
+        cleaned = (cleaned.replace(".", "").replace(",", ".")
+                   if cleaned.rfind(",") > cleaned.rfind(".")
+                   else cleaned.replace(",", ""))
+    elif cleaned.count(",") == 1 and len(cleaned.split(",")[-1]) in (1, 2):
+        cleaned = cleaned.replace(",", ".")
+    else:
+        cleaned = cleaned.replace(",", "")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _rounds_to(claim: str, evidence: str) -> bool:
+    """Is the claim the evidence, correctly rounded to the claim's precision?
+
+    This is the difference between a model reporting a figure and inventing
+    one. fontem-api returns `total_contract_value_eur: 12874355.329999998` —
+    an ordinary binary-float artifact — and the model correctly writes
+    "€12,874,355.33". Stripping the decimal point to compare digits turns
+    those into "1287435533" and "12874355329999998", which share no prefix
+    past the tenth digit, so the honest answer was recorded as fabricated.
+    That single false accusation was the whole of one model's 0% grounding.
+    """
+    c, e = _as_float(claim), _as_float(evidence)
+    if c is None or e is None:
+        return False
+    decimals = len(claim.split(".")[-1]) if "." in claim else 0
+    return round(e, decimals) == c
+
+
+def _supported(claim: str, evidence_nums: list[str], prompt_nums: list[str],
+               claim_raw: str = "", evidence_raw: tuple[str, ...] = ()) -> bool:
     """A claim counts as supported if the evidence or the question contains it.
 
     Substring matching is deliberately lenient — 931 is accepted against
     9310000 in the evidence. A false accusation of fabrication is more
     damaging than a missed one here, because it teaches the reader to
     distrust the checker rather than the model.
+
+    The raw forms are checked too, so that a figure the model rounded
+    correctly counts as read rather than invented — see `_rounds_to`.
     """
     if claim in prompt_nums:
         return True
-    return any(claim == e or claim in e for e in evidence_nums)
+    if any(claim == e or claim in e for e in evidence_nums):
+        return True
+    return any(_rounds_to(claim_raw, e) for e in evidence_raw) if claim_raw \
+        else False
 
 
 def detect_language(text: str) -> str:
@@ -265,15 +325,20 @@ def _check_grounding(trace: Trace, prompt_text: str) -> list[Check]:
     vagueness.
     """
     claims = numeric_claims(trace.answer)
+    claims_raw = numeric_claims_raw(trace.answer)
     if not claims or not trace.calls:
         # No claims, or no tool output to check them against. Scoring an
         # answer against empty evidence marked every no-tool prompt as 100%
         # fabricated in the first run, which measured the fixture rather
         # than the model.
         return []
-    evidence = numeric_claims(trace.evidence())
+    evidence_text = trace.evidence()
+    evidence = numeric_claims(evidence_text)
+    evidence_raw = tuple(numeric_claims_raw(evidence_text))
     asked = numeric_claims(prompt_text)
-    unsupported = [c for c in claims if not _supported(c, evidence, asked)]
+    # claims and claims_raw come from the same scan in the same order.
+    unsupported = [c for c, raw in zip(claims, claims_raw)
+                   if not _supported(c, evidence, asked, raw, evidence_raw)]
     ratio = 1.0 - (len(unsupported) / len(claims))
     # Map [0,1] onto [-3,+3]: a half-fabricated answer scores zero, not credit.
     return [Check(
