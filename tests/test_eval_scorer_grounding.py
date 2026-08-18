@@ -1,0 +1,98 @@
+"""The grounding check must not accuse an honest answer of inventing figures.
+
+It did. fontem-api returns `total_contract_value_eur: 12874355.329999998` — an
+ordinary binary-float artifact — and the model wrote "€12,874,355.33", which is
+that number, correctly rounded, read off the tool result. The check compared
+digit strings with the decimal point stripped, so "1287435533" was tested
+against "12874355329999998", the two diverge at the tenth digit, and the honest
+answer was scored as fabricated.
+
+That single false accusation was the entire grounding score of a full run: it
+read 0%, and was reported as the model asserting numbers no tool returned.
+
+These tests pin both directions. A checker that cannot catch fabrication is
+worthless, and one that cries fabrication at correct arithmetic is worse than
+worthless — it teaches the reader to distrust the checker.
+"""
+from __future__ import annotations
+
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "evals"))
+
+# evals/ is not a package on the default path; the sys.path line above is what
+# makes this import work, and pylint cannot see that.
+import scorer  # noqa: E402  pylint: disable=wrong-import-position,import-error
+
+
+def supported(answer: str, evidence: str) -> bool:
+    # Testing the private predicate on purpose: it is the unit that made the
+    # false accusation, and going through the public check would need a whole
+    # Trace to exercise one comparison.
+    # pylint: disable=protected-access
+    claims = scorer.numeric_claims(answer)
+    raws = scorer.numeric_claims_raw(answer)
+    ev = scorer.numeric_claims(evidence)
+    ev_raw = tuple(scorer.numeric_claims_raw(evidence))
+    assert claims, "test needs a claim to check"
+    return scorer._supported(claims[0], ev, [], raws[0], ev_raw)
+
+
+# --- the false accusation that started this ---------------------------------
+
+def test_a_correctly_rounded_float_is_read_not_invented():
+    assert supported("€12,874,355.33",
+                     '{"total_contract_value_eur": 12874355.329999998}')
+
+
+def test_rounding_up_counts_too():
+    assert supported("1,234.57", '{"v": 1234.5678}')
+
+
+def test_an_exact_float_still_matches():
+    assert supported("1,234.56", '{"v": 1234.56}')
+
+
+def test_an_integer_reported_from_a_float_matches():
+    assert supported("12874355", '{"v": 12874355.329999998}')
+
+
+# --- and it must still catch actual fabrication -----------------------------
+
+def test_a_figure_absent_from_the_evidence_is_still_caught():
+    assert not supported("€45,000,000.00",
+                         '{"total_contract_value_eur": 12874355.329999998}')
+
+
+def test_a_digit_transposition_is_still_caught():
+    """12,874,355 vs 12,847,355 — the kind of slip worth catching."""
+    assert not supported("12,847,355.33",
+                         '{"total_contract_value_eur": 12874355.329999998}')
+
+
+def test_wrong_rounding_is_still_caught():
+    assert not supported("1,234.99", '{"v": 1234.5678}')
+
+
+def test_an_order_of_magnitude_error_is_still_caught():
+    assert not supported("128,743,553.30",
+                         '{"total_contract_value_eur": 12874355.329999998}')
+
+
+# --- the lenient integer behaviour the check was written with ---------------
+
+def test_the_deliberate_substring_leniency_survives():
+    """931 against 9310000 was accepted on purpose; the fix must not undo it."""
+    assert supported("931", '{"v": 9310000}')
+
+
+# --- separator conventions --------------------------------------------------
+
+def test_european_decimal_comma():
+    assert supported("12.874.355,33",
+                     '{"total_contract_value_eur": 12874355.329999998}')
+
+
+def test_plain_thousands_separators():
+    assert supported("1,234,567", '{"v": 1234567}')
