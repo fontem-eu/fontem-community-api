@@ -6,7 +6,17 @@ replicas: 1
 # Briefings feed refresh. Upstream publishes daily, so six hours already
 # over-samples the source four times over; drop it to "20 */3 * * *" if a
 # briefing ever needs to be fresher than that.
+#
+# OFF BY DEFAULT, and each environment opts in once its image can run the
+# job. ArgoCD renders this chart from the service repo but takes the image
+# tag from gitops, so the two advance independently: merging the CronJob
+# template shipped it to every environment immediately, including ones still
+# running an image with no src/jobs module. Prod fired it three times over
+# thirteen hours and failed every time with ModuleNotFoundError before anyone
+# looked. A default of false means a chart change can never activate a job the
+# deployed image cannot execute; turning it on is a deliberate act by whoever
+# promoted the code that runs it.
 feedRefresh:
-  enabled: true
+  enabled: false
   schedule: "20 */6 * * *"
   timeoutSeconds: 1800
