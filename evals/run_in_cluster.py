@@ -44,12 +44,19 @@ BOOTSTRAP = (
 )
 
 
-def payload() -> str:
-    """The harness, as a base64 tarball. Only the files a run needs."""
+def payload(extra: list[str]) -> str:
+    """The harness, as a base64 tarball. Only the files a run needs.
+
+    `extra` rides along at /tmp/<basename> — for --system-file, whose whole
+    point is A/B-ing a prompt that by definition is not in the image.
+    """
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for name in ("runner.py", "scorer.py", "prompts.yaml"):
             tar.add(EVALS / name, arcname=f"evals/{name}")
+        for path in extra:
+            src = pathlib.Path(path)
+            tar.add(src, arcname=src.name)
     return base64.b64encode(buf.getvalue()).decode()
 
 
@@ -62,13 +69,17 @@ def main() -> int:
     parser.add_argument(
         "--secret-env", default="",
         help="ENV:SECRET:KEY -- substituted for @@KEY@@ in the runner args")
+    parser.add_argument(
+        "--file", action="append", default=[],
+        help="local file to ship into the pod at /tmp/<basename>; repeatable. "
+             "Use with --system-file /tmp/<basename> to A/B a prompt.")
     parser.add_argument("runner_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
     runner_args = args.runner_args[1:] if args.runner_args[:1] == ["--"] \
         else args.runner_args
 
-    env = [{"name": "EVAL_PAYLOAD", "value": payload()},
+    env = [{"name": "EVAL_PAYLOAD", "value": payload(args.file)},
            {"name": "EVAL_ARGS", "value": json.dumps(runner_args)}]
     if args.secret_env:
         _, secret, key = args.secret_env.split(":", 2)
