@@ -1,0 +1,506 @@
+{
+  "meta": {
+    "run_at": "2026-08-17T19:35:59+00:00",
+    "fixture_version": 2,
+    "prompts": 14,
+    "models": [
+      "qwen3-8b-q4_k_m"
+    ],
+    "endpoint": "http://llama-server.llm-service.svc.cluster.local:8080",
+    "gmr_api": "http://fontem-api.fontem-staging.svc.cluster.local",
+    "system_prompt": "shipped",
+    "code_sha": "abd2588",
+    "max_rounds": 12,
+    "max_tokens": 4000,
+    "tool_result_char_budget": 8000
+  },
+  "results": [
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P01",
+      "latency_s": 20.3,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "Fontem does not have any records of an entity named \"L\u0151rinc M\u00e9sz\u00e1ros\" in its current holdings. This could mean that the name is either misspelled, not present in the data sources we use, or the individual is not covered by Fontem's data. If you have more context or details, I can help refine the search.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P02",
+      "latency_s": 76.8,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. has won a total of \u20ac12,874,355.33 in EU public contracts. Out of these, 4 contracts were awarded to the company, and all of them were directly awarded without competition, as there is no indication of competitive bidding in the data provided.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": -3.0,
+          "max": 3.0,
+          "pct": -100.0,
+          "notes": [
+            "numeric_claims_supported: 1/1 unsupported: ['1287435533']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P03",
+      "latency_s": 46.1,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__find_paths"
+      ],
+      "error": null,
+      "answer": "I encountered an error while trying to find a connection between M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros and the Hungarian state railway. Let me try a different approach to investigate this further.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P04",
+      "latency_s": 39.2,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "There are **12 distinct companies** in the record tied to M\u00e9sz\u00e1ros, accounting for spelling variants and country subsidiaries. These include entities such as \"M\u00e9sz\u00e1ros Vendel,\" \"M\u00c9SZ\u00c1ROS GR\u00c1NIT Kft.,\" and \"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.\" for further exploration.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 4.0,
+          "pct": 75.0,
+          "notes": [
+            "min_tool_calls: 1 call(s), expected >= 2"
+          ]
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P05",
+      "latency_s": 20.1,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Fontem is a European public-data platform that provides access to a wide range of data about companies, authorities, persons, and lobbyists, including their procurement contracts, relationships, and other relevant information. It is designed to support transparency, accountability, and informed decision-making by making this data accessible and searchable.\n\nTo connect your own AI client to Fontem, you would typically use its API. However, I currently do not have the capability to provide direct API access or integration instructions. For detailed information on how to connect to Fontem's API, you should visit the official Fontem documentation or contact their support team. If you need help finding the right documentation or resources, I can assist you in navigating to the relevant pages on the Fontem website.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P06",
+      "latency_s": 26.0,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "The entity with the ID `E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB` was not found in the system. This suggests that the ID may not correspond to a valid entity in our data. If you have a name or other details about the company, I can help you search for it using the `search_entities` function. Would you like to proceed with that?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P07",
+      "latency_s": 11.0,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "I cannot answer this question based on Fontem's holdings. Fontem does not hold data on EU countries' legal reforms or their associated crime statistics. To explore this topic, you would need to consult legal databases, academic research, or official government reports. Would you like me to help you find a relevant resource or guide you to a page where you can search for such information?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P08",
+      "latency_s": 94.4,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__propose_edit"
+      ],
+      "error": null,
+      "answer": "The paragraph has been successfully added to your article, summarising the key details of the contracts held by M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. Let me know if you'd like to refine or expand this content further.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P09",
+      "latency_s": 30.4,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "Fontem ne d\u00e9tient pas de donn\u00e9es sur les entreprises russes d\u00e9tenant des contrats publics dans l'UE. Les r\u00e9sultats de la recherche indiquent des entit\u00e9s li\u00e9es \u00e0 des ETF (fonds d'investissement) li\u00e9s \u00e0 la Russie, mais ces entit\u00e9s sont bas\u00e9es en Luxembourg et ne sont pas directement li\u00e9es \u00e0 des contrats publics dans l'UE. Pour obtenir des informations plus pr\u00e9cises sur les entreprises russes et leurs contrats publics, il faudrait explorer davantage les donn\u00e9es de Fontem ou consulter des sources externes. Voulez-vous explorer davantage les donn\u00e9es li\u00e9es \u00e0 ces ETF ?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "language": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P10",
+      "latency_s": 16.4,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "There are no Israeli-domiciled companies in the data held by Fontem. The search returned an Israeli-acquisitions-corp based in the USA. If you are interested in Israeli companies, you may need to refine your search or consider other sources. Would you like to explore companies from a different country?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "partial_abstention: no stated limit"
+          ]
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P11",
+      "latency_s": 16.3,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "The Atlas is now open. Here, you can explore geographic visualizations and regional statistics based on the data available in Fontem. Use the interactive map to drill down into specific regions, view aggregated data, and compare metrics across different areas. Let me know if you'd like to explore a particular region or dataset!",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P12",
+      "latency_s": 12.0,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "You can write up your analysis on the \"Edit your data story\" page. Navigate to `/stories/:id/edit` (auth) to edit one of your data stories. If you haven't created a story yet, you can start by exploring datasets on the `/explore` page and then create a new story from there. Would you like to go to the data exploration hub first?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "navigated: never offered a destination"
+          ]
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P13",
+      "latency_s": 7.2,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "I don't have access to a page that specifically shows quarterly staff turnover by department. However, you can explore this data through the data exploration hub at `/explore`. If you need further assistance, let me know!",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P14",
+      "latency_s": 22.8,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "The Fontem platform offers a variety of tools and data sources to explore and analyze public data. Here's a quick tour of what you can do:\n\n1. **Home Feed** - Browse published data stories and insights.\n2. **Atlas** - View data geographically by region.\n3. **Data Exploration Hub** - Access and explore datasets directly.\n4. **Geographic Data Browser** - Dive into geographic data for deeper analysis.\n5. **Data Quality Dashboards** - Check the quality and coverage of the data.\n6. **Help and FAQ** - Learn how to connect your own AI assistant to Fontem.\n7. **Account Settings** - Manage your profile and preferences if you're signed in.\n\nWould you like to explore any of these areas in more detail?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    }
+  ]
+}
