@@ -114,12 +114,6 @@ class InMemoryFeedRepository(FeedRepository):
                 return deepcopy(watch)
         return None
 
-    async def find_watch(self, user_id: str, group_id: str) -> Watch | None:
-        for watch in self._watches.values():
-            if watch.user_id == user_id and watch.group_id == group_id:
-                return deepcopy(watch)
-        return None
-
     async def list_watches(self, user_id: str) -> list[Watch]:
         out = [deepcopy(w) for w in self._watches.values() if w.user_id == user_id]
         return sorted(out, key=lambda w: w.created_at or datetime.min.replace(

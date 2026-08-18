@@ -98,55 +98,94 @@ def test_an_unknown_briefing_is_404(client, briefing):
 
 # ── watching ────────────────────────────────────────────────────
 def test_watching_requires_a_session(client, briefing):
-    assert client.put("/briefings/public-investment/watch", json={}).status_code in (401, 403)
+    assert client.post("/briefings/public-investment/watches",
+                       json={}).status_code in (401, 403)
 
 
 def test_watching_returns_a_feed_url(client, briefing):
-    resp = client.put("/briefings/public-investment/watch",
-                      json={"nuts": ["PT"], "volume_per_week": 5},
-                      headers=make_headers(MEMBER))
-    assert resp.status_code == 200
+    resp = client.post("/briefings/public-investment/watches",
+                       json={"nuts": ["PT"], "volume_per_week": 5},
+                       headers=make_headers(MEMBER))
+    assert resp.status_code == 201
     body = resp.json()
     assert body["nuts"] == ["PT"]
     assert body["volume_per_week"] == 5
     assert body["feed_url"].endswith(".atom")
 
 
-def test_watching_twice_adjusts_rather_than_minting_a_second_feed(client, briefing):
-    """Two feed URLs for one briefing is not a thing anyone wants."""
-    first = client.put("/briefings/public-investment/watch", json={"nuts": ["PT"]},
-                       headers=make_headers(MEMBER)).json()
-    second = client.put("/briefings/public-investment/watch",
-                        json={"nuts": ["ES"], "volume_per_week": 3},
+def test_one_briefing_can_be_watched_at_several_scopes(client, briefing):
+    """The case an earlier model made impossible: fifty a week from Coimbra,
+    ten from Portugal, ten from the whole EU — one briefing, three
+    subscriptions, because a local award and a European one are different
+    kinds of news to the same reader."""
+    made = []
+    for nuts, volume in (['PT16'], 50), (['PT'], 10), (['EU'], 10):
+        r = client.post("/briefings/public-investment/watches",
+                        json={"nuts": nuts, "volume_per_week": volume},
+                        headers=make_headers(MEMBER))
+        assert r.status_code == 201, r.text
+        made.append(r.json())
+
+    assert len({w["id"] for w in made}) == 3
+    # Three independent subscriptions means three feed URLs.
+    assert len({w["feed_url"] for w in made}) == 3
+    assert len(client.get("/me/watches", headers=make_headers(MEMBER)).json()) == 3
+
+
+def test_an_exact_duplicate_is_a_double_click_not_a_second_feed(client, briefing):
+    first = client.post("/briefings/public-investment/watches",
+                        json={"nuts": ["PT"], "volume_per_week": 10},
                         headers=make_headers(MEMBER)).json()
-    assert second["id"] == first["id"]
-    assert second["feed_url"] == first["feed_url"]
-    assert second["nuts"] == ["ES"]
+    again = client.post("/briefings/public-investment/watches",
+                        json={"nuts": ["PT"], "volume_per_week": 10},
+                        headers=make_headers(MEMBER)).json()
+    assert again["id"] == first["id"]
     assert len(client.get("/me/watches", headers=make_headers(MEMBER)).json()) == 1
 
 
+def test_a_watch_is_adjusted_by_id_and_keeps_its_feed_url(client, briefing):
+    """Someone's reader is already polling that URL; changing the scope of a
+    feed is not a reason to break it."""
+    watch = client.post("/briefings/public-investment/watches",
+                        json={"nuts": ["PT"], "volume_per_week": 10},
+                        headers=make_headers(MEMBER)).json()
+    resp = client.patch(f"/me/watches/{watch['id']}",
+                        json={"volume_per_week": 25}, headers=make_headers(MEMBER))
+    assert resp.status_code == 200
+    assert resp.json()["volume_per_week"] == 25
+    assert resp.json()["nuts"] == ["PT"]        # untouched
+    assert resp.json()["feed_url"] == watch["feed_url"]
+
+
+def test_adjusting_someone_elses_watch_is_refused(client, briefing):
+    watch = client.post("/briefings/public-investment/watches", json={},
+                        headers=make_headers(MEMBER)).json()
+    assert client.patch(f"/me/watches/{watch['id']}", json={"volume_per_week": 3},
+                        headers=make_headers(OTHER)).status_code == 403
+
+
 def test_everywhere_subsumes_any_other_selection(client, briefing):
-    body = client.put("/briefings/public-investment/watch",
-                      json={"nuts": ["EU", "PT"]}, headers=make_headers(MEMBER)).json()
+    body = client.post("/briefings/public-investment/watches",
+                       json={"nuts": ["EU", "PT"]}, headers=make_headers(MEMBER)).json()
     assert body["nuts"] == ["EU"]
 
 
 def test_a_nonsense_region_is_rejected(client, briefing):
-    resp = client.put("/briefings/public-investment/watch",
-                      json={"nuts": ["'; DROP TABLE"]}, headers=make_headers(MEMBER))
+    resp = client.post("/briefings/public-investment/watches",
+                       json={"nuts": ["'; DROP TABLE"]}, headers=make_headers(MEMBER))
     assert resp.status_code == 400
 
 
 def test_volume_is_bounded(client, briefing):
     for volume in (0, 5000):
-        resp = client.put("/briefings/public-investment/watch",
-                          json={"volume_per_week": volume}, headers=make_headers(MEMBER))
+        resp = client.post("/briefings/public-investment/watches",
+                           json={"volume_per_week": volume}, headers=make_headers(MEMBER))
         assert resp.status_code == 422, volume
 
 
 def test_a_watch_belongs_to_its_owner(client, briefing):
-    watch = client.put("/briefings/public-investment/watch", json={},
-                       headers=make_headers(MEMBER)).json()
+    watch = client.post("/briefings/public-investment/watches", json={},
+                        headers=make_headers(MEMBER)).json()
     assert client.delete(f"/me/watches/{watch['id']}",
                          headers=make_headers(OTHER)).status_code == 403
     assert client.delete(f"/me/watches/{watch['id']}",
@@ -159,8 +198,8 @@ def _feed_url(client, nuts=None, volume=None):
     body = {"nuts": nuts or ["EU"]}
     if volume:
         body["volume_per_week"] = volume
-    watch = client.put("/briefings/public-investment/watch", json=body,
-                       headers=make_headers(MEMBER)).json()
+    watch = client.post("/briefings/public-investment/watches", json=body,
+                        headers=make_headers(MEMBER)).json()
     return "/capi".join(watch["feed_url"].split("/capi")[1:]) or watch["feed_url"]
 
 
@@ -221,6 +260,45 @@ def test_a_briefing_exposes_the_id_a_watch_refers_to(client, briefing):
     """A watch names a group_id. Without the id here, a client holding both
     lists cannot say which briefing it watches without a round trip each."""
     listed = client.get("/briefings").json()[0]
-    watch = client.put("/briefings/public-investment/watch", json={},
-                       headers=make_headers(MEMBER)).json()
+    watch = client.post("/briefings/public-investment/watches", json={},
+                        headers=make_headers(MEMBER)).json()
     assert listed["id"] == watch["group_id"]
+
+
+def test_overlapping_watches_each_get_their_own_scope(client, briefing):
+    """Coimbra and Portugal overlap, and that is fine: each feed answers its
+    own question. Collapsing them was the bug."""
+    coimbra = client.post("/briefings/public-investment/watches",
+                          json={"nuts": ["PT16"], "volume_per_week": 50},
+                          headers=make_headers(MEMBER)).json()
+    portugal = client.post("/briefings/public-investment/watches",
+                           json={"nuts": ["PT"], "volume_per_week": 10},
+                           headers=make_headers(MEMBER)).json()
+
+    def feed_titles(watch):
+        token = watch["feed_url"].rsplit("/", 1)[-1].removesuffix(".atom")
+        body = client.get(f"/feeds/{token}.atom").text
+        return [line for line in body.splitlines() if "<title>" in line]
+
+    # The Coimbra feed sees the Coimbra item; the Portugal feed sees both.
+    assert any("Coimbra" in t for t in feed_titles(coimbra))
+    assert not any("Lisbon" in t for t in feed_titles(coimbra))
+    portugal_titles = feed_titles(portugal)
+    assert any("Coimbra" in t for t in portugal_titles)
+    assert any("Lisbon" in t for t in portugal_titles)
+
+
+def test_a_reader_cannot_hoard_watches_without_limit(client, briefing, services):
+    """Each watch is a query against the items table on every page load."""
+    from src.services.briefing_service import MAX_WATCHES  # pylint: disable=import-outside-toplevel
+    from src.domain.feed import Watch  # pylint: disable=import-outside-toplevel
+    feed = services["feed_repo"]
+    user = _run(seed_user(services["user_repo"], "hoarder", trust_level="contributor"))
+    for i in range(MAX_WATCHES):
+        _run(feed.create_watch(Watch(user_id=user.id, group_id="g", nuts=[f"X{i}"],
+                                     volume_per_week=1, token=f"t{i}")))
+    resp = client.post("/briefings/public-investment/watches",
+                       json={"nuts": ["FR"], "volume_per_week": 3},
+                       headers=make_headers("hoarder"))
+    assert resp.status_code == 400
+    assert str(MAX_WATCHES) in resp.json()["detail"]

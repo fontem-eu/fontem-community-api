@@ -33,6 +33,11 @@ FEED_WEEKS = 4
 _MAX_REGION_LEN = 5
 _MAX_REGIONS = 40
 
+# Watches are cheap but not free: each one is a query against the items table
+# every time the reading page loads. A ceiling stops a script turning one
+# account into a load generator, and nobody legitimately follows 60 things.
+MAX_WATCHES = 60
+
 
 class BriefingService:
     def __init__(self, catalogue: NamedQueryRepository, feed: FeedRepository) -> None:
@@ -99,21 +104,33 @@ class BriefingService:
 
     async def watch(self, user_id: str, slug: str, nuts: list[str] | None = None,
                     volume: int | None = None) -> Watch:
-        """Start watching, or adjust an existing watch.
+        """Add a watch on a briefing.
 
-        Idempotent by (user, briefing): watching something already watched
-        updates the regions and volume rather than minting a second feed URL,
-        because two feeds for one briefing is not a thing anyone wants.
+        NOT idempotent by briefing, deliberately. A reader wanting fifty
+        items a week from Coimbra, ten from Portugal and ten from the whole
+        EU is asking for three watches on one briefing, and an earlier version
+        of this collapsed them into one — silently overwriting the previous
+        answer each time. Each watch is now an independent subscription with
+        its own feed URL.
+
+        The guard against genuine accidents is narrower: an exact duplicate —
+        same briefing, same regions, same volume — returns the existing watch
+        instead of minting a second identical feed, because that is a
+        double-click, not an intention.
         """
         group = await self.get_briefing(slug)
         regions = self._clean_regions(nuts)
         per_week = self._clean_volume(volume)
 
-        existing = await self._feed.find_watch(user_id, group.id)
-        if existing is not None:
-            existing.nuts = regions
-            existing.volume_per_week = per_week
-            return await self._feed.update_watch(existing)
+        for existing in await self._feed.list_watches(user_id):
+            if (existing.group_id == group.id
+                    and existing.nuts == regions
+                    and existing.volume_per_week == per_week):
+                return existing
+
+        if len(await self._feed.list_watches(user_id)) >= MAX_WATCHES:
+            raise InvalidInput(
+                f"You can hold {MAX_WATCHES} watches at once. Remove one first.")
 
         return await self._feed.create_watch(Watch(
             user_id=user_id, group_id=group.id, nuts=regions,
@@ -123,6 +140,28 @@ class BriefingService:
             # nothing else — no user id, no briefing slug.
             token=secrets.token_urlsafe(32),
         ))
+
+    async def adjust_watch(self, user_id: str, watch_id: str,
+                           nuts: list[str] | None = None,
+                           volume: int | None = None) -> Watch:
+        """Change one watch's regions or volume, by id.
+
+        By id rather than by briefing, because "the watch on Public
+        investment" is no longer a thing that identifies anything.
+        """
+        watch = await self._feed.get_watch(watch_id)
+        if watch is None:
+            raise NotFound(f"Watch {watch_id} not found")
+        if watch.user_id != user_id:
+            raise PermissionDenied("That watch belongs to someone else")
+        if nuts is not None:
+            watch.nuts = self._clean_regions(nuts)
+        if volume is not None:
+            watch.volume_per_week = self._clean_volume(volume)
+        # The token is deliberately untouched: someone's reader is already
+        # polling that URL, and changing the scope of a feed is not a reason
+        # to break it.
+        return await self._feed.update_watch(watch)
 
     async def list_watches(self, user_id: str) -> list[Watch]:
         return await self._feed.list_watches(user_id)

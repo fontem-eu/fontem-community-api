@@ -55,9 +55,6 @@ class FeedRepository(ABC):
     async def get_watch_by_token(self, token: str) -> Watch | None: ...
 
     @abstractmethod
-    async def find_watch(self, user_id: str, group_id: str) -> Watch | None: ...
-
-    @abstractmethod
     async def list_watches(self, user_id: str) -> list[Watch]: ...
 
     @abstractmethod

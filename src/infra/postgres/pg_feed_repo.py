@@ -180,12 +180,6 @@ class PgFeedRepository(FeedRepository):
         row = (await self._session.execute(stmt)).scalar_one_or_none()
         return self._watch_to_domain(row) if row else None
 
-    async def find_watch(self, user_id: str, group_id: str) -> Watch | None:
-        stmt = select(WatchModel).where(
-            WatchModel.user_id == user_id, WatchModel.group_id == group_id)
-        row = (await self._session.execute(stmt)).scalar_one_or_none()
-        return self._watch_to_domain(row) if row else None
-
     async def list_watches(self, user_id: str) -> list[Watch]:
         stmt = (select(WatchModel).where(WatchModel.user_id == user_id)
                 .order_by(WatchModel.created_at.desc()))
