@@ -129,3 +129,26 @@ def test_anonymous_visitors_stay_on_the_smallest_local_model(with_key):  # pylin
     assert anon.hosted is False
     r, _ = route(local_models.ANONYMOUS_MODEL_ID)
     assert r.local is True and r.api_key == ""
+
+
+# --- the anonymous guard ----------------------------------------------------
+
+def test_anonymous_model_id_is_the_local_1_7b(with_key):  # pylint: disable=unused-argument
+    assert local_models.anonymous_model_id() == "qwen3-1.7b"
+    assert local_models.resolve("qwen3-1.7b").hosted is False
+
+
+def test_anonymous_refuses_a_hosted_constant(monkeypatch, with_key):  # pylint: disable=unused-argument
+    """If ANONYMOUS_MODEL_ID is ever pointed at a model the platform pays for,
+    the accessor must not honour it. Anonymous turns carry no account and no
+    metering, so a hosted model there is an open tab for anyone who can reach
+    the endpoint."""
+    monkeypatch.setattr(local_models, "ANONYMOUS_MODEL_ID", "gpt-oss-120b")
+    got = local_models.anonymous_model_id()
+    assert got == "qwen3-1.7b"
+    assert local_models.resolve(got).hosted is False
+
+
+def test_anonymous_survives_a_constant_naming_nothing(monkeypatch, with_key):  # pylint: disable=unused-argument
+    monkeypatch.setattr(local_models, "ANONYMOUS_MODEL_ID", "retired-model")
+    assert local_models.resolve(local_models.anonymous_model_id()).hosted is False

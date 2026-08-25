@@ -133,6 +133,26 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
 _BY_ID = {m.id: m for m in LOCAL_MODELS}
 
 
+def anonymous_model_id() -> str:
+    """The model a signed-out visitor gets. Always a local one.
+
+    ANONYMOUS_MODEL_ID is a constant someone can edit, and the constant alone
+    is a thin guard for what it protects: anonymous turns carry no account, no
+    metering and no per-user budget, so a hosted model here would let an
+    unauthenticated caller spend platform money at whatever rate they can
+    issue requests.
+
+    So this does not trust the constant. If it ever names a hosted model — or
+    one that no longer exists — the fallback is the first local entry, which
+    the ordering makes the smallest. A test pins the constant itself; this is
+    what happens if that test is ever deleted along with the mistake.
+    """
+    model = _BY_ID.get(ANONYMOUS_MODEL_ID)
+    if model is not None and not model.hosted:
+        return model.id
+    return next(m.id for m in LOCAL_MODELS if not m.hosted)
+
+
 def resolve(model_id: str | None) -> LocalModel:
     """Map a stored or requested id to a model, falling back to the default.
 
