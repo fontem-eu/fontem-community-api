@@ -130,6 +130,36 @@ python evals/runner.py \
 `--base-url` has `/v1/chat/completions` appended to it, so pass the host and
 prefix only — for an endpoint documented as `.../api/v1`, pass `.../api`.
 
+### Nebius AI Studio
+
+Key lives in Vault at `secret/fontem-shared/nebius` and syncs into
+`fontem-staging` as the `nebius-api` Secret (see `gitops/infra/staging.yaml`).
+Run from a pod so the key never leaves the cluster:
+
+```
+python evals/run_in_cluster.py \
+  --image <the community-api image> \
+  --secret-env NEBIUS:nebius-api:NEBIUS_API_KEY \
+  eval-nebius -- \
+  --base-url https://api.studio.nebius.com \
+  --models <model-id> \
+  --gmr-api http://fontem-api.fontem-staging.svc.cluster.local \
+  --max-rounds 12 --max-tokens 4000 --out - --api-key @@KEY@@
+```
+
+Note the base URL: Nebius documents `https://api.studio.nebius.com/v1`, and the
+runner appends `/v1/chat/completions`, so the `/v1` is left off here.
+
+`GET /v1/models` lists what is actually served — 30 models, not the thousands
+the marketplace advertises — and returns ids only: no context length, no
+pricing. Both have to come from the pricing page.
+
+**Reasoning models need `--max-tokens` raised**, and are worth measuring with
+and without reasoning: on the last hosted model tried, switching reasoning off
+cost 12 points of grounding and a third of navigation while saving no
+wall-clock, because the model spent the saved tokens on extra rounds. See
+`results/2026-08-18-hetzner-service-notes.md`.
+
 `--api-key` is optional and sends a bearer token; llama-server wants none.
 It is never printed, including under `--trace`. Read it from the environment
 rather than pasting it into a shell that keeps history.
