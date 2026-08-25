@@ -5,6 +5,7 @@ stored preference has to survive us re-quantising or renaming the weights,
 and the id travels from a browser, so "serve whatever the caller names"
 would let anyone load an arbitrary file out of the model directory.
 """
+from src.assistant import local_models
 from src.assistant.local_models import (
     DEFAULT_MODEL_ID,
     LOCAL_MODELS,
@@ -79,19 +80,36 @@ def test_a_path_traversal_id_cannot_reach_the_server():
 
 def test_the_offered_list_carries_a_speed_so_faster_is_a_number():
     offered = as_dicts()
-    assert [m["id"] for m in offered] == [m.id for m in LOCAL_MODELS]
+    # Against `offered()`, not LOCAL_MODELS: a hosted model with no key
+    # configured is deliberately absent from what the picker shows, and this
+    # test suite runs without one.
+    assert [m["id"] for m in offered] == [m.id for m in local_models.offered()]
     assert all(m["tokens_per_second"] > 0 for m in offered)
 
 
 def test_the_list_is_ordered_fastest_first():
-    rates = [m.tokens_per_second for m in LOCAL_MODELS]
-    assert rates == sorted(rates, reverse=True)
+    """Fastest-first within each class, local models before hosted ones.
+
+    They are not one list ranked by speed: a local rate is measured on our
+    hardware, a hosted rate is the provider's under load we do not control and
+    costs money per token. Ranking them together would put a paid remote call
+    above a free local one on a number that means different things in each
+    half.
+    """
+    local = [m.tokens_per_second for m in LOCAL_MODELS if not m.hosted]
+    hosted = [m.tokens_per_second for m in LOCAL_MODELS if m.hosted]
+    assert local == sorted(local, reverse=True)
+    assert hosted == sorted(hosted, reverse=True)
+    # and every local model comes before every hosted one
+    kinds = [m.hosted for m in LOCAL_MODELS]
+    assert kinds == sorted(kinds)
 
 
 def test_the_offered_list_carries_nothing_but_the_choice():
     # No filenames, no paths — the browser never learns what is on disk.
     for m in as_dicts():
-        assert set(m) == {"id", "label", "tokens_per_second", "context_tokens", "note"}
+        assert set(m) == {"id", "label", "tokens_per_second", "context_tokens",
+                          "note", "hosted"}
         assert "gguf" not in str(m).lower()
         assert "/models" not in str(m)
 

@@ -375,7 +375,9 @@ class AssistantService:
             # Nothing to propose into, and no account to propose for.
             "has_editor": False,
             "anonymous": True,
-            "local_model_id": local_models.ANONYMOUS_MODEL_ID,
+            # Not the constant directly: the accessor refuses to hand an
+            # anonymous turn a model the platform pays for.
+            "local_model_id": local_models.anonymous_model_id(),
         }
         async for line in self._proxy.stream(payload):
             yield line
