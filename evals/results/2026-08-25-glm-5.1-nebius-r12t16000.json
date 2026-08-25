@@ -1,0 +1,679 @@
+{
+  "meta": {
+    "run_at": "2026-08-25T11:52:24+00:00",
+    "fixture_version": 2,
+    "prompts": 14,
+    "models": [
+      "zai-org/GLM-5.1"
+    ],
+    "endpoint": "https://api.studio.nebius.com",
+    "gmr_api": "http://fontem-api.fontem-staging.svc.cluster.local",
+    "system_prompt": "shipped",
+    "code_sha": "06d8e90",
+    "max_rounds": 12,
+    "max_tokens": 16000,
+    "extra_body": {},
+    "tool_result_char_budget": 8000
+  },
+  "results": [
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P01",
+      "latency_s": 25.6,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "Fontem's data returns **no results** for L\u0151rinc M\u00e9sz\u00e1ros \u2014 I searched several spelling variants (with and without diacritics, Hungarian name order) and also tried just the surname. Nothing came back across companies, persons, authorities, or lobbyists.\n\n**Who he is (from public knowledge, not Fontem):** L\u0151rinc M\u00e9sz\u00e1ros is a Hungarian businessman, often described in the press as a close ally of Prime Minister Viktor Orb\u00e1n. A former gas-fitter from Felcs\u00fat (Orb\u00e1n's home village), his wealth grew dramatically in the 2010s through a web of companies winning large public contracts, particularly in construction and media. He has been a recurring figure in EU and Hungarian investigative reporting on oligarchic capture of public procurement.\n\n**What Fontem has:** Nothing. He does not appear as a person, company owner, lobbyist, or authority in the current dataset. This likely reflects a gap in Fontem's coverage of Hungarian corporate registries or beneficial-owner registers rather than an absence from the real world \u2014 M\u00e9sz\u00e1ros's companies are extensively documented in Hungarian public records and EU procurement databases.\n\nIf you want to dig further, I could search for specific companies k",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": -3.0,
+          "max": 3.0,
+          "pct": -100.0,
+          "notes": [
+            "numeric_claims_supported: 1/1 unsupported: ['2010']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P02",
+      "latency_s": 153.6,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "navigate"
+      ],
+      "error": null,
+      "answer": "The direct link didn't match a known page path. You can find the full contract details \u2014 including procedure type and number of bids \u2014 by searching for \"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros\" on the Fontem platform and opening the company profile, then clicking through to individual contracts.\n\n**Summary of what we know:**\n\n- **~23 contracts** across all spelling variants, with a **naive total of ~\u20ac72.5 million** (likely \u20ac62\u201365M after deduplication).\n- The two biggest single contracts belong to the **Zrt.**: \"\u00c9MO14 szennyv\u00edztiszt. \u00e9s csat. h\u00e1l. fejl. feladata\" and \"Tatab\u00e1nyai ipari-innov\u00e1ci\u00f3s ter\u00fclet fejleszt\u00e9ase\" \u2014 together worth **\u20ac49,355,924.48** (entity `01dfce84`).\n- The **Kft.** holds the next-largest batch: water-system rehabilitation, the Kom\u00e1rom-Kom\u00e1rno Danube bridge, and gas-network works, totalling **\u20ac12,874,355.33** (entity `ef2de5a8`) plus **\u20ac10,236,792.89** (entity `d530c2b7`, likely the same firm).\n- **Competition data** (number of bids, procedure type) is not exposed in the summary view I can access; it's available contract-by-contract on the platform. Many of the contracts are flagged `value_low_confidence: true`, which often correlates with negotiated procedures without prior publ",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 1.8000000000000003,
+          "max": 3.0,
+          "pct": 60.0,
+          "notes": [
+            "numeric_claims_supported: 1/5 unsupported: ['725']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P03",
+      "latency_s": 140.7,
+      "rounds": 6,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Now I have a clear picture. Here's what the data shows:\n\n---\n\n**No direct contract between M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros and M\u00c1V appears in the record.** But there is an indirect railway link worth noting.\n\n### What M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros holds\n\nAcross the four entity variants in the graph, the group has **14 EU procurement contracts** total. The relevant ones are three contracts awarded by **NIF Zrt.** (Nemzeti Infrastrukt\u00fara Fejleszt\u0151 Zrt.), the state-owned national infrastructure developer:\n\n| Entity | Contract | Authority |\n|---|---|---|\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari Kft. (`536e994b`) | Ercsi el\u00e1gaz\u00e1s \u2013 Pusztaszabolcs vas\u00fati p\u00e1lya korszer\u0171s\u00edt\u00e9se (CPV 45234100) | **NIF Zrt.** |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari Kft. (`536e994b`) | Sz\u00e1zhalombatta \u2013 Ercsi el\u00e1gaz\u00e1s vas\u00fati p\u00e1lya korszer\u0171s\u00edt\u00e9se (CPV 45234100) | **NIF Zrt.** |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. (`ef2de5a8`) | Kom\u00e1rom-Kom\u00e1rno Duna-h\u00edd kivitelez\u00e9s (CPV 45221100) | **NIF Zrt.** |\n\nThe first two are explicitly **railway track modernisation** on the Budapest\u2013Pusztaszabolcs line \u2014 infrastructure that is part of M\u00c1V's network.\n\n### What M\u00c1V holds\n\nThe two M\u00c1V authority records (`cbe4f4b5` and `ed94d42e`) show **9 contracts** between them \u2014 for weed",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P04",
+      "latency_s": 122.9,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "The search for \"M\u00e9sz\u00e1ros\" returned **13 company records**, all in Hungary. No additional variants (\"Meszaros\", \"L\u0151rinc M\u00e9sz\u00e1ros\", etc.) produced new hits. Now let me identify likely duplicates among those 13.\n\n### Raw results (13 records)\n\n| # | GMR ID | Name | Notes |\n|---|--------|------|-------|\n| 1 | `c7d633e9` | M\u00e9sz\u00e1ros Vendel | Looks like a person, not a company |\n| 2 | `5dd2da3c` | M\u00c9SZ\u00c1ROS GR\u00c1NIT Kft. | |\n| 3 | `ef2de5a8` | M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. | |\n| 4 | `a61b5df7` | M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt. | |\n| 5 | `38767a59` | M\u00e9sz\u00e1ros M1 Aut\u00f3keresked\u0151 Kft. | |\n| 6 | `536e994b` | M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 **Kft.** | Abbreviated form |\n| 7 | `6cdb7235` | M\u00e9sz\u00e1ros M1 J\u00e1rm\u0171parkkezel\u0151 Zrt. | |\n| 8 | `12bc747a` | \u2026Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. **(M-E 2020 Konzorcium)** | Consortium entry |\n| 9 | `d530c2b7` | \u2026Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 **Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g** | Full form of \"Kft.\" |\n| 10 | `01dfce84` | \u2026Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 **Z\u00e1rtk\u00f6r\u0171en M\u0171k\u00f6d\u0151 R\u00e9szv\u00e9nyt\u00e1rsas\u00e1g** | Full form of \"Zrt.\" |\n| 11 | `c8a077e1` | Telek \u00e9s M\u00e9sz\u00e1ros Szolg\u00e1ltat\u00f3 kft | |\n| 12 | `ada6f2da` | M-E 2020 Konzorcium (Vezet\u0151 tag: M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1r",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P05",
+      "latency_s": 17.9,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "**What Fontem is**\n\nFontem is a European public-data platform. It brings together structured data on companies, public authorities, lobbyists and persons, linked through ownership graphs, procurement contracts and influence relationships. You can use it to:\n\n- **Search** for entities by name, ticker or keyword\n- **Investigate** any entity \u2014 its properties, EU procurement contracts, and its network neighbourhood (shared owners, common suppliers, connected lobbyists)\n- **Trace paths** between two entities that appear unconnected, surfacing the intermediary sitting between them\n- **Browse** an Atlas of the data, individual entity profiles, contract tables, and interactive graph explorers\n\nThe data covers EU procurement, corporate ownership structures, and lobbying registers, with a focus on making connections visible that would be hard to spot manually.\n\n---\n\n**Connecting your own AI client**\n\nThat's a question about Fontem's API or integration setup, and I don't have the details on that in the data I can see. I'd suggest checking Fontem's own documentation or settings pages on the site \u2014 there may be an API key, MCP server endpoint, or integration guide available there. If you tell m",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P06",
+      "latency_s": 5.5,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "That entity ID doesn't match any record in Fontem's database. It's not a company, authority, lobbyist, or person we hold data on \u2014 it simply isn't in the system.\n\nIf you have a company name, ticker, or keyword, I can search for it and find the correct ID. Would you like to try that?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 5.0,
+          "pct": 20.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P07",
+      "latency_s": 9.1,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "That question falls outside Fontem's coverage. Our data tracks EU procurement contracts, corporate ownership networks, lobbyists, and the people linking them \u2014 not criminal law reform or crime statistics.\n\nA question Fontem *can* answer in this neighbourhood: **Which EU authorities awarded contracts to organisations lobbying on justice or victims' rights policy?** \u2014 I could search for those lobbyists and trace their procurement ties if that's useful.\n\nFor the consent-law question, the European Union Agency for Fundamental Rights (FRA) and the European Institute for Crime Prevention and Control (HEUNI) would be the right sources.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P08",
+      "latency_s": 42.1,
+      "rounds": 5,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__propose_edit"
+      ],
+      "error": null,
+      "answer": "I've proposed a paragraph for your article. Here's what it covers, drawn from the data:\n\n- **20 contracts** across five graph entries (legal-form and spelling variants of the same group)\n- **~\u20ac23.1 m** combined value \u2014 though two entries carry \u20ac0 and many individual values are low-confidence\n- **Three main sectors**: water infrastructure (flood protection, sewage, water-system rehab), railway modernisation, and gas-network reconstruction\n- **Key buyers**: NFP (National Development Programme Office), Orsz\u00e1gos V\u00edz\u00fcgyi F\u0151igazgat\u00f3s\u00e1g (National Water Authority), NIF Zrt. (rail), and NKM F\u00f6ldg\u00e1zh\u00e1l\u00f3zati Kft. (gas)\n- The Zrt. variant is an outlier: just two small archaeological earthworks contracts worth \u20ac35,477.40\n\nAccept or reject the card in the panel to add it to your article.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P09",
+      "latency_s": 121.6,
+      "rounds": 12,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Voici ce que les donn\u00e9es Fontem r\u00e9v\u00e8lent. J'ai recherch\u00e9 une vingtaine de grandes entreprises russes dans la base ; voici celles qui d\u00e9tiennent des contrats publics europ\u00e9ens identifi\u00e9s :\n\n---\n\n### \ud83d\udd34 OJSC \u00ab Power Machines \u00bb (RUS) \u2014 ~55 M\u20ac en Lettonie\n\nLe plus gros cas. Deux entr\u00e9es (variantes typographiques) pointent vers la m\u00eame entreprise, constructeur russe d'\u00e9quipements hydro\u00e9lectriques :\n\n| Contrat | Acheteur | Valeur |\n|---|---|---|\n| Rekonstrukcija de P\u013cavi\u0146u HES (unit\u00e9s 1 et 3) | AS \u00ab Latvenergo \u00bb (LVA) | 24 141 817,03 \u20ac |\n| Rekonstrukcija de \u0136eguma HES-2 | AS \u00ab Latvenergo \u00bb (LVA) | 30 862 249,55 \u20ac |\n\n**Total calcul\u00e9 : ~55 M\u20ac** \u2014 deux contrats d'infrastructure critique (barrages hydro\u00e9lectriques) confi\u00e9s \u00e0 une entreprise russe par le principal \u00e9nerg\u00e9tique letton. C'est de loin le poste le plus important.\n\n---\n\n### \ud83d\udfe0 Lukoil \u2014 filiales roumaines, ~662 k\u20ac\n\nLe groupe PJSC LUKOIL (19 filiales dans le graphe) n'a pas de contrats en propre, mais deux filiales roumaines oui :\n\n- **Lukoil Rom\u00e2nia** (ROU) \u2014 1 contrat de 573 345,64 \u20ac : accord-cadre de fourniture de carburant (essence sans plomb, diesel) au CNCIR (autorit\u00e9 roumaine de contr\u00f4le des chaudi\u00e8res/pression).\n- **LUKOIL LUBRI",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 2.25,
+          "max": 3.0,
+          "pct": 75.0,
+          "notes": [
+            "numeric_claims_supported: 1/8 unsupported: ['662']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "language": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P10",
+      "latency_s": 83.8,
+      "rounds": 12,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": "did not converge in 12 rounds",
+      "answer": "",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "produced_answer: error: did not converge in 12 rounds"
+          ]
+        },
+        "honesty": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "partial_abstention: no stated limit"
+          ]
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P11",
+      "latency_s": 6.1,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "You're now on the **Atlas** \u2014 Fontem's geographic view of the data, broken down by region. That's where you'll find maps and regional statistics.\n\nIf you need a more detailed geographic data browser, there's also the **Geographic data browser** at `/geo`, which offers a different lens on the same kind of data.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P12",
+      "latency_s": 11.7,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "I've opened the Help & FAQ page for you. It should explain how to kick off a new data story. If it turns out there's no clear path there either, let me know and I can dig deeper.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P13",
+      "latency_s": 8.5,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "No page on Fontem matches that description. The site doesn't have a dedicated view for quarterly staff turnover by department \u2014 none of the existing pages cover HR or workforce analytics.\n\nThe closest places to look would be:\n\n- **`/explore`** \u2014 the data exploration hub, in case a dataset on staff turnover exists somewhere in the catalog.\n- **`/data-quality`** \u2014 coverage reports, which might indicate whether workforce data is tracked at all.\n\nWould you like me to open either of those, or is there something else I can help you find?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        },
+        "navigation": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.1",
+      "prompt": "P14",
+      "latency_s": 14.8,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Here's what Fontem offers \u2014 a quick tour of the site:\n\n---\n\n### \ud83c\udfe0 **Home Feed** (`/`)\nYou're here right now. This is where published data stories appear \u2014 investigative pieces built from the platform's data.\n\n### \ud83d\uddfa\ufe0f **Atlas** (`/map`)\nA geographic view of the data. Browse by region to see what's happening where \u2014 contracts, companies, and connections laid out on a map.\n\n### \ud83d\udd0d **Explore** (`/explore`)\nThe data exploration hub and your entry point to the datasets. This is where you start digging \u2014 search for companies, authorities, lobbyists, persons, or procurement contracts and follow the threads.\n\n### \ud83c\udf0d **Geographic Browser** (`/geo`)\nA more structured geographic data browser for drilling into regional breakdowns.\n\n### \ud83d\udcca **Data Quality** (`/data-quality`)\nDashboards and coverage reports so you can see how complete and reliable the underlying data is \u2014 important context before drawing conclusions.\n\n### \u270d\ufe0f **Story Editor** (`/stories/:id/edit`) *(sign-in required)*\nWrite and edit your own data stories. This is where you turn findings into publishable pieces.\n\n### \u2699\ufe0f **Account** (`/account`) *(sign-in required)*\nManage your profile, display preferences, and LLM provider keys (so you ",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    }
+  ]
+}

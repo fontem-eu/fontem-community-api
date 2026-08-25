@@ -1,0 +1,562 @@
+{
+  "meta": {
+    "run_at": "2026-08-25T09:10:20+00:00",
+    "fixture_version": 2,
+    "prompts": 14,
+    "models": [
+      "openai/gpt-oss-120b"
+    ],
+    "endpoint": "https://api.studio.nebius.com",
+    "gmr_api": "http://fontem-api.fontem-staging.svc.cluster.local",
+    "system_prompt": "shipped",
+    "code_sha": "06d8e90",
+    "max_rounds": 12,
+    "max_tokens": 4000,
+    "extra_body": {},
+    "tool_result_char_budget": 8000
+  },
+  "results": [
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P01",
+      "latency_s": 6.6,
+      "rounds": 5,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "**Finding**\n\n- Fontem does **not** have a person\u2011level entry for **L\u0151rinc\u202fM\u00e9sz\u00e1ros**. A search for \u201cL\u0151rinc\u202fM\u00e9sz\u00e1ros\u201d, \u201cLorinc\u202fMeszaros\u201d and for the surname alone returns only companies and authorities that contain the word *M\u00e9sz\u00e1ros* or *L\u0151rinc* \u2013 none of them are classified as a\u202f*person* in the graph.  \n\n**What the platform holds**\n\n| Entity type | Example matches (no person) | GMR\u202fID | Note |\n|-------------|----------------------------|--------|------|\n| Companies   | M\u00e9sz\u00e1ros Vendel, M\u00c9SZ\u00c1ROS\u202fGR\u00c1NIT\u202fKft., M\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros\u202fKft., \u2026 | e.g. `c7d633e9-660b-5b44-8675-c84c0d39e608` | All are corporate entities that happen to contain the surname \u201cM\u00e9sz\u00e1ros\u201d. |\n| Authorities | L\u0151rinci V\u00e1rosi \u00d6nkorm\u00e1nyzat, Budapest\u202fF\u0151v\u00e1ros\u202fXVIII.\u202fker\u00fclet\u202fPestszentl\u0151rinc\u2011Pestszentimre\u202f\u00d6nkorm\u00e1nyzata | `dde3541b-4595-5860-9759-51fde35fed85` | Municipal bodies that include \u201cL\u0151rinc\u201d in their name. |\n| Persons     | **none** | \u2013 | No person record matches the query. |\n\n**What this means**\n\n- Because there is no person node, Fontem cannot show any EU procurement contracts, ownership links, or lobbying activity *directly* tied to L\u0151rinc\u202fM\u00e9sz\u00e1ros.\n- If you are interested in companies that are known to be part o",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P02",
+      "latency_s": 9.9,
+      "rounds": 7,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "**What the data show**\n\n| Entity (as listed in Fontem) | EU\u2011procurement contracts | Total value (EUR) |\n|---|---|---|\n| M\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros\u202fKft. | 4 contracts | **12\u202f874\u202f355.33\u202f\u20ac** (entity\u202f`ef2de5a8\u20116b5c\u20115f0b\u20119cc4\u201104313d4ce520`) |\n| M\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros\u202fZrt. | 2 contracts | **35\u202f477.40\u202f\u20ac** (entity\u202f`a61b5df7\u2011826a\u20115600\u2011ace8\u20110efb82356914`) |\n| M\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros\u202fIpari,\u202fKereskedelmi\u202f\u00e9s\u202fSzolg\u00e1ltat\u00f3\u202fKft. | 6 contracts | **0\u202f\u20ac** (no contract values recorded; entity\u202f`536e994b\u201163d4\u20115354\u2011a4de\u20111bcd38457653`) |\n\n**Combined total** \u2013\u202f12\u202f909\u202f832.73\u202f\u20ac across the three entities that carry the \u201cM\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros\u201d name.\n\n**Competition information**\n\nThe contract records returned by Fontem contain fields such as title, CPV code, awarding authority and a \u201cvalue_low_confidence\u201d flag, but they do **not include a field that indicates whether the award resulted from a competitive procurement procedure**. Consequently, we cannot determine from the current dataset how much of the \u20ac12.9\u202fmillion was awarded competitively.\n\n**What would refute this finding?**  \nIf a deeper\u2011level query (e.g., requesting contract\u2011level details beyond the summary fields) exposed a \u201cprocedure_type\u201d or similar attribute, we c",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 1.0000000000000004,
+          "max": 3.0,
+          "pct": 33.3,
+          "notes": [
+            "numeric_claims_supported: 5/15 unsupported: ['35533', '47740', '909', '83273']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P03",
+      "latency_s": 9.6,
+      "rounds": 8,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "**Finding:**\u202fIn the current Fontem data there is **no recorded link** between any\u202f*M\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros*\u202fentity and the Hungarian state railway\u202f(M\u00c1V\u202fMagyar\u202f\u00c1llamvasutak\u202fZrt.).\n\n**What we checked**\n\n| Entity | Fontem ID | Contracts in the graph |\n|--------|-----------|------------------------|\n|\u202fM\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros\u202fKft. | `ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520` | 4 contracts (authorities: Orsz\u00e1gos\u202fV\u00edz\u00fcgyi\u202fF\u0151igazgat\u00f3s\u00e1g, NKM\u202fF\u00f6ldg\u00e1z\u2011Kft., NIF\u202fZrt.) |\n|\u202fM\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros\u202fZrt. | `a61b5df7-826a-5600-ace8-0efb82356914` | 2 contracts (authority: Magyar\u202fNemzeti\u202fM\u00fazeum\u202fK\u00f6zgy\u0171jtem\u00e9nyi\u202fK\u00f6zpont) |\n|\u202fM\u00c1V\u202fMagyar\u202f\u00c1llamvasutak\u202fZrt. | `ed94d42e-7079-5253-9962-e7efbfcbf91f` | 7 contracts (contractors: Multiszolg\u202f97\u202fH\u00eddm\u00e9rleg\u202fKft., Bodrogi\u202fBau\u202fKft., Holdesco\u202fIngatlanhasznos\u00edt\u00f3\u202fKft., Novum\u202fGuard\u202fKft., Airport\u202fService\u202fBudapest\u202fKft., PREV\u2011INFO\u202fKft., MVM\u202fPartner\u202fEnergiakereskedelmi\u202fZrt., etc.) |\n\n* None of the contractors listed for M\u00c1V match the\u202f*M\u00e9sz\u00e1ros\u202f\u00e9s\u202fM\u00e9sz\u00e1ros*\u202fIDs.  \n* The\u202f*M\u00e9sz\u00e1ros*\u202fcompanies have no shared directors, owners or group affiliation with M\u00c1V in the graph.  \n* A direct\u2011path query between the two entities returned an internal error, but the contract\u2011level inspection already shows ",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P04",
+      "latency_s": 3.0,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "produced_answer: 2 tool call(s), no final answer"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P05",
+      "latency_s": 4.3,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "**What Fontem is**\n\nFontem is a European public\u2011data platform that aggregates, curates and makes searchable a wide range of EU\u2011level information \u2013\u202fincluding procurement contracts, corporate registries, lobbyist disclosures, public\u2011sector entities and their relationships. All data is stored in a graph database, so you can explore direct links (e.g. a company that won a contract) as well as multi\u2011hop connections (e.g. a parent\u2011company that indirectly controls a supplier). The platform is built for investigative reporting, academic research and any kind of data\u2011driven analysis of public\u2011sector activity across the EU.\n\n**Connecting your own AI client**\n\nFontem exposes a public API that lets external applications (including AI agents) query the graph, retrieve entity profiles, run contract searches and even ask for shortest\u2011path analyses. To hook up your own client you need to:\n\n1. **Obtain an API key** \u2013\u202fregister on the Fontem developer portal (\u202f`https://fontem.eu/developers`\u202f). After confirming your email you\u2019ll receive a token that must be sent in the `Authorization: Bearer <your\u2011key>` header with every request.\n\n2. **Choose the endpoint** \u2013\u202fthe base URL for the API is `https://api.f",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P06",
+      "latency_s": 0.9,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "I\u2019m sorry \u2013 the identifier **E8D4C4E5\u20113F7D\u20114F3E\u2011B2C1\u20111234567890AB** does not match any entity in Fontem\u2019s current database. If you have a company name, ticker, or a different identifier you can share, I can look it up for you.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 5.0,
+          "pct": 20.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P07",
+      "latency_s": 3.9,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "**What Fontem holds**\n\nFontem\u2019s data set is focused on public\u2011sector procurement\u202f\u2014\u202fcontracts, bidders, buyers, and related corporate entities across the EU. It does not include legislative histories, criminal\u2011law reforms, or crime\u2011statistics such as recorded rape rates.\n\n**Answer to your question**\n\nBecause the platform does not store information on:\n\n* when (or whether) an EU member state changed its definition of rape to a consent\u2011based model, and  \n* the subsequent trends in recorded rape offences,\n\nwe cannot tell you which EU countries have moved to consent\u2011based rape laws, nor whether their recorded rape rates rose after those reforms.\n\n**What you could do next**\n\nIf you need this kind of information, you might look at:\n\n* National legislation databases or the European Institute for Gender Equality (EIGE), which tracks legal reforms on sexual violence.  \n* Eurostat or national statistical offices for yearly recorded rape statistics, which can be compared before and after a law change.\n\nShould you have a question that can be answered with procurement data\u2014e.g., \u201cWhich companies have won contracts for gender\u2011based violence prevention programmes in the EU?\u201d\u2014I can retrieve that di",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P08",
+      "latency_s": 3.6,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__propose_edit"
+      ],
+      "error": null,
+      "answer": "M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. appears in four EU procurement contracts worth a combined\u202f\u20ac12,874,355.33. The contracts cover water\u2011system rehabilitation (contract\u202f4258157), water\u2011supply works (contract\u202f4257351), gas\u2011pipeline reconstruction (contract\u202f4250954), and Danube\u2011river works (contract\u202f4250981), all awarded by Hungarian public authorities.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P09",
+      "latency_s": 9.5,
+      "rounds": 11,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "**Aucun\u202fentreprise russe ne figure dans les contrats publics de l\u2019UE enregistr\u00e9s par Fontem.**  \n\n- La recherche des principales soci\u00e9t\u00e9s russes (ex.\u202fPJSC\u202fLUKOIL) montre\u202f0\u202fcontrats\u202fEU\u202f(`contract_count: 0`, `total_contract_value_eur: 0` \u2013\u202fvoir l\u2019enqu\u00eate de l\u2019entit\u00e9\u202f0741fc14\u201155bd\u201158da\u2011b74b\u2011cf4ce2d93381).  \n- D\u2019autres soci\u00e9t\u00e9s russes (Rosneft, Gazprom, etc.) n\u2019apparaissent pas du tout dans la base\u202f: aucune entr\u00e9e ne renvoie de contrat public europ\u00e9en.  \n\n**Conclusion\u202f:** selon les donn\u00e9es actuellement d\u00e9tenues par Fontem, aucune soci\u00e9t\u00e9 enregistr\u00e9e comme \u00e9tant russe ne d\u00e9tient de contrats publics dans l\u2019Union europ\u00e9enne.  \n\n*(Si vous avez besoin de v\u00e9rifier un autre nom d\u2019entreprise ou d\u2019explorer les filiales d\u2019une soci\u00e9t\u00e9 russe pr\u00e9cise, je peux lancer une recherche cibl\u00e9e.)*",
+      "truncated_results": 2,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "language": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P10",
+      "latency_s": 6.1,
+      "rounds": 6,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "**Finding** \u2013\u202fOur current Fontem data contain **no EU public\u2011contract awards to companies that are recorded as being domiciled in Israel**. Because there are no such supplier entries, we cannot calculate a share of \u201cdefence\u2011type\u201d contracts versus \u201ccivilian\u2011type\u201d contracts \u2013 the total amount for both categories is\u202f0\u202fEUR.\n\n**Why this matters**  \n- The platform\u2019s\u202f*search_entities*\u202fendpoint returns companies with a\u202f`country`\u202ffield. A query for \u201cIsrael\u201d (or \u201cIsraeli\u201d) returns only entities whose country is listed as Israel, and none were found.  \n- Consequently, the\u202f*investigate_entity*\u202fand contracts tables have no records where the supplier\u2019s country\u202f=\u202fIsrael, so there are no EU\u2011contract values to classify by CPV (defence vs. civilian).\n\n**What you can do next**  \n- If you have a specific Israeli company in mind (e.g., by name or registration number), let us know and we can look it up directly.  \n- If you\u2019re interested in companies that are *owned* by Israeli entities but listed elsewhere, we could explore ownership links, though those would still need a supplier\u2011country flag to be counted here.  \n\nAt present, the answer is that the data show **0\u202fEUR** of EU public contracts held by Is",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P11",
+      "latency_s": 0.6,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Here\u2019s the Atlas with the interactive maps and regional statistics:\u202f`/map`. I\u2019ll open it for you.  \n\n**Opening the Atlas\u2026**  \n\n(Using `navigate` to go to the page.)",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "navigated: never offered a destination"
+          ]
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P12",
+      "latency_s": 1.8,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "You write your own analysis as a **Data\u202fStory**.  \nOnce you\u2019re signed in, you can edit (or create) a story on the page\u202f`/stories/:id/edit` \u2013 the \u201c:id\u201d part is the unique identifier of the story you\u2019re working on. This is the dedicated editor where you can add text, embed charts, tables, and any other widgets that Fontem provides.  \n\nSo, after logging in, go to a story\u2019s edit URL (e.g.\u202f`/stories/12345/edit`) to start writing your analysis. If you don\u2019t have a story yet, create one from the home feed or the Explore hub, then open its edit page to compose your piece.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "navigated: never offered a destination"
+          ]
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P13",
+      "latency_s": 0.6,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "I\u2019m sorry, but there isn\u2019t a page in Fontem\u2019s current site map that specifically shows quarterly staff turnover by department. If you\u2019d like, I can help you explore the available datasets or see if related information is available elsewhere on the platform. Let me know how you\u2019d like to proceed.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        },
+        "navigation": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "prompt": "P14",
+      "latency_s": 1.6,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "**Quick tour of what you can do on Fontem**\n\n| Area | What you\u2019ll find / can do | How to get there |\n|------|---------------------------|------------------|\n| **Home feed** | Browse the latest published data stories, see highlights of new contracts, investigations, and visualisations. | `/` |\n| **Atlas** | Interactive map that shows EU procurement activity, contracts, and entities by region. Click on a country or city to drill into the underlying data. | `/map` |\n| **Data Explorer** | Search, filter and download the raw datasets (contracts, entities, lobbying registers, etc.). Build custom queries, export CSV/JSON, and visualise trends. | `/explore` |\n| **Geographic browser** | Browse data by geography without the map visualisation \u2013 useful for list\u2011style browsing of regions, countries, and NUTS codes. | `/geo` |\n| **Data\u2011quality dashboards** | Inspect coverage reports, see where the data is complete or missing, and understand the reliability scores of each source. | `/data-quality` |\n| **Help & FAQ** | Get step\u2011by\u2011step guides, API documentation, and instructions on connecting your own AI assistant to Fontem. | `/help` |\n| **Account settings** *(requires sign\u2011in)* | Manage your pro",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,648 @@
+{
+  "meta": {
+    "run_at": "2026-08-25T12:32:25+00:00",
+    "fixture_version": 2,
+    "prompts": 14,
+    "models": [
+      "Qwen/Qwen3.5-397B-A17B"
+    ],
+    "endpoint": "https://api.studio.nebius.com",
+    "gmr_api": "http://fontem-api.fontem-staging.svc.cluster.local",
+    "system_prompt": "shipped",
+    "code_sha": "06d8e90",
+    "max_rounds": 25,
+    "max_tokens": 16000,
+    "extra_body": {},
+    "tool_result_char_budget": 8000
+  },
+  "results": [
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P01",
+      "latency_s": 36.1,
+      "rounds": 14,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "Based on my searches of the Fontem database, **there is no person entity for L\u0151rinc M\u00e9sz\u00e1ros** in the system.\n\n**What Fontem does have:**\n\nThe database contains multiple Hungarian companies bearing the M\u00e9sz\u00e1ros name, including:\n\n- **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft.** (ID: `536e994b-63d4-5354-a4de-1bcd38457653`) \u2014 6 EU procurement contracts\n- **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt.** (ID: `a61b5df7-826a-5600-ace8-0efb82356914`) \u2014 2 contracts totaling \u20ac35,477.40\n- **M\u00c9SZ\u00c1ROS GR\u00c1NIT Kft.**\n- **M\u00e9sz\u00e1ros M1 Aut\u00f3keresked\u0151 Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g**\n- **M\u00e9sz\u00e1ros M1 J\u00e1rm\u0171parkkezel\u0151 Z\u00e1rtk\u00f6r\u0171en M\u0171k\u00f6d\u0151 R\u00e9szv\u00e9nyt\u00e1rsas\u00e1g**\n- Several other variants and consortiums\n\n**What Fontem does not have:**\n\n- No person entity for \"L\u0151rinc M\u00e9sz\u00e1ros\" under any spelling variant tested (L\u0151rinc M\u00e9sz\u00e1ros, M\u00e9sz\u00e1ros L\u0151rinc, Lorinc Meszaros, Meszaros)\n- The person and lobbyist categories in Fontem appear to be sparse or empty in this dataset\n- No director information is linked to the M\u00e9sz\u00e1ros companies (directors arrays are empty)\n\n**Context:** L\u0151rinc M\u00e9sz\u00e1ros is a Hungarian businessman often described in media as one of Hungary's wealthiest individuals, with business interests spanning energy,",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P02",
+      "latency_s": 95.1,
+      "rounds": 15,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Based on my search of the Fontem data, I found multiple \"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros\" entity variants in Hungary. Here's what the data shows:\n\n## Contract Values by Entity\n\n| Entity | Contracts | Total Value (EUR) |\n|--------|-----------|-------------------|\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Z\u00e1rtk\u00f6r\u0171en M\u0171k\u00f6d\u0151 R\u00e9szv\u00e9nyt\u00e1rsas\u00e1g (01dfce84-97d5-5e27-9190-528dbc1c2f30) | 2 | \u20ac49,355,924.48 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. (ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520) | 4 | \u20ac12,874,355.33 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g (d530c2b7-dfb4-50a0-80a0-7d7a15820a1d) | 6 | \u20ac10,236,792.89 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt. (a61b5df7-826a-5600-ace8-0efb82356914) | 2 | \u20ac35,477.40 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. (536e994b-63d4-5354-a4de-1bcd38457653) | 6 | \u20ac0 (values missing) |\n| Consortium variants | 3 | \u20ac0 (values missing) |\n\n**Important caveat on duplication:** These entities likely represent the same underlying business recorded under different legal name variants (Kft. vs. Zrt. vs. full legal form spellings). The contract counts overlap (e.g., both 536e994b... and d530c2b7... show 6 contracts), suggesti",
+      "truncated_results": 2,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P03",
+      "latency_s": 70.3,
+      "rounds": 14,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Based on my investigation of the Fontem records, **there is no direct connection** between M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros and the Hungarian state railway (M\u00c1V Magyar \u00c1llamvasutak) in the EU procurement data.\n\nHere is what the data shows:\n\n**M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros entities examined:**\n- M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. (ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520): 4 contracts with Orsz\u00e1gos V\u00edz\u00fcgyi F\u0151igazgat\u00f3s\u00e1g (water authority), NKM F\u00f6ldg\u00e1zh\u00e1l\u00f3zati Kft. (gas network), and NIF Zrt. (National Road Directorate)\n- M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt. (a61b5df7-826a-5600-ace8-0efb82356914): 2 contracts with Magyar Nemzeti M\u00fazeum K\u00f6zgy\u0171jtem\u00e9nyi K\u00f6zpont (National Museum)\n- M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. (536e994b-63d4-5354-a4de-1bcd38457653): 6 contracts, including two railway track modernization contracts\u2014but these are with **NIF Zrt.**, not M\u00c1V\n- M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g (d530c2b7-dfb4-50a0-80a0-7d7a15820a1d): 6 contracts, also including railway work with NIF Zrt.\n\n**M\u00c1V (Hungarian State Railways) as authority:**\nThe authority record for M\u00c1V Magyar \u00c1llamvasutak Z\u00e1rtk\u00f6r\u0171en M\u0171k\u00f6d\u0151 R\u00e9szv\u00e9nyt\u00e1rsas\u00e1g (ed94d42e-7079-5253-9962-e7efbfcbf91",
+      "truncated_results": 3,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P04",
+      "latency_s": 76.9,
+      "rounds": 6,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Based on my search for \"M\u00e9sz\u00e1ros\" and analysis of the results, I found **13 company entities** in the record. However, after accounting for Hungarian legal form abbreviations (spelling variants), there are **12 distinct companies**.\n\n**Duplicate identified:**\n- `M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft.` (536e994b-63d4-5354-a4de-1bcd38457653) and `M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g` (d530c2b7-dfb4-50a0-80a0-7d7a15820a1d) are the same company \u2014 \"Kft.\" is the standard Hungarian abbreviation for \"Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g\" (LLC).\n\n**The 12 distinct companies are:**\n\n1. M\u00e9sz\u00e1ros Vendel (c7d633e9-660b-5b44-8675-c84c0d39e608)\n2. M\u00c9SZ\u00c1ROS GR\u00c1NIT Kft. (5dd2da3c-a748-5623-9f49-5c5becbd1466)\n3. M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. (ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520)\n4. M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt. (a61b5df7-826a-5600-ace8-0efb82356914)\n5. M\u00e9sz\u00e1ros M1 Aut\u00f3keresked\u0151 Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g (38767a59-c253-5e27-a121-2ec706efe2da)\n6. M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. (536e994b-63d4-5354-a4de-1bcd38457653) \u2014 same as #7\n7. M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P05",
+      "latency_s": 4.8,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Fontem is a European public-data platform that provides access to corporate, procurement, and lobbying data. I'm Fontem's assistant, designed to help you search entities, investigate connections, and navigate the platform's data.\n\nHowever, I don't have access to API documentation or technical integration instructions through my current tools. My available functions let me search and investigate entities within Fontem's data, but they don't include information about how to connect an external AI client to Fontem programmatically.\n\nFor API access or integration details, you would typically need to:\n- Check Fontem's developer documentation\n- Look for an API section in your account settings\n- Contact Fontem support directly\n\nIs there something specific within Fontem's data I can help you investigate instead? I can search for companies, persons, or authorities, investigate their connections, or help you navigate to specific pages on the platform.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P06",
+      "latency_s": 3.8,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "The entity ID `E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB` was not found in Fontem's database. This ID doesn't correspond to any company, authority, lobbyist, or person in our registries.\n\nIf you're looking for a specific company, I can help you search for it by name, ticker symbol, or keyword. What company would you like to investigate?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P07",
+      "latency_s": 5.1,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "I need to be direct: Fontem does not hold data on criminal law reforms or crime statistics. \n\nFontem's data covers:\n- EU procurement contracts and tendering\n- Corporate ownership and subsidiary relationships\n- Lobbying registrations and lobbyist activities\n- Public authorities and their contracting patterns\n\nYour question about consent-based rape law reforms and their effect on recorded crime rates would require:\n1. Legal reform tracking across EU member states\n2. National crime statistics databases\n3. Temporal analysis linking law changes to reporting rates\n\nThis is outside Fontem's scope. You would need sources like:\n- Eurostat crime statistics\n- EU Agency for Fundamental Rights reports\n- National justice ministry publications\n- Academic studies on the \"consent-based law reform\" wave (e.g., Spain 2022, Germany 2016, Sweden 2018)\n\n**What Fontem *can* help with on related topics:**\n- Whether any organizations lobbying on gender violence legislation appear in our registry\n- Procurement contracts awarded to organizations working on violence prevention\n- Connections between entities working on justice reform and EU institutions\n\nWould you like me to search for any of those instead, or",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "abstained: unsupported: ['2022', '2016', '2018']"
+          ]
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P08",
+      "latency_s": 9.7,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__propose_edit"
+      ],
+      "error": null,
+      "answer": "I've added a paragraph summarizing M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.'s contract holdings. The summary covers their four EU procurement contracts totaling \u20ac12,874,355.33, spanning water infrastructure (S\u00e9d-N\u00e1dor-Gaja rehabilitation and V\u00e1li-v\u00f6lgy regulation), gas network reconstruction, and the Kom\u00e1rom-Kom\u00e1rno Danube bridge project\u2014all awarded by Hungarian authorities.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P09",
+      "latency_s": 60.8,
+      "rounds": 17,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "D'apr\u00e8s mes recherches dans la base de donn\u00e9es Fontem, voici ce que j'ai trouv\u00e9 concernant les entreprises russes (ou li\u00e9es \u00e0 des groupes russes) d\u00e9tenant des contrats publics dans l'UE :\n\n## Principale d\u00e9couverte : le groupe Lukoil\n\nLe groupe p\u00e9trolier russe **Lukoil** appara\u00eet dans la base via ses filiales europ\u00e9ennes, dont deux entit\u00e9s roumaines d\u00e9tiennent des contrats publics :\n\n### 1. Lukoil Rom\u00e2nia (ROU)\n- **Nombre de contrats** : 1\n- **Valeur totale** : 573 345,64 \u20ac\n- **Objet** : \"Acord-cadru furnizare combustibil (benzin\u0103 f\u0103r\u0103 plumb, motorin\u0103)\" (Accord-cadre fourniture de carburant - essence sans plomb, diesel)\n- **Code CPV** : 09100000 (Produits p\u00e9troliers)\n- **Autorit\u00e9 adjudicatrice** : CNCIR \u2013 Compania Na\u021bional\u0103 pentru Controlul Cazanelor, Instala\u021biilor de Ridicat \u0219i Recipientelor sub Presiune S.A. (Autorit\u00e9 roumaine pour le contr\u00f4le des chaudi\u00e8res, installations de levage et r\u00e9cipients sous pression)\n- **Entity ID** : `64498709-c6c2-58fa-b122-1789efbe4f46`\n\n### 2. LUKOIL LUBRICANTS EAST EUROPE (ROU)\n- **Nombre de contrats** : 3\n- **Valeur totale** : 89 249,48 \u20ac\n- **Objet** : \"Uleiuri \u2013diverse tipuri -impartita in 4 loturi\" (Huiles \u2013 divers types - r\u00e9partis en 4 lots)\n- ",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 2.5384615384615388,
+          "max": 3.0,
+          "pct": 84.6,
+          "notes": [
+            "numeric_claims_supported: 1/13 unsupported: ['59512']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "language": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P10",
+      "latency_s": 52.2,
+      "rounds": 25,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": "did not converge in 25 rounds",
+      "answer": "",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "produced_answer: error: did not converge in 25 rounds"
+          ]
+        },
+        "honesty": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "partial_abstention: no stated limit"
+          ]
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P11",
+      "latency_s": 3.7,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "I've taken you to the **Atlas** (`/map`), which is Fontem's geographic view of the data by region. This is where you'll find maps and regional statistics.\n\nThere's also a **Geographic data browser** (`/geo`) if you need a different view of the geographic data.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P12",
+      "latency_s": 6.2,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "I've taken you to the **Data exploration hub** (`/explore`), which is the entry point for working with Fontem's datasets. This is where you'd start building your analysis.\n\nOnce you create a data story, you can edit it at `/stories/:id/edit` (requires sign-in). The home feed (`/`) also shows published data stories if you want to see examples of what others have created.\n\nIf you're already signed in and have existing stories, they should be accessible from your account or the home feed. Need help finding a specific dataset or understanding what's available to analyze?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P13",
+      "latency_s": 3.6,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "I don't see a page in the site map that specifically shows \"quarterly staff turnover by department.\" The available pages are:\n\n- `/` \u2014 Home feed of published data stories\n- `/map` \u2014 Atlas: geographic view of the data by region\n- `/explore` \u2014 Data exploration hub \u2014 the entry point to the datasets\n- `/geo` \u2014 Geographic data browser\n- `/data-quality` \u2014 Data quality dashboards and coverage reports\n- `/help` \u2014 Help and FAQ\n- `/account` \u2014 Account settings\n\nThe `/explore` page is the data exploration hub and entry point to the datasets \u2014 that's likely where you'd find HR or workforce data if it's available. Would you like me to take you there?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        },
+        "navigation": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-397B-A17B",
+      "prompt": "P14",
+      "latency_s": 4.1,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Here's what you can do on Fontem:\n\n**Explore the data**\n- `/explore` \u2014 Start here to browse the datasets. This is the main entry point to search for companies, authorities, persons, and lobbyists in the EU public data registries.\n- `/map` \u2014 See the data geographically. Plot contracts, entities, and relationships on a map of Europe.\n- `/geo` \u2014 A more detailed geographic browser for drilling into regional data.\n\n**Investigate entities**\n- Search for any company, authority, person, or lobbyist by name, ticker, or keyword.\n- Pull full profiles showing their EU procurement contracts, ownership links, and graph connections (who they're connected to, and how).\n- Trace paths between two entities to find intermediaries \u2014 shared owners, common suppliers, or lobbyists connecting otherwise separate parties.\n\n**Build and share stories**\n- `/` \u2014 Your home feed shows published data stories (yours and others').\n- `/stories/:id/edit` \u2014 Create or edit investigative data stories, embedding charts, tables, and entity widgets.\n\n**Check data quality**\n- `/data-quality` \u2014 See coverage reports, data freshness, and known gaps in the registries we pull from.\n\n**Account & settings**\n- `/account` \u2014 Manage you",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    }
+  ]
+}

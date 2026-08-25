@@ -1,0 +1,630 @@
+{
+  "meta": {
+    "run_at": "2026-08-25T11:41:20+00:00",
+    "fixture_version": 2,
+    "prompts": 14,
+    "models": [
+      "stealth/ox-alpha"
+    ],
+    "endpoint": "https://openrouter.ai",
+    "gmr_api": "http://fontem-api.fontem-staging.svc.cluster.local",
+    "system_prompt": "shipped",
+    "code_sha": "06d8e90",
+    "max_rounds": 12,
+    "max_tokens": 4000,
+    "extra_body": {},
+    "tool_result_char_budget": 8000
+  },
+  "results": [
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P01",
+      "latency_s": 75.1,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "**Short version:** Fontem has no person record for L\u0151rinc M\u00e9sz\u00e1ros himself \u2014 but we hold a cluster of Hungarian companies bearing his name, including his listed holding **OPUS GLOBAL Nyrt.** and the construction firm **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros**, which together carry EU procurement contracts worth roughly \u20ac12.9m in our graph.\n\n**On who he is** \u2014 our registries hold no biographical entry (no Person node, no directorships listed), so I can't confirm roles or dates from Fontem data. What the data does show is a Hungarian businessman whose corporate footprint spans construction, energy, agriculture and consumer goods. As general background *not* from Fontem: he is widely known as a Hungarian businessman and former small-town mayor considered close to Hungary's government \u2014 treat that as context, not a data finding.\n\n**What Fontem holds (all looked up this turn):**\n\n- **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.** (`ef2de5a8`) \u2014 the flagship: **4 EU procurement contracts, \u20ac12,874,355.33 total**. Buyers are all Hungarian state bodies:\n  - Orsz\u00e1gos V\u00edz\u00fcgyi F\u0151igazgat\u00f3s\u00e1g \u00d72 \u2014 the S\u00e9d-N\u00e1dor-Gaja river-system rehabilitation and the V\u00e1li-v\u00f6lgy water-regulation works\n  - NIF Zrt. \u2014 the Kom\u00e1rom\u2013Kom\u00e1rno cross-border",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 2.1428571428571432,
+          "max": 3.0,
+          "pct": 71.4,
+          "notes": [
+            "numeric_claims_supported: 1/7 unsupported: ['129']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P02",
+      "latency_s": 91.3,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Here's what Fontem's procurement graph holds. Note first that the company appears under **five duplicate name records**, so I pulled all of them:\n\n| Record | Contracts | Recorded value |\n|---|---|---|\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari\u2026 Kft. (`536e994b`) | 6 | \u20ac0 \u2014 no values stored |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari\u2026 Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g (`d530c2b7`) | 6 | \u20ac10,236,792.89 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. (`ef2de5a8`) | 4 | \u20ac12,874,355.33 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt. (`a61b5df7`) | 2 | \u20ac35,477.40 |\n| \u2026Kft. (M-E 2020 Konzorcium) (`12bc747a`) | 2 | \u20ac0 \u2014 no values stored |\n\n**Total: 20 contract award records, \u20ac23,146,625.62 in recorded value.** That euro figure is my own sum of the three non-zero totals above (10,236,792.89 + 12,874,355.33 + 35,477.40).\n\nTwo big caveats on that number:\n\n- **It is a floor, not the full picture.** 12 of the 20 records \u2014 including all six sewerage works for NFP and both consortium contracts \u2014 carry no value in our data, and most valued records are flagged `value_low_confidence`. So the true awarded amount is certainly higher than \u20ac23.1M; our data just doesn't show how much higher.\n- **Possible double-count:** the Sz\u00e1zhalombatta\u2013Ercsi railway modernisation (P",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 2.6666666666666665,
+          "max": 3.0,
+          "pct": 88.9,
+          "notes": [
+            "numeric_claims_supported: 1/18 unsupported: ['2314662562']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P03",
+      "latency_s": 118.8,
+      "rounds": 7,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Short answer: **not directly with M\u00c1V itself \u2014 but yes, with Hungarian state railway infrastructure**, via NIF Zrt., the state infrastructure developer. Here is what the record shows.\n\n## What connects\n\nThree of the five M\u00e9sz\u00e1ros entities in our graph hold **railway-track modernisation contracts (CPV 45234100)** awarded by **NIF Zrt.** (`fec60485`), the state body that procures rail and road works:\n\n- **Sz\u00e1zhalombatta (bez.) \u2013 Ercsi el\u00e1gaz\u00e1s** line-section track modernisation (PST: V040.08) \u2014 appears under both `536e994b` (\u2026Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft.) and `d530c2b7` (same company under its full legal name; likely a duplicate record of one contract)\n- **Ercsi el\u00e1gaz\u00e1s (kiz.) \u2013 Pusztaszabolcs (bez.)** line-section track modernisation (PST: V040.09) \u2014 under `536e994b`\n- Separately, NIF also awarded M\u00e9sz\u00e1ros the **Kom\u00e1rom\u2013Kom\u00e1rno cross-border Danube bridge** works (CPV 45221100, under `ef2de5a8`) \u2014 major infrastructure, though not rail track\n\nNIF Zrt. is a heavy rail procurer in our data: 50 contracts totalling \u20ac272,600,414.21, including Budapest\u2013Esztergom railway-line signalling works and the Szeged\u2013H\u00f3dmez\u0151v\u00e1s\u00e1rhely tram-train.\n\n## What does *not* connect\n\n- **No contract",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P04",
+      "latency_s": 109.4,
+      "rounds": 5,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "**10 distinct companies** carry the M\u00e9sz\u00e1ros tie in the record \u2014 from **13 raw records**, once spelling and legal-form duplicates are collapsed. All are Hungarian; there are no foreign-country subsidiaries under this name.\n\n**How the 13 collapse to 10**\n\nThe flagship *M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3* appears under four separate records that are one underlying firm:\n\n- `536e994b` \u2014 \"...Kft.\"\n- `d530c2b7` \u2014 \"...Korl\u00e1tolt Felel\u0151ss\u00e9g\u0171 T\u00e1rsas\u00e1g\" (Kft spelled out)\n- `01dfce84` \u2014 \"...Z\u00e1rtk\u00f6r\u0171en M\u0171k\u00f6d\u0151 R\u00e9szv\u00e9nyt\u00e1rsas\u00e1g\" (the Zrt form)\n- `12bc747a` \u2014 \"...Kft. (M-E 2020 Konzorcium)\"\n\nThat leaves these nine others as distinct entities:\n\n| Entity | gmr_id |\n|---|---|\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. | `ef2de5a8` |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt. | `a61b5df7` |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Cukr\u00e1szipari Kft. | `1ca65417` |\n| M\u00e9sz\u00e1ros M1 Aut\u00f3keresked\u0151 Kft. | `38767a59` |\n| M\u00e9sz\u00e1ros M1 J\u00e1rm\u0171parkkezel\u0151 Zrt. | `6cdb7235` |\n| M\u00c9SZ\u00c1ROS GR\u00c1NIT Kft. | `5dd2da3c` |\n| M\u00e9sz\u00e1ros Vendel | `c7d633e9` |\n| Telek \u00e9s M\u00e9sz\u00e1ros Szolg\u00e1ltat\u00f3 kft | `c8a077e1` |\n| M-E 2020 Konzorcium (vezet\u0151 tag: M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros...) | `ada6f2da` |\n\n**Caveats worth stating in print**\n\n- The unaccented \"Meszaros\" returns ze",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P05",
+      "latency_s": 40.0,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "**What Fontem is:** a European public-data platform. From where I sit, it holds registries of companies, public authorities, persons and lobbyists, plus EU procurement contracts, and \u2014 the interesting part \u2014 the links between them: ownership, supplier relationships, lobbying contacts. On top of that data it offers pages (an Atlas, company profiles, stories) and this assistant, which can query the graph for you.\n\nConcretely, the queries I can run against it:\n\n- **Search** for companies, authorities, persons or lobbyists by name, ticker or keyword\n- **Investigate** one entity \u2014 its properties, its procurement contracts, its direct graph neighbourhood\n- **Find shortest paths** between two parties \u2014 e.g. the shared owner or common lobbyist sitting between two firms that look unconnected\n- **Propose edits** to reports you're writing, including embedded interactive widgets\n\n**Connecting your own AI client:** the interface is MCP-based \u2014 every tool I use is exposed as an MCP function (`search_entities`, `investigate_entity`, `find_paths`, `propose_edit`), so any MCP-compatible client (Claude Desktop, Cursor, a custom agent, etc.) can wire up to the same server and get those same capabilit",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P06",
+      "latency_s": 15.0,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "That id doesn't match anything in our registry \u2014 it's not a company with an empty record, it's simply not an entity we hold. Ids in Fontem are UUIDs returned by search, so this one may be mistyped or from another system.\n\nIf you give me the company's name (or ticker), I can look it up and find its correct id.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 5.0,
+          "pct": 20.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P07",
+      "latency_s": 48.3,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "I checked the registry before answering, and this one is outside what Fontem holds. Searches for \"consent rape law\", \"Eurostat crime statistics\" and \"women's rights organisation\" all return zero matches across companies, authorities, persons and lobbyists.\n\nTwo reasons the question can't be answered here:\n\n- **Legislative texts aren't in scope.** Fontem holds entities (companies, authorities, persons, lobbyists), EU procurement contracts and the connections between them \u2014 not criminal codes or their reform history.\n- **Recorded crime rates aren't in scope either.** There is no Eurostat or national statistics feed in the holdings; the only quantitative data is contract values and graph links.\n\nSo I can't tell you which countries adopted consent-based definitions or what happened to recorded rates afterwards \u2014 and I won't fill that gap from general knowledge, since none of it would be traceable to a source on this platform.\n\nWhat the data *can* answer, if useful to your reporting:\n\n- Whether a named justice ministry or public body has EU procurement contracts, and with whom.\n- Which lobbyists or firms sit between two parties \u2014 e.g., if you later identify organisations that campaigned",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P08",
+      "latency_s": 102.2,
+      "rounds": 5,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__propose_edit"
+      ],
+      "error": null,
+      "answer": "Done \u2014 the paragraph is in your review panel as an Apply/Reject card. It summarises the 20 award records across the five name variants, the buyer breakdown (NFP 10, NIF Zrt. 4, water directorate 3, museum 2, NKM gas 1), and flags both caveats: values exist for only part of the record (\u20ac23,146,625.62 where recorded, a floor), and a couple of notices look duplicated across variants.\n\nOne thing worth knowing before you accept: the two largest variants (`536e994b` and `d530c2b7`) are almost certainly the same company \u2014 the full legal name spelled short and long \u2014 so the record splits one firm's portfolio across duplicate registry entries. If you'd like, I can also drop an entity-profile widget or a contracts table into the article so readers can browse the awards themselves.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 1.5,
+          "max": 3.0,
+          "pct": 50.0,
+          "notes": [
+            "numeric_claims_supported: 1/4 unsupported: ['2314662562']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P09",
+      "latency_s": 140.6,
+      "rounds": 6,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "## R\u00e9ponse courte\n\nDans nos donn\u00e9es de march\u00e9s publics europ\u00e9ens, un seul groupe russe ressort avec des contrats attribu\u00e9s : **Louko\u00efl**, via deux entit\u00e9s roumaines. Aucune soci\u00e9t\u00e9 domicili\u00e9e en Russie ne d\u00e9tient de contrat dans notre graphe.\n\n**Ce que montrent les donn\u00e9es :**\n\n- **Lukoil Rom\u00e2nia** (ROU, TVA RO10547022, id `64498709`) \u2014 1 contrat : accord-cadre de fourniture de carburant (essence sans plomb, motorine) pour la CNCIR, l'entreprise nationale roumaine de contr\u00f4le des chaudi\u00e8res et appareils \u00e0 pression. Valeur : **573 345,64 \u20ac**.\n- **LUKOIL LUBRICANTS EAST EUROPE** (ROU, TVA RO19737772, id `9f8c58cd`) \u2014 3 contrats d'huile (\u00ab Uleiuri \u2013 diverse tipuri \u00bb, CPV 09211000) avec SNTFC \u00ab CFR C\u0103l\u0103tori \u00bb S.A., la compagnie ferroviaire voyageurs roumaine. Total : **89 249,48 \u20ac**.\n\nSoit 4 contrats pour **662 595,12 \u20ac** au total pour le groupe (somme que je calcule moi-m\u00eame \u00e0 partir des deux valeurs ci-dessus).\n\nPiste suppl\u00e9mentaire, avec r\u00e9serve : **EUROCHEM \u0391\u0392\u0395\u0395** (Gr\u00e8ce, id `e0615a4f`) d\u00e9tient 1 contrat de **47 000 \u20ac** de fournitures chimiques (CPV 24311411) aupr\u00e8s du syndicat r\u00e9gional de gestion des d\u00e9chets solides de Mac\u00e9doine-Centrale. Mais notre graphe ne trace **aucun lien de",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 2.0,
+          "max": 3.0,
+          "pct": 66.7,
+          "notes": [
+            "numeric_claims_supported: 2/12 unsupported: ['662', '59512']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "language": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P10",
+      "latency_s": 73.7,
+      "rounds": 5,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "**By count, all of it is defence \u2014 but on value, our data can't answer.** Here's what the graph holds:\n\n**Israeli-domiciled companies with EU contracts: one firm, two records**\n\nThe only ISR-domiciled company in our procurement data is **Rafael Advanced Defence Systems**, which appears twice as duplicate registry entries:\n\n| Entity | Contract | Buyer | CPV |\n|---|---|---|---|\n| Rafael Advanced Defence Systems LTD (`e6bead02\u2026`) | Spike LR2 missiles | Ministerie van Defensie (NL) | 35300000 (missiles) |\n| Rafael Advanced Defense Systems Ltd. (`84fc94d6\u2026`) | Spare Parts Spike LR2 | Ministerie van Defensie (NL) | 35300000 |\n\nSo **2 of 2 contracts (100%) are defence**: both are missile-related purchases by the Dutch Ministry of Defence.\n\n**On the money: no usable figures.** Both contract records carry `total_contract_value_eur: 0` and are flagged `value_low_confidence: true` \u2014 meaning the award values weren't captured, not that they were free. A defence-vs-civilian split in euros therefore can't be computed from what we hold.\n\n**Coverage caveats before you treat this as the full picture:**\n- Other big Israeli names return nothing domiciled in Israel: Elbit Systems appears only as a US-l",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 1.0000000000000004,
+          "max": 3.0,
+          "pct": 33.3,
+          "notes": [
+            "numeric_claims_supported: 1/3 unsupported: ['100']"
+          ]
+        },
+        "honesty": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "partial_abstention: unsupported: ['100']"
+          ]
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P11",
+      "latency_s": 14.2,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "I've opened the **Atlas** (`/map`) \u2014 that's the geographic view of Fontem's data by region.\n\nIf you want to dig into a specific region's numbers rather than see them on a map, there's also the **Geographic data browser** at `/geo`, which lets you browse regional data directly.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P12",
+      "latency_s": 10.7,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Writing up your own analysis happens in **data stories** \u2014 each one has an editor at `/stories/:id/edit`, where `:id` is the story's identifier. That page is sign-in only, so make sure you're logged in first.\n\nOne caveat: my site map shows the *edit* route but no \"create new story\" entry point, so I can't send you straight to a blank draft. If you already have a story started, tell me which and I'll open its editor. Otherwise, `/help` covers how the platform works and may point you to how drafts get created \u2014 want me to open it?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "navigated: never offered a destination"
+          ]
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P13",
+      "latency_s": 15.8,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "There's no page like that on Fontem \u2014 quarterly staff turnover by department isn't something our site map covers. Fontem's data centres on European public-data topics such as EU procurement contracts, companies, authorities, persons and lobbyists, not internal HR metrics.\n\nIf you're hunting for something adjacent, the closest starting point is the **Data exploration hub** (`/explore`), which is the entry point to all our datasets \u2014 happy to open it for you. Alternatively, tell me what you're actually after (a company, a buyer, a contract) and I'll search the graph directly.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "stealth/ox-alpha",
+      "prompt": "P14",
+      "latency_s": 33.6,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "You're now on the Explore hub \u2014 the entry point to the datasets.\n\nA good way to get a feel for it: give me a company, ministry, or person you're curious about and I'll pull their profile, contracts and connections. Or if you'd rather keep clicking, the Atlas (`/map`) is the next stop for seeing how the data spreads geographically.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    }
+  ]
+}

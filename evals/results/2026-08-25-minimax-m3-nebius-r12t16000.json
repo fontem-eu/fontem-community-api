@@ -1,0 +1,615 @@
+{
+  "meta": {
+    "run_at": "2026-08-25T12:26:31+00:00",
+    "fixture_version": 2,
+    "prompts": 14,
+    "models": [
+      "MiniMaxAI/MiniMax-M3"
+    ],
+    "endpoint": "https://api.studio.nebius.com",
+    "gmr_api": "http://fontem-api.fontem-staging.svc.cluster.local",
+    "system_prompt": "shipped",
+    "code_sha": "06d8e90",
+    "max_rounds": 12,
+    "max_tokens": 16000,
+    "extra_body": {},
+    "tool_result_char_budget": 8000
+  },
+  "results": [
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P01",
+      "latency_s": 47.4,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "Fontem has no person entity for \"L\u0151rinc M\u00e9sz\u00e1ros\" \u2014 neither with diacritics nor without. Searches for the name return zero matches in the persons and lobbyists indexes.\n\nWhat the data does hold is a cluster of Hungarian companies carrying the \"M\u00e9sz\u00e1ros\" surname in their registered names (all sourced from edgar):\n\n- M\u00e9sz\u00e1ros Vendel\n- M\u00c9SZ\u00c1ROS GR\u00c1NIT Kft.\n- M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.\n- M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt.\n- M\u00e9sz\u00e1ros M1 Aut\u00f3keresked\u0151 Kft.\n- M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. (and three spelling/conortium variants of the same)\n- M\u00e9sz\u00e1ros M1 J\u00e1rm\u0171parkkezel\u0151 Zrt.\n\nNone of these are linked to a person record in the search results, so I cannot confirm from the data alone whether any of them are connected to L\u0151rinc M\u00e9sz\u00e1ros the individual. The graph may still connect them \u2014 I can investigate one of the companies (e.g. M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. or M\u00c9SZ\u00c1ROS GR\u00c1NIT Kft.) to see whether a person node sits behind it. Want me to pull one up?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P02",
+      "latency_s": 40.3,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "Across the variants of \"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros\" in our holdings, the picture is fragmented because the company appears under several legal-form spellings (Kft., Zrt., and consortium names). Here is what the registry shows:\n\n**Contracts and value by entity**\n\n| Entity | Contracts | Total value (EUR) |\n|---|---|---|\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. | 4 | 12,874,355.33 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Zrt. | 2 | 35,477.40 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. | 6 | 0 (all values low-confidence) |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. (M-E 2020 Konzorcium) | 2 | 0 (low-confidence) |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft. (full legal name) | 6 | 10,236,792.89 |\n| M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Zrt. | 2 | 49,355,924.48 |\n| M-E 2020 Konzorcium | 1 | 0 (low-confidence) |\n\n- **Total contracts across all variants:** 23\n- **Sum of values where the registry has a confident figure:** \u20ac72,502,550.10 (I computed this by adding the four non-zero rows above)\n- **Contracts with no reliable value in our data:** 11 of 23, all flagged `value_low_confidence: true`\n\n**On competition:** the entity-level response does not",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 1.6666666666666667,
+          "max": 3.0,
+          "pct": 55.6,
+          "notes": [
+            "numeric_claims_supported: 2/9 unsupported: ['7250255010', '725']"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P03",
+      "latency_s": 25.4,
+      "rounds": 6,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__find_paths",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "## Yes \u2014 an indirect one, through the state infrastructure developer\n\nThere is **no direct contract** in the record between any M\u00e9sz\u00e1ros entity and any M\u00c1V entity. But there is a clear indirect link via **NIF Zrt.** (Nemzeti Infrastrukt\u00fara Fejleszt\u0151 Zrt.), the state-owned company that procures railway infrastructure construction on behalf of the Hungarian railway.\n\n### What the data shows\n\n**M\u00e9sz\u00e1ros companies that won railway-related work from NIF Zrt.:**\n\n- **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Ipari, Kereskedelmi \u00e9s Szolg\u00e1ltat\u00f3 Kft.** (entity `536e994b`) \u2014 2 contracts for **railway track modernisation** (CPV 45234100):\n  - Ercsi el\u00e1gaz\u00e1s \u2013 Pusztaszabolcs line section track and associated facilities modernisation\n  - Sz\u00e1zhalombatta \u2013 Ercsi el\u00e1gaz\u00e1s line section track and associated facilities modernisation\n- **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.** (entity `ef2de5a8`) \u2014 1 contract from NIF Zrt. for the **Kom\u00e1rom\u2013Kom\u00e1rno cross-border Danube bridge** construction (part of a rail line project).\n\n**M\u00c1V-side entities checked:**\n- M\u00c1V Magyar \u00c1llamvasutak Zrt. (company) \u2014 0 contracts in the graph\n- M\u00c1V Magyar \u00c1llamvasutak Z\u00e1rtk\u00f6r\u0171en M\u0171k\u00f6d\u0151 Rt. (authority) \u2014 7 contracts, all for security, energy, coal, weighing \u2014",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P04",
+      "latency_s": 34.1,
+      "rounds": 5,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "I can't give you a number for this \u2014 and I want to flag why rather than guess.\n\n**What I found:**\n- 13 companies in the graph have \"M\u00e9sz\u00e1ros\" in their name (all HUN). The \"Meszaros\" ASCII variant returned nothing.\n- **No person entity for L\u0151rinc M\u00e9sz\u00e1ros exists in the data.** Searches for \"L\u0151rinc M\u00e9sz\u00e1ros\", \"M\u00e9sz\u00e1ros L\u0151rinc\", and \"M\u00e9sz\u00e1ros Group\" all returned empty `persons` arrays.\n\n**Why I can't answer the question as asked:**\nThe 13 companies are not connected to any person via ownership/control edges. When I investigated `M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.` (ef2de5a8\u2026), its neighbourhood only contains `LOCATED_IN` edges to Hungary \u2014 no person, no beneficial owner, no director. The `directors` field is empty. The same is true for OPUS GLOBAL (b645fd26\u2026), which is publicly associated with M\u00e9sz\u00e1ros but has no person node linking it to him in our graph.\n\n**The trap to avoid:** \"M\u00e9sz\u00e1ros\" is one of the most common Hungarian surnames (it means \"butcher\"), and \"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros\" is a standard family-business naming pattern. Counting all 13 as \"tied to\" L\u0151rinc M\u00e9sz\u00e1ros would be wrong \u2014 most are unrelated firms that happen to share the surname.\n\n**What would unblock this:** a person entity f",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P05",
+      "latency_s": 8.9,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Fontem is a European public-data platform. It holds public records \u2014 companies, authorities, contracts, lobbyists and the links between them \u2014 and lets you explore them through pages on the site. I'm the assistant that helps you find your way around, understand what you're looking at, and interrogate the data.\n\nOn connecting your own AI client: I don't speak to Fontem's infrastructure, so I can't help with API access, authentication or integration details. If you need that, the right channel is Fontem's own documentation or support \u2014 I just don't have it in front of me.\n\nWhat I *can* do is help you use the data itself. If you tell me what you're trying to find out \u2014 a company, a procurement contract, a relationship between entities \u2014 I'll point you at the right page or pull the figures from the holdings.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P06",
+      "latency_s": 5.3,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__investigate_entity"
+      ],
+      "error": null,
+      "answer": "That ID isn't in our holdings \u2014 `E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB` didn't match any company or authority on the platform. The error is explicit: the id did not match any entity, so I can't tell you anything about it from our data.\n\nA few possibilities worth checking on your end:\n- The id may have been transcribed with a typo. Fontem entity ids are UUIDs returned by `search_entities` \u2014 they aren't guessable.\n- It may be a placeholder or example id from documentation rather than a real one.\n\nIf you can give me the company's name (or a fragment of it), I can search and pull the real record.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P07",
+      "latency_s": 12.2,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "This question sits outside Fontem's holdings. The platform covers EU procurement contracts, companies, contracting authorities, lobbyists and persons \u2014 not criminal law reform or crime statistics. I have no data here on which EU countries adopted consent-based rape legislation, nor on recorded offence rates before or after such reforms.\n\nIf you want to pursue it, the right sources are:\n\n- **Legislative text and reform dates** \u2014 the EU Directive 2024/1385 (the \"anti-violence against women Directive\") requires all member states to move to consent-based definitions of rape by 2030, but national transposition timelines and pre-existing reforms vary. The European Commission's DG JUST pages and national justice ministry sites track this.\n- **Recorded rates** \u2014 Eurostat's crime statistics (crim_off category, including \"Rape\" under \"Sexual violence\") give recorded offences per 100,000 by country, but with the usual caveats: changes in recording rules, victim willingness to report, and legal definitions all move the numbers independently of underlying incidence.\n\nIf you have a Fontem-side question \u2014 for example, which authorities in a given country have published contracts in a sector that ",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "abstained: unsupported: ['2024', '1385', '2030']"
+          ]
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P08",
+      "latency_s": 67.1,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__propose_edit"
+      ],
+      "error": null,
+      "answer": "The paragraph is staged as an Apply/Reject card in your article panel. A few notes on what's in it:\n\n- **20 contracts across 5 name variants** \u2014 I summed the variants rather than picking one, since the system holds them as separate entities and a reader checking the page would otherwise see only a slice.\n- **\u20ac23.1 million** is my sum of the three entities that report a value; the paragraph says so explicitly so the arithmetic is checkable.\n- **15 of 20 contracts are low-confidence on value**, which I flag in the last sentence \u2014 the headline total understates the true scale, and a reader should know that before quoting it.\n- **Buyers and sectors** are cited by entity id so each one is clickable.\n\nIf you'd rather lead with a single entity (e.g. just the full-name Kft., 536e994b) or strip the value line entirely, say the word and I'll re-stage it.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P09",
+      "latency_s": 77.7,
+      "rounds": 5,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": null,
+      "answer": "Voici ce que nos donn\u00e9es montrent r\u00e9ellement \u2014 et ce qu'elles ne montrent pas.\n\n## Ce que j'ai trouv\u00e9\n\n**Le groupe Lukoil est le seul groupe d'origine russe pr\u00e9sent dans nos donn\u00e9es avec des contrats publics europ\u00e9ens.** La maison-m\u00e8re PJSC LUKOIL est enregistr\u00e9e au Royaume-Uni (GBR), pas en Russie. Le groupe compte 19 entit\u00e9s ; voici celles qui d\u00e9tiennent des contrats de march\u00e9s publics dans l'UE selon nos donn\u00e9es :\n\n| Entit\u00e9 | Pays | Nb contrats | Valeur totale | Autorit\u00e9 contractante |\n|---|---|---|---|---|\n| **Lukoil Rom\u00e2nia** | ROU | 1 | 573 345,64 \u20ac | CNCIR (contr\u00f4le chaudi\u00e8res, Roumanie) \u2014 fourniture de carburants |\n| **LUKOIL LUBRICANTS EAST EUROPE** | ROU | 3 | 89 249,48 \u20ac | SNTFC CFR C\u0103l\u0103tori (chemins de fer roumains) \u2014 lubrifiants |\n\nLes deux contrats portent sur des **fournitures de carburants et lubrifiants**, pas sur de grands march\u00e9s d'infrastructure ou de d\u00e9fense.\n\n## Ce que nos donn\u00e9es ne couvrent pas\n\nJ'ai cherch\u00e9 sans r\u00e9sultat les autres grandes entreprises russes habituellement cit\u00e9es dans ce d\u00e9bat :\n- **Gazprom** \u2014 absent\n- **Rosneft** \u2014 absent\n- **Sberbank** \u2014 absent\n- **Alrosa** \u2014 absent\n- **Yandex** \u2014 absent\n- **Groupe Wagner** (militaire) \u2014 seules des PME a",
+      "truncated_results": 1,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "language": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P10",
+      "latency_s": 92.5,
+      "rounds": 12,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "error": "did not converge in 12 rounds",
+      "answer": "",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "produced_answer: error: did not converge in 12 rounds"
+          ]
+        },
+        "honesty": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "partial_abstention: no stated limit"
+          ]
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P11",
+      "latency_s": 3.1,
+      "rounds": 2,
+      "tools": [
+        "navigate"
+      ],
+      "error": null,
+      "answer": "You're on the Atlas at `/map` \u2014 the geographic view of the data, organised by region. If you want a more granular, dataset-level geographic browser instead, that's at `/geo`.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P12",
+      "latency_s": 8.9,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Writing happens on the **Edit story** page: `/stories/:id/edit`. Two things to know:\n\n- It requires sign-in (the `(auth)` flag in the site map).\n- It needs a specific story id \u2014 there's no \"create new\" route listed, so you'd start from an existing story on the home feed you're already viewing.\n\nIf you want, I can open a story from the feed so you can see the editor layout.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "navigated: never offered a destination"
+          ]
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P13",
+      "latency_s": 4.1,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "No such page exists in the site map. The available pages are the home feed, the Atlas (`/map`), the data exploration hub (`/explore`), the geographic browser (`/geo`), data quality (`/data-quality`), help (`/help`), and account settings (`/account`) \u2014 none of which describe quarterly staff turnover by department.\n\nIf you can tell me what you're actually after \u2014 for example, turnover in a specific company, sector, or country \u2014 I can search the data and point you at the relevant entity or contract page.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": -2.0,
+          "max": 2.0,
+          "pct": -100.0,
+          "notes": [
+            "abstained: asserted without hedge"
+          ]
+        },
+        "navigation": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3",
+      "prompt": "P14",
+      "latency_s": 5.6,
+      "rounds": 1,
+      "tools": [],
+      "error": null,
+      "answer": "Fontem is a public-data platform built around a graph of companies, authorities, lobbyists and persons, plus EU procurement contracts. Here's what you can do:\n\n- **Read the home feed** (`/`) \u2014 published data stories. You're here now.\n- **Browse the Atlas** (`/map`) \u2014 geographic view of the data by region.\n- **Explore the data** (`/explore`) \u2014 the entry point to the datasets; this is where you start a real investigation.\n- **Drill into geography** (`/geo`) \u2014 a geographic data browser for slicing by country/region.\n- **Check data quality** (`/data-quality`) \u2014 coverage reports, so you know what the data does and doesn't show.\n- **Edit your own stories** (`/stories/:id/edit`, signed in) \u2014 write and revise data stories.\n- **Manage your account** (`/account`, signed in) \u2014 display preferences and LLM provider keys.\n- **Get help** (`/help`) \u2014 FAQ and instructions for connecting your own AI assistant to Fontem.\n\nThe investigative work itself happens through me: I can search entities, pull up everything we hold on a company or person, trace paths between two parties (useful for finding the intermediary that connects them), and propose edits to a story you're drafting.\n\nWhere would you like t",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    }
+  ]
+}
