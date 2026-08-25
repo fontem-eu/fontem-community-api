@@ -89,6 +89,16 @@ spec:
                   name: {{ .Values.mistralSecretName | default "mistral-api-key" }}
                   key: api-key
                   optional: true
+            # Platform-paid hosted models. `optional: true` matters: where the
+            # secret is absent the variable is unset, and local_models.offered()
+            # hides the hosted entries rather than presenting a picker option
+            # that fails every turn.
+            - name: NEBIUS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.nebiusSecretName | default "nebius-api" }}
+                  key: NEBIUS_API_KEY
+                  optional: true
             - name: MINIO_ENDPOINT
               value: {{ .Values.minioEndpoint | default "minio.gmr.svc.cluster.local:9000" | quote }}
             - name: MINIO_BUCKET

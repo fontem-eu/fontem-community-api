@@ -235,6 +235,10 @@ _LOCAL_MODEL = "qwen3-4b"
 #: have to re-pick a provider when it changes.
 LOCAL_PROVIDER = "local"
 
+#: Named here so the fallback below reads as a decision rather than a
+#: magic string.
+DEFAULT_LOCAL_MODEL_ID = local_models.DEFAULT_MODEL_ID
+
 #: Where a bring-your-own-key turn is sent, per provider.
 #:
 #: The hand-written loop that used to live in this module sent EVERY
@@ -314,14 +318,39 @@ def resolve_route(
         return Route(mock_url.rstrip("/") + "/v1", "", mock_llm.MOCK_MODEL_ID,
                      local=True, timeout=60.0), ""
 
+    # A built-in model the platform pays for. This sits after the credential
+    # branch for the same reason the mock does: a user spending their own key
+    # must keep spending it, whatever their stored id says.
+    #
+    # `resolve` falls back to the default for unknown ids, so this branch is
+    # only reached for an id that really is hosted AND has a key — an
+    # unconfigured environment falls through to llama-server rather than to a
+    # 401 mid-stream.
+    chosen = local_models.resolve(local_model_id)
+    if chosen.hosted:
+        platform_key = local_models.hosted_key(chosen.provider)
+        if platform_key:
+            # Our key, our bill. Hosted providers answer in seconds; the
+            # cluster-local one generates on CPU and takes minutes, hence the
+            # timeout gap.
+            return Route(local_models.NEBIUS_BASE_URL, platform_key,
+                         chosen.served_name, local=False, timeout=120.0), ""
+
     if local_url:
         # The caller picks from a curated list of ids, never a model name.
         # local_models.resolve maps the id to what llama-server calls it and
         # falls back to the default for anything else, so an arbitrary string
         # cannot reach the server. No key: a cluster-local server must never
         # be handed a secret.
-        return Route(local_url.rstrip("/") + "/v1", "",
-                     local_models.resolve(local_model_id).served_name,
+        #
+        # A hosted id reaching here means its key is not configured — the
+        # branch above declined it. Its served_name is a provider's name
+        # ("openai/gpt-oss-120b"), which llama-server has never heard of, so
+        # fall back to the default rather than asking for a model that cannot
+        # exist. A preference outliving its key must degrade, not 404.
+        served = (local_models.resolve(DEFAULT_LOCAL_MODEL_ID)
+                  if chosen.hosted else chosen).served_name
+        return Route(local_url.rstrip("/") + "/v1", "", served,
                      local=True, timeout=300.0), ""
 
     return None, "no model is available: set LOCAL_LLM_URL or supply a key"

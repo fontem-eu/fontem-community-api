@@ -32,9 +32,16 @@ DEFAULT_MODEL_ID = "qwen3-4b"
 ANONYMOUS_MODEL_ID = "qwen3-1.7b"
 
 
+#: Provider of a model we pay for ourselves, as opposed to llama-server.
+#: A turn on one of these spends platform money rather than CPU, which is why
+#: `offered()` hides them unless a key is configured.
+NEBIUS_PROVIDER = "nebius"
+NEBIUS_BASE_URL = "https://api.studio.nebius.com/v1"
+
+
 @dataclass(frozen=True)
 class LocalModel:
-    """One offered model. `served_name` is what llama-server calls it."""
+    """One offered model. `served_name` is what the provider calls it."""
 
     id: str
     label: str
@@ -47,9 +54,25 @@ class LocalModel:
     context_tokens: int
     #: Shown as a caveat next to the model. Empty for the ones with none.
     note: str = ""
+    #: Empty for a model llama-server runs in-cluster. Set to a hosted
+    #: provider for one we pay per token for — the turn then leaves the
+    #: cluster and costs money, so the two are not interchangeable.
+    provider: str = ""
+
+    @property
+    def hosted(self) -> bool:
+        """Whether a turn on this model spends money rather than CPU."""
+        return bool(self.provider)
 
 
-#: Order matters — this is the order the UI offers them in, fastest first.
+#: Order matters — this is the order the UI offers them in: the local
+#: models fastest-first, then the hosted ones.
+#:
+#: The two are not one list ranked by speed. A local model's tokens_per_second
+#: is measured on our own hardware; a hosted one's is whatever the provider
+#: manages under load we do not control, and it bills per token. Sorting them
+#: together would rank a paid remote call above a free local one on a number
+#: that does not mean the same thing in both halves.
 LOCAL_MODELS: tuple[LocalModel, ...] = (
     LocalModel(
         id="qwen3-1.7b", label="Qwen3 1.7B",
@@ -65,6 +88,29 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         id="qwen3-8b", label="Qwen3 8B",
         served_name="qwen3-8b-q4_k_m",
         tokens_per_second=10, context_tokens=32768,
+    ),
+    # Hosted. These are last because the list is ordered fastest-first for the
+    # UI and these are not the fastest — they are the most capable, and they
+    # bill per token.
+    #
+    # The label carries the provider because the user is choosing where their
+    # question goes, not only how good the answer is: a turn on one of these
+    # leaves the cluster.
+    LocalModel(
+        id="qwen3-30b", label="Qwen3 30B A3B [nebius]",
+        served_name="Qwen/Qwen3-30B-A3B-Instruct-2507",
+        provider=NEBIUS_PROVIDER,
+        # Hosted throughput is not ours to measure and varies with their load.
+        # The figure is indicative, not a promise like the local ones.
+        tokens_per_second=60, context_tokens=131072,
+        note="Hosted by Nebius — your question leaves the cluster.",
+    ),
+    LocalModel(
+        id="gpt-oss-120b", label="GPT-OSS 120B [nebius]",
+        served_name="openai/gpt-oss-120b",
+        provider=NEBIUS_PROVIDER,
+        tokens_per_second=45, context_tokens=131072,
+        note="Hosted by Nebius — your question leaves the cluster.",
     ),
 )
 
@@ -112,7 +158,32 @@ def is_known(model_id: str | None) -> bool:
     from src.assistant import mock_llm
     if wanted == mock_llm.MOCK_MODEL_ID:
         return mock_llm.enabled()
-    return wanted in _BY_ID
+    model = _BY_ID.get(wanted)
+    if model is None:
+        return False
+    # A hosted model with no key is not on offer here, and storing a
+    # preference for one would leave the user selected on a model that cannot
+    # answer — the same reason `offered()` hides it.
+    return not model.hosted or bool(hosted_key(model.provider))
+
+
+def hosted_key(provider: str) -> str:
+    """The platform's key for a hosted provider, or "" if none is configured."""
+    import os                       # pylint: disable=import-outside-toplevel
+    if provider == NEBIUS_PROVIDER:
+        return os.environ.get("NEBIUS_API_KEY", "").strip()
+    return ""
+
+
+def offered() -> tuple[LocalModel, ...]:
+    """The models this deployment can actually serve.
+
+    A hosted model with no key configured is a dead option: picking it would
+    fail every turn. Environments without the secret — a laptop, a fresh
+    namespace — therefore see only the local ones, the same way the scripted
+    e2e model appears only where it is configured.
+    """
+    return tuple(m for m in LOCAL_MODELS if not m.hosted or hosted_key(m.provider))
 
 
 def as_dicts() -> list[dict]:
@@ -124,6 +195,9 @@ def as_dicts() -> list[dict]:
             "tokens_per_second": m.tokens_per_second,
             "context_tokens": m.context_tokens,
             "note": m.note,
+            # The UI shows a different affordance for a model that leaves the
+            # cluster; it should not have to parse the label to know.
+            "hosted": m.hosted,
         }
-        for m in LOCAL_MODELS
+        for m in offered()
     ]
