@@ -18,6 +18,7 @@ from src.assistant import local_models, tool_runtime
 @pytest.fixture(name="with_key")
 def _with_key(monkeypatch):
     monkeypatch.setenv("NEBIUS_API_KEY", "platform-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-key")
     importlib.reload(local_models)
     yield
     importlib.reload(local_models)
@@ -26,6 +27,7 @@ def _with_key(monkeypatch):
 @pytest.fixture(name="without_key")
 def _without_key(monkeypatch):
     monkeypatch.delenv("NEBIUS_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     importlib.reload(local_models)
     yield
     importlib.reload(local_models)
@@ -152,3 +154,52 @@ def test_anonymous_refuses_a_hosted_constant(monkeypatch, with_key):  # pylint: 
 def test_anonymous_survives_a_constant_naming_nothing(monkeypatch, with_key):  # pylint: disable=unused-argument
     monkeypatch.setattr(local_models, "ANONYMOUS_MODEL_ID", "retired-model")
     assert local_models.resolve(local_models.anonymous_model_id()).hosted is False
+
+
+# --- more than one hosted provider ------------------------------------------
+
+def test_each_provider_gets_its_own_endpoint_and_key(with_key):  # pylint: disable=unused-argument
+    """The bug this prevents is the one the old hand-written loop had: every
+    provider's key sent to one provider's URL. A key posted to the wrong host
+    is a leak, not a 401."""
+    neb, _ = route("glm-5.1")
+    ora, _ = route("ox-alpha")
+    assert neb.base_url == local_models.HOSTED_PROVIDERS["nebius"]["base_url"]
+    assert neb.api_key == "platform-key"
+    assert ora.base_url == local_models.HOSTED_PROVIDERS["openrouter"]["base_url"]
+    assert ora.api_key == "openrouter-key"
+    assert neb.api_key != ora.api_key
+
+
+def test_one_provider_configured_does_not_offer_the_other(monkeypatch):
+    """A deployment with only a Nebius key must not advertise OpenRouter
+    models — picking one would fail every turn."""
+    monkeypatch.setenv("NEBIUS_API_KEY", "platform-key")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    importlib.reload(local_models)
+    try:
+        offered = [m["id"] for m in local_models.as_dicts()]
+        assert "glm-5.1" in offered
+        assert "ox-alpha" not in offered
+    finally:
+        importlib.reload(local_models)
+
+
+def test_a_model_naming_an_unknown_provider_falls_back_to_local(with_key, monkeypatch):  # pylint: disable=unused-argument
+    """Rather than being sent to whichever provider is first in the table."""
+    ghost = local_models.LocalModel(
+        id="ghost", label="Ghost", served_name="ghost/model",
+        provider="not-a-provider", tokens_per_second=1, context_tokens=1)
+    monkeypatch.setitem(local_models._BY_ID, "ghost", ghost)  # pylint: disable=protected-access
+    r, err = route("ghost")
+    assert not err
+    assert r.local is True
+    assert r.api_key == ""
+    assert "/" not in r.model
+
+
+def test_every_offered_hosted_model_has_a_reachable_provider(with_key):  # pylint: disable=unused-argument
+    for m in local_models.offered():
+        if m.hosted:
+            assert local_models.hosted_base_url(m.provider), m.id
+            assert local_models.hosted_key(m.provider), m.id

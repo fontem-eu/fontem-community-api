@@ -32,11 +32,28 @@ DEFAULT_MODEL_ID = "qwen3-4b"
 ANONYMOUS_MODEL_ID = "qwen3-1.7b"
 
 
-#: Provider of a model we pay for ourselves, as opposed to llama-server.
+#: Providers of models we pay for ourselves, as opposed to llama-server.
 #: A turn on one of these spends platform money rather than CPU, which is why
 #: `offered()` hides them unless a key is configured.
+#:
+#: Both speak the OpenAI chat-completions protocol at these bases. Adding a
+#: third is a row here plus an env var, not another branch.
 NEBIUS_PROVIDER = "nebius"
-NEBIUS_BASE_URL = "https://api.studio.nebius.com/v1"
+OPENROUTER_PROVIDER = "openrouter"
+
+HOSTED_PROVIDERS: dict[str, dict[str, str]] = {
+    NEBIUS_PROVIDER: {
+        "base_url": "https://api.studio.nebius.com/v1",
+        "env": "NEBIUS_API_KEY",
+    },
+    OPENROUTER_PROVIDER: {
+        "base_url": "https://openrouter.ai/api/v1",
+        "env": "OPENROUTER_API_KEY",
+    },
+}
+
+#: Kept for the call sites that predate HOSTED_PROVIDERS.
+NEBIUS_BASE_URL = HOSTED_PROVIDERS[NEBIUS_PROVIDER]["base_url"]
 
 
 @dataclass(frozen=True)
@@ -110,7 +127,40 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         served_name="openai/gpt-oss-120b",
         provider=NEBIUS_PROVIDER,
         tokens_per_second=45, context_tokens=131072,
+        note="Hosted by Nebius. Fastest of these, and the least reliable at "
+             "opening pages: it never navigated in our evaluation.",
+    ),
+    LocalModel(
+        id="qwen3.5-397b", label="Qwen3.5 397B A17B [nebius]",
+        served_name="Qwen/Qwen3.5-397B-A17B",
+        provider=NEBIUS_PROVIDER,
+        tokens_per_second=40, context_tokens=131072,
+        note="Hosted by Nebius. Thorough but long-winded: it took 122 tool "
+             "calls across our evaluation fixture where the 8B took 15.",
+    ),
+    LocalModel(
+        id="minimax-m3", label="MiniMax M3 [nebius]",
+        served_name="MiniMaxAI/MiniMax-M3",
+        provider=NEBIUS_PROVIDER,
+        tokens_per_second=40, context_tokens=131072,
         note="Hosted by Nebius — your question leaves the cluster.",
+    ),
+    LocalModel(
+        id="glm-5.1", label="GLM 5.1 [nebius]",
+        served_name="zai-org/GLM-5.1",
+        provider=NEBIUS_PROVIDER,
+        tokens_per_second=25, context_tokens=131072,
+        note="Hosted by Nebius. Scored worst of these on sticking to figures "
+             "the tools returned.",
+    ),
+    LocalModel(
+        id="ox-alpha", label="Ox Alpha [openrouter]",
+        served_name="stealth/ox-alpha",
+        provider=OPENROUTER_PROVIDER,
+        tokens_per_second=20, context_tokens=1048576,
+        note="Hosted by OpenRouter, on an undisclosed provider's preview "
+             "model. Prompts are shared with them. For evaluation, not "
+             "everyday use.",
     ),
 )
 
@@ -190,9 +240,15 @@ def is_known(model_id: str | None) -> bool:
 def hosted_key(provider: str) -> str:
     """The platform's key for a hosted provider, or "" if none is configured."""
     import os                       # pylint: disable=import-outside-toplevel
-    if provider == NEBIUS_PROVIDER:
-        return os.environ.get("NEBIUS_API_KEY", "").strip()
-    return ""
+    spec = HOSTED_PROVIDERS.get(provider)
+    return os.environ.get(spec["env"], "").strip() if spec else ""
+
+
+def hosted_base_url(provider: str) -> str:
+    """Where a turn on this provider is sent. "" for an unknown provider,
+    which `resolve_route` treats as "not available" rather than guessing."""
+    spec = HOSTED_PROVIDERS.get(provider)
+    return spec["base_url"] if spec else ""
 
 
 def offered() -> tuple[LocalModel, ...]:

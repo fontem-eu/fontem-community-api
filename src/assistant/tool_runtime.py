@@ -329,12 +329,16 @@ def resolve_route(
     chosen = local_models.resolve(local_model_id)
     if chosen.hosted:
         platform_key = local_models.hosted_key(chosen.provider)
-        if platform_key:
+        base = local_models.hosted_base_url(chosen.provider)
+        # Both are required. A model naming a provider we have no base URL for
+        # must fall through to the local server, not be sent to whichever
+        # provider happens to be first in the table.
+        if platform_key and base:
             # Our key, our bill. Hosted providers answer in seconds; the
             # cluster-local one generates on CPU and takes minutes, hence the
             # timeout gap.
-            return Route(local_models.NEBIUS_BASE_URL, platform_key,
-                         chosen.served_name, local=False, timeout=120.0), ""
+            return Route(base, platform_key, chosen.served_name,
+                         local=False, timeout=120.0), ""
 
     if local_url:
         # The caller picks from a curated list of ids, never a model name.

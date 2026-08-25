@@ -273,14 +273,22 @@ class TestAnonymousAssistant:
         # order of LOCAL_MODELS, so this is what stops the two drifting:
         # reorder that tuple, or add a smaller model, and this fails.
         def billions(model) -> float:
-            # "qwen3-1.7b" -> 1.7. Every id we offer ends in a size.
+            # "qwen3-1.7b" -> 1.7. True of every LOCAL id; the hosted ones are
+            # named after their product ("minimax-m3", "ox-alpha") and carry no
+            # parseable size, which is fine because they are excluded below.
             return float(model.id.rsplit("-", 1)[1].rstrip("b"))
 
         chosen = local_models.resolve(local_models.ANONYMOUS_MODEL_ID)
         assert chosen.id == local_models.ANONYMOUS_MODEL_ID, \
             "the anonymous model must be one we actually offer"
-        assert billions(chosen) == min(billions(m)
-                                       for m in local_models.LOCAL_MODELS)
+        # Never a hosted model: an anonymous turn carries no account and no
+        # metering, so one we pay for is billable by anyone who can reach the
+        # endpoint. local_models.anonymous_model_id() enforces this; this is
+        # the second pair of eyes on the constant it reads.
+        assert not chosen.hosted, \
+            "the anonymous model must not be one the platform pays for"
+        local = [m for m in local_models.LOCAL_MODELS if not m.hosted]
+        assert billions(chosen) == min(billions(m) for m in local)
 
     def test_the_caller_cannot_name_the_model(self, client, recording):
         # Pinned on the outcome rather than the absence of a field: if a
