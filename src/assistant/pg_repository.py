@@ -24,6 +24,25 @@ from src.assistant.repository import (
 )
 
 
+def _to_turn(m: AssistMessage) -> Turn:
+    """One stored row as the model should see it.
+
+    A tool row keeps the tool's name in `content` — that is what the
+    provenance view reads — so the turn puts the name in `name` and the
+    stored result in `content`. Rendering them the other way round is how a
+    tool row came to read as "Assistant: search_companies".
+    """
+    if m.role != "tool":
+        return Turn(role=m.role, content=m.content, message_id=m.id)
+    extras = m.extras or {}
+    return Turn(
+        role="tool",
+        content=str(extras.get("result") or ""),
+        name=m.content,
+        message_id=m.id,
+    )
+
+
 def _to_conv_dc(row: AssistConversationModel) -> AssistConversation:
     return AssistConversation(
         id=row.id,
@@ -32,6 +51,8 @@ def _to_conv_dc(row: AssistConversationModel) -> AssistConversation:
         created_at=row.created_at,
         updated_at=row.updated_at,
         title=row.title,
+        summary=row.summary or "",
+        summary_through=row.summary_through or "",
     )
 
 
@@ -266,9 +287,24 @@ class PgAssistRepository(AssistRepository):
         rows = (await self._session.execute(stmt)).scalars().all()
         return [_to_msg_dc(r) for r in reversed(rows)]
 
+    async def set_summary(
+        self, conversation_id: str, summary: str, through_message_id: str,
+    ) -> None:
+        """Store the rolling summary and how far it reaches.
+
+        `through_message_id` is what makes the next overflow cheap: it
+        summarises only what has fallen off since, rather than re-reading the
+        conversation from the start.
+        """
+        await self._session.execute(
+            update(AssistConversationModel)
+            .where(AssistConversationModel.id == conversation_id)
+            .values(summary=summary, summary_through=through_message_id)
+        )
+
     async def history_turns(self, conversation_id: str) -> list[Turn]:
         messages = await self.list_messages(conversation_id)
-        return [Turn(role=m.role, content=m.content) for m in messages]
+        return [_to_turn(m) for m in messages]
 
     async def commit(self) -> None:
         await self._session.commit()

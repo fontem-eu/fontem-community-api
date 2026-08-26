@@ -9,7 +9,7 @@ implementation lives in ``pg_repository.py``.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from typing import Callable
 from uuid import uuid4
@@ -41,6 +41,9 @@ class AssistConversation:
     #: Populated by list_conversations; not stored.
     message_count: int = 0
     last_snippet: str = ""
+    summary: str = ""
+    summary_through: str = ""
+
 
 
 @dataclass
@@ -58,6 +61,25 @@ class AssistMessage:
 
 
 # ── Abstract interface ────────────────────────────────────────
+
+
+def _to_turn(m: AssistMessage) -> Turn:
+    """One stored row as the model should see it.
+
+    A tool row keeps the tool's name in `content` — the provenance view reads
+    it there — so the turn carries the name in `name` and the stored result in
+    `content`. The other way round is how a tool row came to render as
+    "Assistant: search_companies".
+    """
+    if m.role != "tool":
+        return Turn(role=m.role, content=m.content, message_id=m.id)
+    extras = m.extras or {}
+    return Turn(
+        role="tool",
+        content=str(extras.get("result") or ""),
+        name=m.content,
+        message_id=m.id,
+    )
 
 
 class AssistRepository(ABC):
@@ -143,6 +165,13 @@ class AssistRepository(ABC):
         ``(created_at, id)``: created_at alone is not unique, because a turn
         can write several tool rows inside the same clock tick.
         """
+
+    @abstractmethod
+    async def set_summary(
+        self, conversation_id: str, summary: str, through_message_id: str,
+    ) -> None:
+        """Store the rolling summary and the message it reaches through."""
+        ...
 
     @abstractmethod
     async def history_turns(self, conversation_id: str) -> list[Turn]:
@@ -313,10 +342,19 @@ class InMemoryAssistRepository(AssistRepository):
             rows = [m for m in rows if (m.created_at, m.id) < before]
         return rows[-limit:] if limit > 0 else []
 
+    async def set_summary(
+        self, conversation_id: str, summary: str, through_message_id: str,
+    ) -> None:
+        conv = self._conversations.get(conversation_id)
+        if conv is None:
+            return
+        self._conversations[conversation_id] = replace(
+            conv, summary=summary, summary_through=through_message_id,
+        )
+
     async def history_turns(self, conversation_id: str) -> list[Turn]:
         return [
-            Turn(role=m.role, content=m.content)
-            for m in await self.list_messages(conversation_id)
+            _to_turn(m) for m in await self.list_messages(conversation_id)
         ]
 
     async def commit(self) -> None:

@@ -25,13 +25,19 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator as TypingAsyncIterator, Protocol
 
-from src.assistant import context_budget, local_models, navigation, tool_budget
+from src.assistant import (
+    context_budget,
+    local_models,
+    navigation,
+    summariser,
+    tool_budget,
+)
 from src.services import audit_context
 from src.assistant.context import (
     TurnLimits,
     budget_context_block,
     build_system_prompt,
-    truncate_history,
+    fit_history,
 )
 from src.assistant.repository import AssistRepository, DailyUsage
 from src.assistant.tokens import (
@@ -118,6 +124,13 @@ class ProxyClient(Protocol):
 # ── Service ────────────────────────────────────────────────────
 
 
+def _cap(value: object, limit: int) -> str:
+    """One stored tool result, bounded. Non-strings are not stored."""
+    if not isinstance(value, str):
+        return ""
+    return value if len(value) <= limit else value[:limit]
+
+
 class AssistantService:
 
     def __init__(
@@ -183,8 +196,24 @@ class AssistantService:
         # not from a module constant. The constant was sized for the smallest
         # context we serve, which handed a 1M-token model the same ~7,700
         # tokens of conversation as a 32k one.
-        prior = await self._repo.history_turns(conv.id)
-        windowed = truncate_history(prior, self._limits_for(req.local_model_id))
+        stored = await self._repo.history_turns(conv.id)
+        # What the stored summary already covers is represented by the
+        # summary, not by the turns themselves — otherwise they fall off again
+        # every turn and get folded in again, and the summary restates itself.
+        prior = summariser.unsummarised(stored, conv.summary_through)
+        windowed, overflow = fit_history(prior, self._limits_for(req.local_model_id))
+
+        # Summarise only what just fell off, and only when something did.
+        #
+        # A conversation that fits its budget produces no summary and pays for
+        # none — on a 1M-token model that is effectively every conversation.
+        # When turns do fall off, dropping them silently is what makes a long
+        # chat start contradicting decisions taken earlier in itself.
+        summary = conv.summary
+        if overflow:
+            summary = await self._roll_summary(conv, summary, overflow, req)
+        if summary:
+            windowed = [summariser.render(summary), *windowed]
 
         budgeted_context = budget_context_block(
             req.context_block, char_budget=self._context_budget
@@ -298,11 +327,11 @@ class AssistantService:
                 if text:
                     assistant_buf.append(text)
             elif event == "tool_result":
-                # One row per tool call: what was called and with which
-                # arguments. Not the result — a tool that returns 90k of JSON
-                # would make the conversation store mostly tool output, and
-                # the argument is what says whether the agent did what was
-                # asked. The id is the one minted where the call ran, so an
+                # One row per tool call: what was called, with which
+                # arguments, and what came back. The result is capped at
+                # MAX_TOOL_RESULT_CHARS so a tool returning 90k of JSON
+                # cannot make the conversation store mostly tool output.
+                # The id is the one minted where the call ran, so an
                 # activity entry can point straight at this row.
                 await self._persist_tool_call(conv.id, req.user_id, data)
             elif event == "error":
@@ -398,26 +427,95 @@ class AssistantService:
         async for line in self._proxy.stream(payload):
             yield line
 
-    def _limits_for(self, local_model_id: str | None) -> TurnLimits:
-        """Turn limits sized to the model this turn will run on.
+    async def _roll_summary(
+        self, conv, previous: str, dropped: list, req,
+    ) -> str:
+        """Fold the newly dropped turns into the rolling summary.
 
-        `self._turn_limits` stays the floor: whatever the arithmetic says, no
-        model gets a smaller window than the fixed constant it had before.
+        Best-effort by design. A summariser that fails must not take down the
+        turn the user is waiting on: the window is already correct without a
+        summary, it is merely poorer. Returning `previous` keeps whatever was
+        already known rather than discarding it on a transient failure.
         """
+        request = summariser.build_request(previous, dropped)
+        if not request:
+            return previous
+
+        payload: dict = {
+            "system": summariser.SYSTEM_PROMPT,
+            "message": request,
+            "nav": None,
+            # No tools and no editor: this call reads text and returns text.
+            # Handing it the tool surface invites it to go looking things up
+            # mid-summary, which is neither wanted nor paid for.
+            "has_editor": False,
+        }
+        if req.local_model_id:
+            payload["local_model_id"] = req.local_model_id
+        if req.credential:
+            provider, api_key, model = req.credential
+            payload["credential"] = {
+                "provider": provider, "api_key": api_key, "model": model,
+            }
+
+        buf: list[str] = []
+        try:
+            async for line in self._proxy.stream(payload):
+                parsed = _parse_sse_line(line)
+                if parsed is None:
+                    continue
+                event, data = parsed
+                if event == "chunk":
+                    text = _extract_chunk_text(data)
+                    if text:
+                        buf.append(text)
+                elif event == "error":
+                    return previous
+        except Exception:  # pylint: disable=broad-except
+            # Deliberately broad: every transport failure mode reaching here
+            # has the same right answer, which is to answer the user anyway.
+            return previous
+
+        rolled = summariser.cap("".join(buf))
+        if not rolled:
+            return previous
+        await self._repo.set_summary(conv.id, rolled, dropped[-1].message_id or "")
+        return rolled
+
+    def _tool_chars_for(self, local_model_id: str | None) -> int:
+        """This turn's ceiling on all tool output, together.
+
+        The same derivation as the history window, using the other half of
+        the split. `MAX_TOOL_RESULT_CHARS_PER_TURN` stays the floor, so no
+        model gets less room for tool output than it had before — but a model
+        with a large context stops being held to a number that was sized
+        against a 16k window.
+        """
+        return self._budget_for(local_model_id).tool_chars
+
+    def _budget_for(self, local_model_id: str | None) -> context_budget.ContextBudget:
         model = local_models.resolve(local_model_id)
-        budget = context_budget.derive(
+        return context_budget.derive(
             context_tokens=model.context_tokens,
             fixed_prefix_chars=self._fixed_prefix_chars,
             reply_tokens=self._reply_tokens,
             floor_history_chars=self._turn_limits.max_chars,
             floor_tool_chars=tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN,
         )
-        # Constructed rather than `replace`d: dataclasses.replace is typed as
-        # returning DataclassInstance, so the annotation on this function would
-        # be a claim the type checker cannot support.
+
+    def _limits_for(self, local_model_id: str | None) -> TurnLimits:
+        """Turn limits sized to the model this turn will run on.
+
+        `self._turn_limits` stays the floor: whatever the arithmetic says, no
+        model gets a smaller window than the fixed constant it had before.
+
+        Constructed rather than `replace`d: dataclasses.replace is typed as
+        returning DataclassInstance, so the -> TurnLimits annotation would be
+        a claim the type checker cannot support.
+        """
         return TurnLimits(
             max_turns=self._turn_limits.max_turns,
-            max_chars=budget.history_chars,
+            max_chars=self._budget_for(local_model_id).history_chars,
             keep_fraction=self._turn_limits.keep_fraction,
         )
 
@@ -450,9 +548,19 @@ class AssistantService:
             extras={
                 "args": payload.get("args") or {},
                 "elapsed": payload.get("elapsed"),
-                # How much the tool produced, even though we keep none of it.
+                # How much the tool produced, before any capping.
                 "bytes": payload.get("bytes"),
                 "truncated": bool(payload.get("truncated")),
+                # The result now travels with the call.
+                #
+                # It used to be dropped so the store would not become mostly
+                # tool output, which also meant the next turn had no idea what
+                # the last one found — the model would re-run a search it had
+                # already run, and the panel rendered historical tool bubbles
+                # with an empty body. Capped at the same ceiling that binds a
+                # result on its way into the model, so one row cannot be
+                # unbounded either.
+                "result": _cap(payload.get("result"), tool_budget.MAX_TOOL_RESULT_CHARS),
             },
             message_id=payload.get("call_id") or None,
         )
