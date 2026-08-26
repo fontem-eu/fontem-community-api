@@ -57,6 +57,10 @@ class AssistConversationModel(Base):
         UUID(as_uuid=False), nullable=False,
     )
     conversation_key: Mapped[str] = mapped_column(Text, nullable=False)
+    #: What the switcher shows. Nullable: a conversation has no title until
+    #: it has a first message to take one from, and an "Untitled" row is
+    #: worse than an absent title the UI fills in from the opening question.
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
     )

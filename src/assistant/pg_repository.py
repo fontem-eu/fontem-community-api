@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.assistant.context import Turn
@@ -30,6 +30,7 @@ def _to_conv_dc(row: AssistConversationModel) -> AssistConversation:
         conversation_key=row.conversation_key,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        title=row.title,
     )
 
 
@@ -132,6 +133,126 @@ class PgAssistRepository(AssistRepository):
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         return [_to_msg_dc(r) for r in rows]
+
+    async def list_conversations(self, user_id: str) -> list[AssistConversation]:
+        """Every conversation, newest activity first, with counts and a snippet.
+
+        One query for the conversations and one for the per-conversation
+        aggregates, rather than a query per row: a switcher that costs N+1
+        round trips gets slower exactly as it becomes more useful.
+        """
+        convs = (await self._session.execute(
+            select(AssistConversationModel)
+            .where(AssistConversationModel.user_id == user_id)
+            .order_by(AssistConversationModel.updated_at.desc())
+        )).scalars().all()
+        if not convs:
+            return []
+
+        ids = [c.id for c in convs]
+        counts = dict((await self._session.execute(
+            select(AssistMessageModel.conversation_id, func.count())
+            .where(AssistMessageModel.conversation_id.in_(ids))
+            .group_by(AssistMessageModel.conversation_id)
+        )).all())
+
+        # The last thing SAID, not the last row written: a tool call is the
+        # agent's bookkeeping and tells the reader nothing about which
+        # conversation this is.
+        newest = (await self._session.execute(
+            select(
+                AssistMessageModel.conversation_id,
+                AssistMessageModel.content,
+                func.row_number().over(
+                    partition_by=AssistMessageModel.conversation_id,
+                    order_by=(
+                        AssistMessageModel.created_at.desc(),
+                        AssistMessageModel.id.desc(),
+                    ),
+                ).label("rn"),
+            )
+            .where(
+                AssistMessageModel.conversation_id.in_(ids),
+                AssistMessageModel.role.in_(("user", "assistant")),
+            )
+            .subquery()
+            .select()
+        )).all()
+        snippets = {r[0]: (r[1] or "")[:120] for r in newest if r[2] == 1}
+
+        out = []
+        for row in convs:
+            dc = _to_conv_dc(row)
+            dc.message_count = counts.get(row.id, 0)
+            dc.last_snippet = snippets.get(row.id, "")
+            out.append(dc)
+        return out
+
+    async def rename_conversation(
+        self, user_id: str, conversation_key: str, title: str
+    ) -> bool:
+        result = await self._session.execute(
+            update(AssistConversationModel)
+            .where(and_(
+                AssistConversationModel.user_id == user_id,
+                AssistConversationModel.conversation_key == conversation_key,
+            ))
+            .values(title=title)
+        )
+        return bool(result.rowcount)
+
+    async def delete_conversation(self, user_id: str, conversation_key: str) -> bool:
+        row = (await self._session.execute(
+            select(AssistConversationModel).where(and_(
+                AssistConversationModel.user_id == user_id,
+                AssistConversationModel.conversation_key == conversation_key,
+            ))
+        )).scalar_one_or_none()
+        if row is None:
+            return False
+        # Messages first: the FK is not declared ON DELETE CASCADE, so the
+        # parent will not take them with it.
+        await self._session.execute(
+            delete(AssistMessageModel).where(
+                AssistMessageModel.conversation_id == row.id
+            )
+        )
+        await self._session.execute(
+            delete(AssistConversationModel).where(
+                AssistConversationModel.id == row.id
+            )
+        )
+        return True
+
+    async def page_messages(
+        self,
+        conversation_id: str,
+        *,
+        limit: int,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[AssistMessage]:
+        """The newest `limit` messages before the cursor, oldest-first.
+
+        Ordered DESC in the query so the database can stop after `limit`
+        rows, then reversed for the caller, who renders oldest-first.
+        """
+        stmt = select(AssistMessageModel).where(
+            AssistMessageModel.conversation_id == conversation_id
+        )
+        if before is not None:
+            created_at, msg_id = before
+            # Row-wise comparison: the tuple (created_at, id) is the key, and
+            # comparing the pair is what makes the page boundary exact when
+            # several rows share a timestamp.
+            stmt = stmt.where(
+                tuple_(AssistMessageModel.created_at, AssistMessageModel.id)
+                < (created_at, msg_id)
+            )
+        stmt = stmt.order_by(
+            AssistMessageModel.created_at.desc(), AssistMessageModel.id.desc()
+        ).limit(limit)
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_to_msg_dc(r) for r in reversed(rows)]
 
     async def history_turns(self, conversation_id: str) -> list[Turn]:
         messages = await self.list_messages(conversation_id)
