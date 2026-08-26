@@ -166,6 +166,20 @@ def _fits(history: list[Turn], limits: TurnLimits) -> bool:
     )
 
 
+def _render_turn(turn: Turn) -> str:
+    """One history turn as the model should read it.
+
+    A tool turn is named rather than attributed to the assistant. Rendering it
+    as "Assistant: search_companies" made the model read the tool's name as
+    something the assistant had said.
+    """
+    if turn.role != "tool":
+        label = "User" if turn.role == "user" else "Assistant"
+        return f"{label}: {turn.content}"
+    head = f"Tool {turn.name}" if turn.name else "Tool"
+    return f"{head}: {turn.content}" if turn.content else f"{head}: (called)"
+
+
 def build_system_prompt(
     base_prompt: str,
     context_block: str,
@@ -205,18 +219,7 @@ def build_system_prompt(
         parts.append("Current context:\n" + context_block.rstrip())
 
     if history:
-        rendered = []
-        for turn in history:
-            if turn.role == "tool":
-                # Named, so the model can tell its own tool output from
-                # something a person said.
-                head = f"Tool {turn.name}" if turn.name else "Tool"
-                rendered.append(
-                    f"{head}: {turn.content}" if turn.content else f"{head}: (called)"
-                )
-                continue
-            label = "User" if turn.role == "user" else "Assistant"
-            rendered.append(f"{label}: {turn.content}")
-        parts.append("Previous conversation:\n" + "\n".join(rendered))
+        rendered = "\n".join(_render_turn(t) for t in history)
+        parts.append("Previous conversation:\n" + rendered)
 
     return "\n\n".join(parts)
