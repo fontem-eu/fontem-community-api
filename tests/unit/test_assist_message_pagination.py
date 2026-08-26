@@ -150,3 +150,25 @@ def test_an_unusable_cursor_reads_as_the_newest_page(bad):
     the useful answer is the start of the list, not an error the UI cannot
     act on."""
     assert _decode_cursor(bad) is None
+
+
+# --- routing ----------------------------------------------------------------
+
+def test_the_paged_route_is_declared_before_the_greedy_one():
+    """`{conversation_key:path}` matches "chat:abc/messages" whole.
+
+    Declared after the transcript route, the paged endpoint is unreachable:
+    every request for a page lands on the handler that returns the entire
+    conversation, which is the thing paging exists to avoid. It shipped that
+    way and only an isolation test noticed, by asking for a field the
+    transcript response does not carry.
+    """
+    from src.assistant.router import router  # pylint: disable=import-outside-toplevel
+
+    paths = [r.path for r in router.routes if "conversations" in getattr(r, "path", "")]
+    paged = paths.index("/assist/conversations/{conversation_key:path}/messages")
+    transcript = paths.index("/assist/conversations/{conversation_key:path}")
+    assert paged < transcript, (
+        "the /messages route must be declared first or the greedy path "
+        "converter swallows it"
+    )
