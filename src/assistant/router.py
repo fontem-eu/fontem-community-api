@@ -10,6 +10,7 @@ No business logic lives here.
 # Same call as src/api/routers/auth.py.
 
 from collections.abc import AsyncGenerator
+from datetime import datetime
 import os
 from typing import Annotated
 
@@ -330,6 +331,93 @@ async def get_conversation(
             }
             for m in messages
         ],
+    }
+
+
+#: How many messages one page carries.
+#:
+#: The panel renders the newest page on open and pulls older ones as the
+#: reader scrolls up, so this is "enough to fill a tall panel and a bit
+#: more", not "enough to hold a conversation".
+DEFAULT_PAGE_SIZE = 30
+
+#: A caller can ask for more, but not for the whole transcript by setting
+#: limit=100000 — that is the behaviour this endpoint exists to replace.
+MAX_PAGE_SIZE = 100
+
+
+def _encode_cursor(msg: dict) -> str:
+    """Opaque cursor for one message row: its (created_at, id) key."""
+    return f"{msg['created_at']}|{msg['id']}"
+
+
+def _decode_cursor(raw: str) -> tuple[datetime, str] | None:
+    """Parse a cursor, or None if it is unusable.
+
+    A malformed cursor returns the newest page rather than a 422. It is an
+    opaque token the client got from us; when it is wrong the useful answer
+    is the start of the list, not an error the UI has no way to act on.
+    """
+    if not raw:
+        return None
+    stamp, _, msg_id = raw.partition("|")
+    if not stamp or not msg_id:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return parsed, msg_id
+
+
+@router.get("/conversations/{conversation_key:path}/messages")
+@inject
+async def page_conversation_messages(
+    conversation_key: str,
+    *,
+    service: FromDishka[AssistantService],
+    user: Annotated[User, Depends(get_current_user)],
+    before: str = "",
+    limit: int = DEFAULT_PAGE_SIZE,
+) -> dict:
+    """One page of a conversation, newest first, oldest-first within the page.
+
+    The unpaged sibling above returns every message a conversation has ever
+    held. That is fine for provenance tooling and wrong for a panel someone
+    opens twenty times a day.
+
+    `before` is the `next_before` from a previous response. Omit it for the
+    newest page.
+    """
+    limit = max(1, min(limit, MAX_PAGE_SIZE))
+    # pylint: disable=protected-access
+    conv = await service._repo.find_or_create_conversation(user.id, conversation_key)
+    rows = await service._repo.page_messages(
+        conv.id, limit=limit, before=_decode_cursor(before),
+    )
+    # pylint: enable=protected-access
+    messages = [
+        {
+            "id": m.id,
+            "role": m.role,
+            "content": m.content,
+            "created_at": m.created_at.isoformat(),
+            "tokens_in": m.tokens_in,
+            "tokens_out": m.tokens_out,
+            "model": m.model,
+            "extras": m.extras or {},
+        }
+        for m in rows
+    ]
+    # A full page means there is probably more; a short one means there is
+    # not. Cheaper than a count, and the cost of being wrong is one request
+    # that comes back empty.
+    has_more = len(rows) == limit
+    return {
+        "conversation_key": conversation_key,
+        "messages": messages,
+        "has_more": has_more,
+        "next_before": _encode_cursor(messages[0]) if has_more and messages else "",
     }
 
 

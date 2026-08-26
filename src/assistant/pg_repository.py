@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.assistant.context import Turn
@@ -132,6 +132,36 @@ class PgAssistRepository(AssistRepository):
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         return [_to_msg_dc(r) for r in rows]
+
+    async def page_messages(
+        self,
+        conversation_id: str,
+        *,
+        limit: int,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[AssistMessage]:
+        """The newest `limit` messages before the cursor, oldest-first.
+
+        Ordered DESC in the query so the database can stop after `limit`
+        rows, then reversed for the caller, who renders oldest-first.
+        """
+        stmt = select(AssistMessageModel).where(
+            AssistMessageModel.conversation_id == conversation_id
+        )
+        if before is not None:
+            created_at, msg_id = before
+            # Row-wise comparison: the tuple (created_at, id) is the key, and
+            # comparing the pair is what makes the page boundary exact when
+            # several rows share a timestamp.
+            stmt = stmt.where(
+                tuple_(AssistMessageModel.created_at, AssistMessageModel.id)
+                < (created_at, msg_id)
+            )
+        stmt = stmt.order_by(
+            AssistMessageModel.created_at.desc(), AssistMessageModel.id.desc()
+        ).limit(limit)
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_to_msg_dc(r) for r in reversed(rows)]
 
     async def history_turns(self, conversation_id: str) -> list[Turn]:
         messages = await self.list_messages(conversation_id)
