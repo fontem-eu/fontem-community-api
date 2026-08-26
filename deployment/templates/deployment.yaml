@@ -3,6 +3,23 @@ kind: Deployment
 metadata:
   name: fontem-community-api
   namespace: {{ .Release.Namespace }}
+  {{- if .Values.chaos }}{{- if .Values.chaos.enabled }}
+  # kube-monkey reads these from the Deployment's own labels. They lived on
+  # the pod template for months, where kube-monkey never looks, so nothing was
+  # ever eligible — the chaos monkey looked armed and killed nothing.
+  #
+  # Gated, and off unless a values file turns it on. Production must never
+  # carry them: prod inherits this same chart, and a label that opts a
+  # workload into being killed has no business defaulting to on.
+  labels:
+    kube-monkey/enabled: enabled
+    kube-monkey/identifier: fontem-community-api
+    kube-monkey/mtbf: {{ .Values.chaos.mtbf | default 2 | quote }}
+    kube-monkey/kill-mode: fixed
+    kube-monkey/kill-value: "1"
+    # Read by the chaos runner's richer faults, which select on this alone.
+    chaos/eligible: "true"
+  {{- end }}{{- end }}
 spec:
   replicas: {{ .Values.replicas | default 1 }}
   strategy:
@@ -17,11 +34,6 @@ spec:
     metadata:
       labels:
         app: fontem-community-api
-        kube-monkey/enabled: enabled
-        kube-monkey/identifier: fontem-community-api
-        kube-monkey/mtbf: "2"
-        kube-monkey/kill-mode: fixed
-        kube-monkey/kill-value: "1"
     spec:
       imagePullSecrets:
         - name: regcred
