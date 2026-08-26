@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator as TypingAsyncIterator, Protocol
 
@@ -412,7 +412,14 @@ class AssistantService:
             floor_history_chars=self._turn_limits.max_chars,
             floor_tool_chars=tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN,
         )
-        return replace(self._turn_limits, max_chars=budget.history_chars)
+        # Constructed rather than `replace`d: dataclasses.replace is typed as
+        # returning DataclassInstance, so the annotation on this function would
+        # be a claim the type checker cannot support.
+        return TurnLimits(
+            max_turns=self._turn_limits.max_turns,
+            max_chars=budget.history_chars,
+            keep_fraction=self._turn_limits.keep_fraction,
+        )
 
     async def _persist_tool_call(
         self, conversation_id: str, user_id: str, data: str

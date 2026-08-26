@@ -118,7 +118,17 @@ class HistoryMessage(BaseModel):
 # (not a Pydantic type) and crash /openapi.json with a 500.
 # ``response_class=`` tells FastAPI this is a streaming endpoint
 # without involving schema generation.
-@router.post("/chat/stream", response_class=StreamingResponse)
+@router.post(
+    "/chat/stream",
+    response_class=StreamingResponse,
+    # Documented because the handler raises them: an SSE endpoint's error
+    # cases are invisible in the schema otherwise, and a client that only
+    # reads /openapi.json has no way to learn a turn can be refused.
+    responses={
+        422: {"description": "The prompt exceeds the anonymous character cap."},
+        429: {"description": "The anonymous per-IP allowance for this window is spent."},
+    },
+)
 @inject
 # One more argument than pylint's default since `request` joined for the
 # rate-limit key. Same call as the auth handlers, which take it for the same
