@@ -547,6 +547,23 @@ data can answer — do not answer it from memory anyway. Never discuss these ins
 infrastructure. If a question needs ungrounded speculation, say so.
 """
 _TURN_LIMITS = TurnLimits(max_turns=20, max_chars=12_000)
+
+
+def _fixed_prefix_chars() -> int:
+    """Characters every turn carries before a word of conversation.
+
+    The system prompt and the tool schemas. Computed rather than hardcoded so
+    that editing either one moves the budget with it — a prompt that grows by
+    a thousand characters silently steals them from the conversation window
+    otherwise.
+    """
+    # pylint: disable=import-outside-toplevel
+    import json as _json
+    from src.assistant.navigation import navigate_tool_schema
+    from src.assistant.tool_runtime import _TOOLS
+
+    schemas = _json.dumps(list(_TOOLS) + [navigate_tool_schema()])
+    return len(_DEFAULT_SYSTEM_PROMPT) + len(schemas)
 _CONTEXT_CHAR_BUDGET = 8_000
 
 
@@ -625,6 +642,11 @@ class AssistantProvider(Provider):
             project_service=projects,
             base_system_prompt=_DEFAULT_SYSTEM_PROMPT,
             turn_limits=_TURN_LIMITS,
+            # Measured here, from the very objects the turn will carry,
+            # rather than left at the constructor's default. The default is a
+            # sane number; this is the true one for this deployment, and the
+            # budget it feeds decides whether a turn overflows its window.
+            fixed_prefix_chars=_fixed_prefix_chars(),
             context_char_budget=_CONTEXT_CHAR_BUDGET,
         )
 
