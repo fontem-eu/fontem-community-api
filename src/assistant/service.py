@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator as TypingAsyncIterator, Protocol
 
-from src.assistant import local_models, navigation
+from src.assistant import context_budget, local_models, navigation, tool_budget
 from src.services import audit_context
 from src.assistant.context import (
     TurnLimits,
@@ -128,11 +128,22 @@ class AssistantService:
         turn_limits: TurnLimits,
         context_char_budget: int,
         project_service=None,
+        #: Characters of system prompt + tool schemas that every turn carries
+        #: before any conversation. Measured at wiring time rather than
+        #: guessed: it is the same for every turn, and guessing it is how a
+        #: budget overflows in production but not in a test.
+        fixed_prefix_chars: int = 7_176,
+        #: Tokens reserved for the model's own reply. Not slack — a window
+        #: that fits the conversation and leaves nothing to answer with fails
+        #: the same way an overflow does, one step later.
+        reply_tokens: int = 4_000,
     ) -> None:
         self._repo = repo
         self._proxy = proxy_client
         self._base_prompt = base_system_prompt
         self._turn_limits = turn_limits
+        self._fixed_prefix_chars = fixed_prefix_chars
+        self._reply_tokens = reply_tokens
         self._context_budget = context_char_budget
         self._projects = project_service
 
@@ -167,8 +178,13 @@ class AssistantService:
         )
 
         # Build history view for the LLM, from persisted rows only.
+        #
+        # The window is sized from the model this turn will actually run on,
+        # not from a module constant. The constant was sized for the smallest
+        # context we serve, which handed a 1M-token model the same ~7,700
+        # tokens of conversation as a 32k one.
         prior = await self._repo.history_turns(conv.id)
-        windowed = truncate_history(prior, self._turn_limits)
+        windowed = truncate_history(prior, self._limits_for(req.local_model_id))
 
         budgeted_context = budget_context_block(
             req.context_block, char_budget=self._context_budget
@@ -381,6 +397,22 @@ class AssistantService:
         }
         async for line in self._proxy.stream(payload):
             yield line
+
+    def _limits_for(self, local_model_id: str | None) -> TurnLimits:
+        """Turn limits sized to the model this turn will run on.
+
+        `self._turn_limits` stays the floor: whatever the arithmetic says, no
+        model gets a smaller window than the fixed constant it had before.
+        """
+        model = local_models.resolve(local_model_id)
+        budget = context_budget.derive(
+            context_tokens=model.context_tokens,
+            fixed_prefix_chars=self._fixed_prefix_chars,
+            reply_tokens=self._reply_tokens,
+            floor_history_chars=self._turn_limits.max_chars,
+            floor_tool_chars=tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN,
+        )
+        return replace(self._turn_limits, max_chars=budget.history_chars)
 
     async def _persist_tool_call(
         self, conversation_id: str, user_id: str, data: str
