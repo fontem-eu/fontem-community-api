@@ -105,6 +105,24 @@ class AssistRepository(ABC):
         ...
 
     @abstractmethod
+    async def page_messages(
+        self,
+        conversation_id: str,
+        *,
+        limit: int,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[AssistMessage]:
+        """The newest ``limit`` messages, oldest-first within the page.
+
+        Keyset, not offset. Messages are appended constantly — a tool call
+        lands mid-scroll — and an offset shifts underneath the reader, so
+        page two silently repeats or skips a row. The cursor is
+        ``(created_at, id)``: created_at alone is not unique, because a turn
+        can write several tool rows inside the same clock tick.
+        """
+        ...
+
+    @abstractmethod
     async def history_turns(self, conversation_id: str) -> list[Turn]:
         ...
 
@@ -220,6 +238,21 @@ class InMemoryAssistRepository(AssistRepository):
             m for m in self._messages
             if m.conversation_id == conversation_id
         ]
+
+    async def page_messages(
+        self,
+        conversation_id: str,
+        *,
+        limit: int,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[AssistMessage]:
+        rows = sorted(
+            (m for m in self._messages if m.conversation_id == conversation_id),
+            key=lambda m: (m.created_at, m.id),
+        )
+        if before is not None:
+            rows = [m for m in rows if (m.created_at, m.id) < before]
+        return rows[-limit:] if limit > 0 else []
 
     async def history_turns(self, conversation_id: str) -> list[Turn]:
         return [
