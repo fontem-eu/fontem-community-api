@@ -163,3 +163,35 @@ class TestUnauthenticated:
         assert client.get(
             f"/assist/conversations/{victim_key}/messages"
         ).status_code in (401, 403)
+
+
+class TestConcurrentFirstTouch:
+    """Two requests reaching an untouched key at once must converge.
+
+    The panel opens by firing the transcript request and the paged-messages
+    request together. On a key neither has seen, SELECT-then-INSERT let both
+    miss the SELECT and both INSERT, and the loser violated
+    uq_assist_conv_user_key — an intermittent 500 on the first open of every
+    new chat, and a 500 for anyone probing a key they do not own.
+    """
+
+    def test_racing_reads_on_a_fresh_key_all_succeed(self, client, user2_id):
+        import concurrent.futures as cf
+
+        h = make_headers(user2_id)
+        key = "chat:11111111-2222-3333-4444-555555555555"
+        paths = [
+            f"/assist/conversations/{key}",
+            f"/assist/conversations/{key}/messages",
+        ] * 4
+
+        with cf.ThreadPoolExecutor(max_workers=8) as pool:
+            codes = [r.status_code for r in pool.map(lambda p: client.get(p, headers=h), paths)]
+
+        assert all(c == 200 for c in codes), f"expected all 200, got {codes}"
+
+        # And they converged on one row rather than each minting their own:
+        # the loser of the insert has to read the winner's conversation.
+        listed = client.get("/assist/conversations", headers=h)
+        matching = [c for c in listed.json()["conversations"] if c["conversation_key"] == key]
+        assert len(matching) == 1, f"expected one row for {key}, got {len(matching)}"

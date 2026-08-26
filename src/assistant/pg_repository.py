@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import and_, delete, func, select, tuple_, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.assistant.context import Turn
@@ -66,11 +67,22 @@ class PgAssistRepository(AssistRepository):
         row = (await self._session.execute(stmt)).scalar_one_or_none()
         if row is not None:
             return _to_conv_dc(row)
-        row = AssistConversationModel(
-            user_id=user_id, conversation_key=conversation_key,
+
+        # SELECT-then-INSERT is not idempotent, and the panel opens by firing
+        # the transcript and the paged-messages requests together. On a key
+        # neither of them has seen, both miss the SELECT, both INSERT, and the
+        # loser violates uq_assist_conv_user_key — a 500 on the first open of
+        # every new chat, intermittently.
+        #
+        # ON CONFLICT DO NOTHING makes the insert a no-op for the loser, who
+        # then reads the winner's row. Both callers get the same conversation,
+        # which is what find-or-create promised in the first place.
+        await self._session.execute(
+            pg_insert(AssistConversationModel)
+            .values(user_id=user_id, conversation_key=conversation_key)
+            .on_conflict_do_nothing(constraint="uq_assist_conv_user_key")
         )
-        self._session.add(row)
-        await self._session.flush()
+        row = (await self._session.execute(stmt)).scalar_one()
         return _to_conv_dc(row)
 
     async def append_message(
