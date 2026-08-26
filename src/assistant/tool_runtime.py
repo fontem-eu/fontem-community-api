@@ -265,6 +265,67 @@ class Route:
     timeout: float
 
 
+def _callers_own_provider(cred: dict, provider: str, key: str,
+                          default_model: str) -> tuple[Route | None, str]:
+    """Their key, their provider, their bill."""
+    base = PROVIDER_BASE_URLS.get(provider)
+    if base is None:
+        return None, (
+            f"provider {provider!r} is not supported by this engine; "
+            "remove the key to use the built-in model"
+        )
+    # A hosted provider answers in seconds; the local one generates on CPU and
+    # legitimately takes minutes, which is why the timeouts differ by an order
+    # of magnitude.
+    return Route(base, key, cred.get("model") or default_model,
+                 local=False, timeout=120.0), ""
+
+
+def _mock_selected(local_model_id: str | None, mock_url: str) -> bool:
+    """Whether the scripted e2e model is both asked for and available.
+
+    Requires the flag AND a URL, so a half-configured environment falls
+    through to the real models rather than to a dead address.
+    """
+    return bool(
+        (local_model_id or "").strip().lower() == mock_llm.MOCK_MODEL_ID
+        and mock_url and mock_llm.enabled()
+    )
+
+
+def _platform_hosted(chosen) -> Route | None:
+    """A built-in hosted model the platform pays for, if it is configured.
+
+    Both a key and a base URL are required. A model naming a provider we have
+    no base URL for must fall through to the local server, not be sent to
+    whichever provider happens to be first in the table.
+    """
+    if not chosen.hosted:
+        return None
+    platform_key = local_models.hosted_key(chosen.provider)
+    base = local_models.hosted_base_url(chosen.provider)
+    if not (platform_key and base):
+        return None
+    # Our key, our bill, and the same timeout gap as any hosted provider.
+    return Route(base, platform_key, chosen.served_name,
+                 local=False, timeout=120.0)
+
+
+def _cluster_local(local_url: str, chosen) -> Route:
+    """The cluster-local server. No key: it must never be handed a secret.
+
+    A hosted id reaching here means its key is not configured — `_platform_hosted`
+    declined it. Its served_name is a provider's name ("openai/gpt-oss-120b"),
+    which llama-server has never heard of, so fall back to the default rather
+    than asking for a model that cannot exist. A preference outliving its key
+    must degrade, not 404.
+    """
+    served = (local_models.resolve(DEFAULT_LOCAL_MODEL_ID)
+              if chosen.hosted else chosen).served_name
+    return Route(local_url.rstrip("/") + "/v1", "", served,
+                 local=True, timeout=300.0)
+
+
 def resolve_route(
     cred: dict | None,
     *,
@@ -279,83 +340,44 @@ def resolve_route(
     carries a user's secret to a third party or stays inside the cluster.
     Getting it wrong is not a visible bug, it is a leak.
 
-    Order:
+    Order, and it is the whole contract:
       1. The caller supplied a key for a hosted provider — spend theirs.
-      2. Otherwise the cluster-local server, with NO key attached.
-      3. Neither — an error the caller can render, not an exception
+      2. The scripted e2e model, which stands in for the cluster-local one.
+      3. A built-in hosted model the platform pays for.
+      4. The cluster-local server, with NO key attached.
+      5. None of those — an error the caller can render, not an exception
          mid-stream.
 
-    Case 2 is why this exists: the assistant used to be unusable until you
+    Case 4 is why this exists: the assistant used to be unusable until you
     pasted an API key, which meant almost nobody used it.
+
+    Steps 2 and 3 sit after the credential branch, never before it. Ahead of
+    it, a user with their own provider key whose stored id happened to match
+    would have their turn answered by something other than the provider they
+    are paying for; a test says so.
     """
     cred = cred or {}
     provider = (cred.get("provider") or "").strip().lower()
     key = cred.get("api_key") or ""
 
     if provider and provider != LOCAL_PROVIDER and key:
-        base = PROVIDER_BASE_URLS.get(provider)
-        if base is None:
-            return None, (
-                f"provider {provider!r} is not supported by this engine; "
-                "remove the key to use the built-in model"
-            )
-        # Their key, their provider, their bill. A hosted provider answers in
-        # seconds; the local one generates on CPU and legitimately takes
-        # minutes, which is why the timeouts differ by an order of magnitude.
-        return Route(base, key, cred.get("model") or default_model,
-                     local=False, timeout=120.0), ""
+        return _callers_own_provider(cred, provider, key, default_model)
 
-    # The scripted e2e model stands in for the cluster-local one, so it sits
-    # here — after the credential branch, never before it. Ahead of it, a
-    # user with their own provider key whose stored id happened to be the
-    # mock's would have their turn answered by a script instead of the
-    # provider they are paying for; a test says so.
-    #
-    # Requires the flag AND a URL, so a half-configured environment falls
-    # through to the real models rather than to a dead address.
-    if (local_model_id or "").strip().lower() == mock_llm.MOCK_MODEL_ID \
-            and mock_url and mock_llm.enabled():
+    if _mock_selected(local_model_id, mock_url):
         return Route(mock_url.rstrip("/") + "/v1", "", mock_llm.MOCK_MODEL_ID,
                      local=True, timeout=60.0), ""
 
-    # A built-in model the platform pays for. This sits after the credential
-    # branch for the same reason the mock does: a user spending their own key
-    # must keep spending it, whatever their stored id says.
-    #
-    # `resolve` falls back to the default for unknown ids, so this branch is
-    # only reached for an id that really is hosted AND has a key — an
+    # `resolve` falls back to the default for unknown ids, so the hosted branch
+    # is only reached for an id that really is hosted AND has a key — an
     # unconfigured environment falls through to llama-server rather than to a
     # 401 mid-stream.
     chosen = local_models.resolve(local_model_id)
-    if chosen.hosted:
-        platform_key = local_models.hosted_key(chosen.provider)
-        base = local_models.hosted_base_url(chosen.provider)
-        # Both are required. A model naming a provider we have no base URL for
-        # must fall through to the local server, not be sent to whichever
-        # provider happens to be first in the table.
-        if platform_key and base:
-            # Our key, our bill. Hosted providers answer in seconds; the
-            # cluster-local one generates on CPU and takes minutes, hence the
-            # timeout gap.
-            return Route(base, platform_key, chosen.served_name,
-                         local=False, timeout=120.0), ""
+    hosted = _platform_hosted(chosen)
+    if hosted is not None:
+        return hosted, ""
 
     if local_url:
-        # The caller picks from a curated list of ids, never a model name.
-        # local_models.resolve maps the id to what llama-server calls it and
-        # falls back to the default for anything else, so an arbitrary string
-        # cannot reach the server. No key: a cluster-local server must never
-        # be handed a secret.
-        #
-        # A hosted id reaching here means its key is not configured — the
-        # branch above declined it. Its served_name is a provider's name
-        # ("openai/gpt-oss-120b"), which llama-server has never heard of, so
-        # fall back to the default rather than asking for a model that cannot
-        # exist. A preference outliving its key must degrade, not 404.
-        served = (local_models.resolve(DEFAULT_LOCAL_MODEL_ID)
-                  if chosen.hosted else chosen).served_name
-        return Route(local_url.rstrip("/") + "/v1", "", served,
-                     local=True, timeout=300.0), ""
+        return _cluster_local(local_url, chosen), ""
 
     return None, "no model is available: set LOCAL_LLM_URL or supply a key"
 

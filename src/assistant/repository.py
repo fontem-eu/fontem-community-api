@@ -289,7 +289,7 @@ class InMemoryAssistRepository(AssistRepository):
         return False
 
     async def delete_conversation(self, user_id: str, conversation_key: str) -> bool:
-        for conv_id, conv in list(self._conversations.items()):
+        for conv_id, conv in tuple(self._conversations.items()):
             if conv.user_id == user_id and conv.conversation_key == conversation_key:
                 self._messages = [
                     m for m in self._messages if m.conversation_id != conv_id

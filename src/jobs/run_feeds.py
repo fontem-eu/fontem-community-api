@@ -24,6 +24,9 @@ from loguru import logger
 from src.api.di import make_container
 from src.services.feed_runner import FeedRunner
 
+#: One line of a feed run's output, at whichever level it was emitted.
+_RUN_LINE = "feed run {}: {}"
+
 
 async def _main() -> int:
     database_url = os.environ.get("DATABASE_URL")
@@ -48,13 +51,13 @@ async def _main() -> int:
         line = run.summary_line()
         if run.status == "error":
             failed += 1
-            logger.error("feed run {}: {}", run.query_id, line)
+            logger.error(_RUN_LINE, run.query_id, line)
         elif run.truncated_partitions:
             # Not a failure, but it means rows were dropped, and that is
             # exactly the thing this design refuses to let pass silently.
-            logger.warning("feed run {}: {}", run.query_id, line)
+            logger.warning(_RUN_LINE, run.query_id, line)
         else:
-            logger.info("feed run {}: {}", run.query_id, line)
+            logger.info(_RUN_LINE, run.query_id, line)
 
     total_new = sum(r.items_new for r in runs)
     logger.info("refreshed {} queries, {} new items, {} failed",
