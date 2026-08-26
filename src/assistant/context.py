@@ -9,14 +9,23 @@ points are:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
 class Turn:
     """A single chat turn as seen by the LLM."""
-    role: str       # "user" or "assistant"
+    role: str       # "user", "assistant" or "tool"
     content: str
+    #: For role="tool", the tool's name. A tool row used to carry the name in
+    #: `content` and render as "Assistant: search_companies", which the model
+    #: reads as the assistant having said that string. Name and result are
+    #: separate fields so the renderer can label the row for what it is.
+    name: str = ""
+    #: The stored row this turn came from, when it came from one. Lets a
+    #: rolling summary record how far through the conversation it reaches, so
+    #: the next overflow folds in only what has fallen off since.
+    message_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -104,6 +113,73 @@ def truncate_history(history: list[Turn], limits: TurnLimits) -> list[Turn]:
     drop = min(drop, n - 1)
     return list(history[drop:])
 
+def strip_tool_results(history: list[Turn]) -> list[Turn]:
+    """Keep the tool calls, drop what they returned.
+
+    The first step down when a conversation will not fit. Results are the
+    largest rows and the least useful once stale — the model rarely needs the
+    text of a search it ran nine turns ago, but it does need to know it ran
+    it, or it will run it again.
+    """
+    return [
+        replace(t, content="") if t.role == "tool" else t
+        for t in history
+    ]
+
+
+def fit_history(
+    history: list[Turn], limits: TurnLimits,
+) -> tuple[list[Turn], list[Turn]]:
+    """Fit ``history`` into ``limits``, returning ``(kept, dropped)``.
+
+    Degrades in a fixed order, cheapest loss first:
+
+      1. Everything fits — nothing is given up.
+      2. Tool results are blanked, keeping the calls. Usually enough, and it
+         costs the model nothing it is likely to need.
+      3. Oldest turns are dropped, quantised exactly as ``truncate_history``
+         does it, because the prefix has to stay cacheable.
+
+    ``dropped`` is what fell off in step 3 — the caller decides whether to
+    summarise it. Steps 1 and 2 drop no turns, so ``dropped`` is empty and no
+    summary is produced: a model with room to spare never pays for one.
+    """
+    if not history:
+        return [], []
+
+    if _fits(history, limits):
+        return list(history), []
+
+    lean = strip_tool_results(history)
+    if _fits(lean, limits):
+        return lean, []
+
+    kept = truncate_history(lean, limits)
+    dropped = lean[: len(lean) - len(kept)]
+    return kept, dropped
+
+
+def _fits(history: list[Turn], limits: TurnLimits) -> bool:
+    return (
+        sum(len(t.content) for t in history) <= limits.max_chars
+        and len(history) <= limits.max_turns
+    )
+
+
+def _render_turn(turn: Turn) -> str:
+    """One history turn as the model should read it.
+
+    A tool turn is named rather than attributed to the assistant. Rendering it
+    as "Assistant: search_companies" made the model read the tool's name as
+    something the assistant had said.
+    """
+    if turn.role != "tool":
+        label = "User" if turn.role == "user" else "Assistant"
+        return f"{label}: {turn.content}"
+    head = f"Tool {turn.name}" if turn.name else "Tool"
+    return f"{head}: {turn.content}" if turn.content else f"{head}: (called)"
+
+
 def build_system_prompt(
     base_prompt: str,
     context_block: str,
@@ -143,10 +219,7 @@ def build_system_prompt(
         parts.append("Current context:\n" + context_block.rstrip())
 
     if history:
-        rendered = []
-        for turn in history:
-            label = "User" if turn.role == "user" else "Assistant"
-            rendered.append(f"{label}: {turn.content}")
-        parts.append("Previous conversation:\n" + "\n".join(rendered))
+        rendered = "\n".join(_render_turn(t) for t in history)
+        parts.append("Previous conversation:\n" + rendered)
 
     return "\n\n".join(parts)

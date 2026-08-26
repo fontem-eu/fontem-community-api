@@ -61,6 +61,13 @@ class AssistConversationModel(Base):
     #: it has a first message to take one from, and an "Untitled" row is
     #: worse than an absent title the UI fills in from the opening question.
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: A rolling note of what fell out of the continuity window. Absent until
+    #: the conversation first overflows, which on a large-context model is
+    #: never.
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The last message already folded into `summary`, so the next overflow
+    #: summarises only what has fallen off since.
+    summary_through: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
     )

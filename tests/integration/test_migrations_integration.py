@@ -120,3 +120,70 @@ def test_the_catalogue_downgrade_is_real(migrated_url):
     finally:
         engine.dispose()
     _alembic(migrated_url, "upgrade", "head")
+
+
+_PRE_019_TABLE = """
+    CREATE TABLE assist_conversations (
+        id UUID PRIMARY KEY,
+        user_id UUID NOT NULL,
+        conversation_key TEXT NOT NULL,
+        title TEXT,
+        {extra}
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+"""
+
+
+def _db_at_018_with_conversations(pg, extra: str = ""):
+    """A database in the shape a deployed one is actually in when 019 runs.
+
+    `assist_conversations` is created by 002 and then *dropped* by 008 — an
+    autogenerate accident that is now load-bearing history — so a fresh
+    `upgrade head` leaves no such table and `create_all` rebuilds it from the
+    models. That is why 018 and 019 both guard on table existence, and why
+    asserting the columns after a plain `upgrade head` asserts a premise that
+    was never true.
+
+    So: migrate to 018, let create_all's equivalent put the table back, and
+    only then run 019.
+    """
+    url = pg.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+    _alembic(url, "upgrade", "018")
+    with engine.begin() as conn:
+        conn.execute(sa.text(_PRE_019_TABLE.format(extra=extra)))
+    return url, engine
+
+
+def test_019_adds_the_summary_columns_where_the_table_already_exists():
+    """The production path: the table is there, the columns are not.
+
+    The migration runs as an ArgoCD PreSync hook, so a column the model reads
+    but the database lacks fails the whole rollout rather than one request.
+    """
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url, engine = _db_at_018_with_conversations(pg)
+        _alembic(url, "upgrade", "head")
+        cols = {c["name"]: c for c in sa.inspect(engine).get_columns("assist_conversations")}
+        engine.dispose()
+
+    assert {"summary", "summary_through"} <= set(cols)
+    # Nullable: a conversation that never overflowed has no summary, and on a
+    # large-context model that is every conversation.
+    assert cols["summary"]["nullable"] is True
+    assert cols["summary_through"]["nullable"] is True
+
+
+def test_019_is_idempotent_when_the_columns_are_already_there():
+    """Sequential revision ids collide across branches here, so a migration
+    already applied under another id must not fail the deploy."""
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url, engine = _db_at_018_with_conversations(
+            pg, extra="summary TEXT, summary_through TEXT,",
+        )
+        engine.dispose()
+        # Must not raise: _alembic asserts a zero exit code.
+        _alembic(url, "upgrade", "head")

@@ -292,7 +292,10 @@ class TestToHistoryTurns:
         )
 
         turns = await repo.history_turns(conv.id)
-        assert turns == [
-            Turn(role="user", content="hi"),
-            Turn(role="assistant", content="hello"),
+        assert [(t.role, t.content) for t in turns] == [
+            ("user", "hi"),
+            ("assistant", "hello"),
         ]
+        # Each turn carries the row it came from, so a rolling summary can
+        # record how far through the conversation it reaches.
+        assert all(t.message_id for t in turns)

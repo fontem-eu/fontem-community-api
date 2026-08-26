@@ -5,11 +5,10 @@ them, and a page reload lost them. Nothing in the database said the agent
 had searched, investigated, or written to a Studio project — production had
 31 assistant messages, every `extras` empty and every `model` NULL.
 
-These pin the record: one row per call, naming the tool and its arguments,
-addressable by the id minted where the call ran. The result is deliberately
-NOT stored — a tool returning 90k of JSON would make the conversation store
-mostly tool output, and the arguments are what say whether the agent did
-what was asked.
+These pin the record: one row per call, naming the tool, its arguments and
+what came back, addressable by the id minted where the call ran. The result
+is capped at MAX_TOOL_RESULT_CHARS so a tool returning 90k of JSON cannot
+make the conversation store mostly tool output.
 """
 import asyncio
 import json
@@ -97,16 +96,31 @@ def test_the_row_keeps_the_arguments():
     assert tool.extras["args"] == {"query": "Siemens"}
 
 
-def test_the_row_does_not_keep_the_result():
-    # The decision, pinned: register that the tool ran and with what, not
-    # what came back.
+def test_the_row_keeps_the_result():
+    # The decision changed. Dropping the result kept the store small and cost
+    # the next turn any knowledge of what the last one found — the model
+    # re-ran searches it had already run, and the panel rendered historical
+    # tool bubbles with an empty body. Under a per-model budget the size
+    # trade-off no longer has to be made the same way for every model.
     repo = InMemoryAssistRepository()
     svc = _service([_sse("tool_result", TOOL_EVENT), _sse("done", {})], repo)
     _run(_turn(svc))
     tool = [m for m in _messages(repo) if m.role == "tool"][0]
-    assert "result" not in tool.extras
-    assert "[{...}]" not in json.dumps(tool.extras)
-    assert "[{...}]" not in tool.content
+    assert tool.extras["result"] == TOOL_EVENT["result"]
+    # The name still lives in content — provenance reads it there.
+    assert tool.content == TOOL_EVENT["tool"]
+
+
+def test_a_stored_result_is_capped():
+    # One row can never be unbounded, whatever the tool returned.
+    from src.assistant import tool_budget
+
+    big = dict(TOOL_EVENT, result="x" * (tool_budget.MAX_TOOL_RESULT_CHARS + 5_000))
+    repo = InMemoryAssistRepository()
+    svc = _service([_sse("tool_result", big), _sse("done", {})], repo)
+    _run(_turn(svc))
+    tool = [m for m in _messages(repo) if m.role == "tool"][0]
+    assert len(tool.extras["result"]) == tool_budget.MAX_TOOL_RESULT_CHARS
 
 
 def test_the_row_is_addressable_by_the_id_minted_where_it_ran():
