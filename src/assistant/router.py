@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator
 from datetime import datetime
 import os
 from typing import Annotated
+from uuid import uuid4
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -332,6 +333,149 @@ async def get_conversation(
             for m in messages
         ],
     }
+
+
+#: Keys the switcher shows. A report's chat belongs to that report and opens
+#: with it; listing it here would fill the sidebar with entries nobody chose
+#: to start.
+STANDALONE_PREFIX = "chat:"
+
+#: Longest auto-title taken from an opening question.
+TITLE_CHARS = 60
+
+
+def _auto_title(text: str) -> str:
+    """A title from the first thing asked, for a conversation with none.
+
+    Nobody names a chat before having it, so the opening question is the only
+    thing available at the moment a title is needed. Truncated on a word
+    boundary where there is one, because a title cut mid-word reads as broken
+    rather than as shortened.
+    """
+    flat = " ".join((text or "").split())
+    if len(flat) <= TITLE_CHARS:
+        return flat
+    cut = flat[:TITLE_CHARS]
+    head, _, _ = cut.rpartition(" ")
+    return (head or cut) + "…"
+
+
+class ConversationCreate(BaseModel):
+    title: str = Field("", max_length=200)
+
+
+class ConversationRename(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+@router.get("/conversations")
+@inject
+async def list_conversations(
+    *,
+    service: FromDishka[AssistantService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """The user's standalone conversations, newest activity first."""
+    # pylint: disable=protected-access
+    rows = await service._repo.list_conversations(user.id)
+    # pylint: enable=protected-access
+    return {
+        "conversations": [
+            {
+                "conversation_key": c.conversation_key,
+                "title": c.title or _auto_title(c.last_snippet) or "",
+                "updated_at": c.updated_at.isoformat(),
+                "message_count": c.message_count,
+                "last_snippet": c.last_snippet,
+            }
+            for c in rows
+            if c.conversation_key.startswith(STANDALONE_PREFIX)
+        ]
+    }
+
+
+@router.post("/conversations", status_code=201)
+@inject
+async def create_conversation(
+    body: ConversationCreate,
+    *,
+    service: FromDishka[AssistantService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Mint a new standalone conversation and return its key.
+
+    The key is minted here rather than accepted from the caller: it is the
+    identity the messages hang off, and a client-chosen one is a client-chosen
+    way into somebody else's rows.
+    """
+    key = f"{STANDALONE_PREFIX}{uuid4()}"
+    # pylint: disable=protected-access
+    conv = await service._repo.find_or_create_conversation(user.id, key)
+    if body.title:
+        await service._repo.rename_conversation(user.id, key, body.title)
+    await service._repo.commit()
+    # pylint: enable=protected-access
+    return {
+        "conversation_key": conv.conversation_key,
+        "title": body.title,
+        "updated_at": conv.updated_at.isoformat(),
+        "message_count": 0,
+        "last_snippet": "",
+    }
+
+
+@router.patch(
+    "/conversations/{conversation_key:path}",
+    responses={404: {"description": "No such conversation for this user."}},
+)
+@inject
+async def rename_conversation(
+    conversation_key: str,
+    body: ConversationRename,
+    *,
+    service: FromDishka[AssistantService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    # pylint: disable=protected-access
+    ok = await service._repo.rename_conversation(
+        user.id, conversation_key, body.title.strip(),
+    )
+    if ok:
+        await service._repo.commit()
+    # pylint: enable=protected-access
+    if not ok:
+        # 404 rather than 403: saying "exists, but not yours" is what an
+        # enumeration attack needs.
+        raise HTTPException(status_code=404, detail="No such conversation.")
+    return {"conversation_key": conversation_key, "title": body.title.strip()}
+
+
+@router.delete(
+    "/conversations/{conversation_key:path}",
+    responses={404: {"description": "No such conversation for this user."}},
+)
+@inject
+async def delete_one_conversation(
+    conversation_key: str,
+    *,
+    service: FromDishka[AssistantService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Delete one conversation.
+
+    The sibling DELETE /conversations deletes every conversation the user has.
+    That was survivable while there were two; with a switcher full of them, a
+    control that says "delete" and means "delete everything" is a data-loss
+    report waiting to happen. This is the one a delete button should call.
+    """
+    # pylint: disable=protected-access
+    ok = await service._repo.delete_conversation(user.id, conversation_key)
+    if ok:
+        await service._repo.commit()
+    # pylint: enable=protected-access
+    if not ok:
+        raise HTTPException(status_code=404, detail="No such conversation.")
+    return {"deleted": conversation_key}
 
 
 #: How many messages one page carries.

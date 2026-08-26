@@ -35,6 +35,12 @@ class AssistConversation:
     conversation_key: str
     created_at: datetime
     updated_at: datetime
+    #: What a switcher shows. None until the conversation has a first
+    #: message to take a title from.
+    title: str | None = None
+    #: Populated by list_conversations; not stored.
+    message_count: int = 0
+    last_snippet: str = ""
 
 
 @dataclass
@@ -87,7 +93,6 @@ class AssistRepository(ABC):
         where list_messages hands back detached dataclasses. That is exactly
         what production did, so every tokens_in ever stored was the estimate.
         """
-        ...
 
     @abstractmethod
     async def get_message(self, message_id: str) -> AssistMessage | None:
@@ -98,11 +103,29 @@ class AssistRepository(ABC):
         message id, and a message id is guessable in exactly the way a
         conversation is not.
         """
-        ...
 
     @abstractmethod
     async def list_messages(self, conversation_id: str) -> list[AssistMessage]:
         ...
+
+    @abstractmethod
+    async def list_conversations(self, user_id: str) -> list[AssistConversation]:
+        """Every conversation this user has, newest activity first.
+
+        Carries the counts and the last line so a switcher can be drawn from
+        one call. Fetching each conversation to render a list of them is how
+        a sidebar becomes slower than the thing it indexes.
+        """
+
+    @abstractmethod
+    async def rename_conversation(
+        self, user_id: str, conversation_key: str, title: str
+    ) -> bool:
+        """Set a title. False when the conversation is not this user's."""
+
+    @abstractmethod
+    async def delete_conversation(self, user_id: str, conversation_key: str) -> bool:
+        """Delete one conversation and its messages. False when not theirs."""
 
     @abstractmethod
     async def page_messages(
@@ -120,7 +143,6 @@ class AssistRepository(ABC):
         ``(created_at, id)``: created_at alone is not unique, because a turn
         can write several tool rows inside the same clock tick.
         """
-        ...
 
     @abstractmethod
     async def history_turns(self, conversation_id: str) -> list[Turn]:
@@ -238,6 +260,43 @@ class InMemoryAssistRepository(AssistRepository):
             m for m in self._messages
             if m.conversation_id == conversation_id
         ]
+
+    async def list_conversations(self, user_id: str) -> list[AssistConversation]:
+        out = []
+        for conv in self._conversations.values():
+            if conv.user_id != user_id:
+                continue
+            msgs = sorted(
+                (m for m in self._messages if m.conversation_id == conv.id),
+                key=lambda m: (m.created_at, m.id),
+            )
+            conv.message_count = len(msgs)
+            # The last thing said, not the last thing stored: a tool row is
+            # the agent's bookkeeping and tells the reader nothing about
+            # which conversation this is.
+            spoken = [m for m in msgs if m.role in ("user", "assistant")]
+            conv.last_snippet = spoken[-1].content[:120] if spoken else ""
+            out.append(conv)
+        return sorted(out, key=lambda c: c.updated_at, reverse=True)
+
+    async def rename_conversation(
+        self, user_id: str, conversation_key: str, title: str
+    ) -> bool:
+        for conv in self._conversations.values():
+            if conv.user_id == user_id and conv.conversation_key == conversation_key:
+                conv.title = title
+                return True
+        return False
+
+    async def delete_conversation(self, user_id: str, conversation_key: str) -> bool:
+        for conv_id, conv in list(self._conversations.items()):
+            if conv.user_id == user_id and conv.conversation_key == conversation_key:
+                self._messages = [
+                    m for m in self._messages if m.conversation_id != conv_id
+                ]
+                del self._conversations[conv_id]
+                return True
+        return False
 
     async def page_messages(
         self,
