@@ -25,6 +25,7 @@ GROUNDING = "grounding"
 HONESTY = "honesty"
 LANGUAGE = "language"
 NAVIGATION = "navigation"
+INVESTIGATION = "investigation"
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,19 @@ class Trace:
 # --------------------------------------------------------------------------
 
 _DIGITS = re.compile(r"\d[\d.,]*")
+#: A standalone four-digit token in this span is a date, not a figure:
+#: "the 2014-2022 period" is prose about time, and counting it as a numeric
+#: claim scored calendar years as fabrications — in the first parity runs
+#: bare years dominated every "unsupported" list (2014, 2021, 2024, 2025,
+#: 2027) and accounted for most of MiniMax's honesty gap. A year inside a
+#: larger figure still counts; a 4-digit contract VALUE in this range is the
+#: accepted cost, and it is rare where invented millions are not.
+_YEAR_MIN, _YEAR_MAX = 1900, 2100
+
+
+def _is_bare_year(raw: str) -> bool:
+    return (len(raw) == 4 and raw.isdigit()
+            and _YEAR_MIN <= int(raw) <= _YEAR_MAX)
 # A UUID argument is only legitimate if a previous tool RESULT contained it.
 _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
                    r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -109,8 +123,11 @@ def numeric_claims_raw(text: str) -> list[str]:
     """
     out = []
     for raw in _DIGITS.findall(text):
+        raw = raw.rstrip(".,")
+        if _is_bare_year(raw):
+            continue
         if _norm_num(raw) != "0" and len(_norm_num(raw)) >= 3:
-            out.append(raw.rstrip(".,"))
+            out.append(raw)
     return out
 
 
@@ -125,6 +142,8 @@ def numeric_claims(text: str) -> list[str]:
     """
     out = []
     for raw in _DIGITS.findall(text):
+        if _is_bare_year(raw.rstrip(".,")):
+            continue
         norm = _norm_num(raw)
         if norm != "0" and len(norm) >= 3:
             out.append(norm)
@@ -580,6 +599,104 @@ def _check_language(spec: dict, trace: Trace) -> list[Check]:
                   "" if got == want else f"answered in {got}, asked in {want}")]
 
 
+#: Tool families for the investigation diversity metric. Distinct ways of
+#: interrogating the data — a sweep that only searches is shallower than one
+#: that searches, opens entities and probes the graph, whatever the counts.
+_INVESTIGATION_FAMILIES = {
+    "mcp__gmr__search_entities": "search",
+    "mcp__gmr__search": "search",
+    "mcp__gmr__investigate_entity": "entity",
+    "mcp__gmr__find_paths": "paths",
+    "mcp__gmr__query_graph": "query",
+    "mcp__gmr__studio_run_query": "query",
+    "mcp__gmr__get_schema": "schema",
+}
+
+
+def _check_investigation(spec: dict, trace: Trace) -> list[Check]:
+    """Is the model actually investigating — and can it also conclude?
+
+    Only scored on prompts that ask for it (`expect.investigation: true`).
+    The platform is a data-investigation tool, and until this check existed
+    the eval punished exploration: a multi-entity sweep read as "did not
+    converge" and nothing rewarded the sweep itself. Four measures, all from
+    the trace:
+
+    breadth — distinct entity ids the model put into tool ARGUMENTS — each
+    entity it chose to open, not merely saw in a result list.
+    depth — calls whose arguments consume an id returned by an EARLIER
+    call: the difference between following a lead and stabbing around.
+    diversity — distinct tool families used (search / entity / paths /
+    graph query / schema): angles of attack, not call volume.
+    synthesis — a final answer exists. The wrap-up nudge asks for one in
+    the last round, so an empty answer here is a refusal to conclude, not
+    a budget artifact.
+    """
+    if not (spec.get("expect") or {}).get("investigation"):
+        return []
+    prompt_ids = set(_UUID.findall(str(spec.get("prompt", ""))))
+    seen: set[str] = set(prompt_ids)
+    used: set[str] = set()
+    chained = 0
+    families: set[str] = set()
+    for call in trace.calls:
+        arg_ids = set(_UUID.findall(json.dumps(call.args, default=str)))
+        used |= arg_ids
+        if arg_ids & (seen - prompt_ids):
+            chained += 1
+        seen |= set(_UUID.findall(call.result))
+        fam = _INVESTIGATION_FAMILIES.get(call.name)
+        if fam:
+            families.add(fam)
+    breadth = min(len(used), 3) / 3 * 2.0
+    depth = min(chained, 2) / 2 * 2.0
+    diversity = min(len(families), 3) / 3 * 2.0
+    concluded = bool(trace.answer.strip())
+    return [
+        Check(INVESTIGATION, "breadth", breadth, 2.0,
+              "" if breadth >= 2.0 else f"{len(used)} distinct entity id(s) "
+              "in tool arguments"),
+        Check(INVESTIGATION, "depth", depth, 2.0,
+              "" if depth >= 2.0 else f"{chained} call(s) followed up an id "
+              "from an earlier result"),
+        Check(INVESTIGATION, "diversity", diversity, 2.0,
+              "" if diversity >= 2.0 else
+              f"tool families used: {sorted(families) or 'none'}"),
+        Check(INVESTIGATION, "synthesis", 2.0 if concluded else 0.0, 2.0,
+              "" if concluded else "never concluded, even when asked to"),
+    ]
+
+
+def _check_answer_figures(spec: dict, trace: Trace) -> list[Check]:
+    """Did the answer land on the RIGHT figures — not merely grounded ones?
+
+    Grounding checks that figures trace to a tool result; nothing until now
+    checked they answer the question. Bar-raiser prompts declare
+    `expect.answer_figures`, names resolved against the live graph at run
+    time (the runner executes the spec's `ground_truth` queries and stores
+    the values in `_ground_truth`) — the fixture stores queries, never
+    answers, because the graph is re-ingested continuously and a stored
+    answer silently rots. Matching reuses the rounding leniency of
+    grounding: a correctly rounded figure counts.
+    """
+    wanted = (spec.get("expect") or {}).get("answer_figures") or []
+    truth = spec.get("_ground_truth") or {}
+    checks = []
+    for name in wanted:
+        if name not in truth:
+            checks.append(Check(COMPLETION, f"answer_figure:{name}", 0.0, 2.0,
+                                "ground truth unavailable at run time"))
+            continue
+        target = str(truth[name])
+        claims = numeric_claims_raw(trace.answer)
+        ok = any(_rounds_to(c, target) or _norm_num(c) == _norm_num(target)
+                 for c in claims)
+        checks.append(Check(
+            COMPLETION, f"answer_figure:{name}", 2.0 if ok else -1.0, 2.0,
+            "" if ok else f"answer never states {name}={target}"))
+    return checks
+
+
 def score_trace(spec: dict, trace: Trace) -> list[Check]:
     """Run every applicable check for one prompt/run pair."""
     expect = spec.get("expect") or {}
@@ -596,6 +713,8 @@ def score_trace(spec: dict, trace: Trace) -> list[Check]:
     checks += _check_honesty(expect, trace)
     checks += _check_language(expect, trace)
     checks += _check_navigation(spec, trace)
+    checks += _check_investigation(spec, trace)
+    checks += _check_answer_figures(spec, trace)
     return checks
 
 

@@ -156,8 +156,10 @@ def test_metadata_carries_what_makes_two_runs_comparable():
     assert meta["system_prompt"] == "shipped"
     assert meta["run_at"].endswith("+00:00")
     # The round cap and the tool-result budget change what a model can score.
-    # A run compared against one with a different cap is comparing harnesses.
-    assert meta["max_rounds"] == module.MAX_ROUNDS
+    # Budgets are per-model now (registry-driven), so metadata records the
+    # CLI override — None when the registry decided — and each result row
+    # carries the budget it actually ran under.
+    assert meta["max_rounds"] is None
     assert meta["tool_result_char_budget"] == module.MAX_TOOL_RESULT_CHARS
 
 
@@ -230,17 +232,33 @@ def test_round_cap_is_configurable_and_recorded():
     assert "--max-rounds" in proc.stdout
 
 
-def test_round_cap_defaults_to_the_module_constant():
-    """Runs that do not pass it must stay comparable with the committed ones."""
+def test_budgets_come_from_the_model_registry():
+    """Each model runs at its own deployable budget, not a global constant.
+
+    The 900-token default was sized for terse local models and truncated a
+    hosted reasoner's every reply before the first answer token; the 6-round
+    default cut off legitimate multi-entity sweeps. The registry now carries
+    per-model budgets; a served name it does not know is assumed frontier.
+    """
+    from src.assistant import local_models  # pylint: disable=import-outside-toplevel
+    by_served = {m.served_name: m for m in local_models.LOCAL_MODELS}
+    small = by_served["qwen3-1.7b-q4_k_m"]
+    assert (small.eval_max_rounds, small.eval_max_tokens) == (6, 900)
+    mm = by_served["MiniMaxAI/MiniMax-M3"]
+    assert mm.reasoning
+    assert mm.eval_max_rounds >= 12 and mm.eval_max_tokens >= 4000
     module = _runner_module()
+    assert module.FALLBACK_MAX_ROUNDS >= 12
+    assert module.FALLBACK_MAX_TOKENS >= 4000
 
-    class Args:                       # pylint: disable=too-few-public-methods
-        models = "m"
-        base_url = "http://llama:8080"
-        gmr_api = "http://fontem-api"
 
-    meta = module.run_metadata(Args(), {"version": 2}, "shipped", 1)
-    assert meta["max_rounds"] == module.MAX_ROUNDS == 6
+def test_the_final_round_carries_the_wrap_up_nudge():
+    """The cap is a measurement, not a cliff: the last round tells the model
+    to conclude, mirroring production's stall rescue — an investigation that
+    synthesises on request is a success."""
+    module = _runner_module()
+    assert "final round" in module.WRAP_UP_NUDGE
+    assert "stop calling tools" in module.WRAP_UP_NUDGE
 
 
 # --- token budget -----------------------------------------------------------

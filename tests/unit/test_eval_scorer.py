@@ -169,8 +169,8 @@ def test_fixture_is_wellformed():
     known = ({t["function"]["name"] for t in _TOOLS}
              | set(STUDIO_ACTIONS) | {"navigate", "get_doc", "get_schema"})
     # 14 originals + the Russian-spending replays (P15-P17) + the full
-    # article task (P18).
-    assert len(data["prompts"]) == 18
+    # article task (P18) + the v4 bar raisers (P19-P21).
+    assert len(data["prompts"]) == 21
     ids = [p["id"] for p in data["prompts"]]
     assert len(set(ids)) == len(ids), "duplicate prompt ids"
     for prompt in data["prompts"]:
