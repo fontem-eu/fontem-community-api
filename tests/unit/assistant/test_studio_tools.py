@@ -44,6 +44,7 @@ def test_the_offered_surface_is_deliberately_small():
         "mcp__gmr__replace_body",
         "mcp__gmr__insert_widget",
         "mcp__gmr__query_graph",
+        "mcp__gmr__calculate",
         "mcp__gmr__studio_list_projects",
         "mcp__gmr__studio_get_project",
         "mcp__gmr__studio_run_query",

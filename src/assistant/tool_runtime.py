@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.assistant import doc_tools, generated_tools, legacy_tools, probe_tools
+from src.assistant import calc_tools, doc_tools, generated_tools, legacy_tools, probe_tools
 from src.assistant.freshness import _format_freshness_summary
 from src.assistant.catalogue import CatalogueCache
 
@@ -197,6 +197,7 @@ WIDGET_TYPES = doc_tools.WIDGET_TYPES
 
 _TOOLS.extend(doc_tools.DOC_TOOLS)
 _TOOLS.extend(probe_tools.PROBE_TOOLS)
+_TOOLS.extend(calc_tools.CALC_TOOLS)
 
 
 
@@ -227,6 +228,7 @@ _TOOL_LABELS = {
     "mcp__gmr__replace_body": "Proposing a rewrite",
     "mcp__gmr__insert_widget": "Proposing a widget",
     "mcp__gmr__query_graph": "Probing the data store",
+    "mcp__gmr__calculate": "Calculating",
     # Legacy tools — still implemented for old conversations, but no
     # longer advertised in _TOOLS.
     "mcp__gmr__get_company": "Looking up company",
@@ -758,6 +760,7 @@ class ToolRuntime:
                     },
                 )
             elif (name == probe_tools.PROBE_TOOL_NAME
+                  or name == calc_tools.CALC_TOOL_NAME
                   or name == "mcp__gmr__propose_edit"
                   or name in doc_tools.FIELD_PROPOSALS
                   or name == "mcp__gmr__insert_widget"):
@@ -786,6 +789,8 @@ class ToolRuntime:
         """Tools answered here rather than by a fontem-api GET."""
         if name == probe_tools.PROBE_TOOL_NAME:
             return await probe_tools.execute(client, self._gmr_api_url, args)
+        if name == calc_tools.CALC_TOOL_NAME:
+            return calc_tools.execute(args)
         return await self._propose(client, name, args)
 
     async def _propose(
