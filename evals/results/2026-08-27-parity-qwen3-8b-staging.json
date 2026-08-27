@@ -1,0 +1,925 @@
+{
+  "meta": {
+    "run_at": "2026-08-27T20:02:09+00:00",
+    "fixture_version": 3,
+    "prompts": 18,
+    "models": [
+      "qwen3-8b-q4_k_m"
+    ],
+    "endpoint": "http://llama-eval-8b.llm-service.svc.cluster.local:8080",
+    "gmr_api": "http://fontem-api.fontem-staging.svc.cluster.local",
+    "system_prompt": "shipped",
+    "code_sha": "4603360",
+    "max_rounds": 6,
+    "max_tokens": 900,
+    "extra_body": {},
+    "tool_result_char_budget": 8000
+  },
+  "results": [
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P01",
+      "latency_s": 49.9,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__search_entities"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "L\u0151rinc M\u00e9sz\u00e1ros",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"L\u0151rinc M\u00e9sz\u00e1ros\",\"companies\":[],\"authorities\":[],\"persons\":[],\"lobbyists\":[]}"
+        }
+      ],
+      "error": null,
+      "answer": "Fontem does not have any records of an entity named \"L\u0151rinc M\u00e9sz\u00e1ros\" in its database. This could mean that the name is not present in the data we hold, or it may be spelled differently or not widely recognized in the context of the data sources we use. If you have more details or a different spelling, please provide them, and I can attempt to search again.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P02",
+      "latency_s": 100.7,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros\",\"companies\":[{\"gmr_id\":\"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\",\"name\":\"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.\",\"country\":\"HUN\",\"ticker\":null,\"exchange\":null,\"currency\":null,\"is_active\":null,\"symbol\":null,\"search_name\":\"m\u00e9sz\u00e1ros \u00e9s m\u00e9sz\u00e1ros kft. none\",\"search_keywords\":\"m\u00e9sz\u00e1ros \u00e9s "
+        },
+        {
+          "name": "mcp__gmr__investigate_entity",
+          "args": {
+            "entity_id": "ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520",
+            "depth": 1,
+            "contract_limit": 20
+          },
+          "result_head": "{\"label\": \"Company\", \"entity_id\": \"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\", \"props\": {\"gmr_id\": \"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\", \"company_name\": \"M\\u00e9sz\\u00e1ros \\u00e9s M\\u00e9sz\\u00e1ros Kft.\", \"country\": \"HUN\", \"contract_count\": 4, \"total_contract_value_eur\": 12874355.329999998, \"director"
+        }
+      ],
+      "error": null,
+      "answer": "M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. has won a total of \u20ac12,874,355.33 in EU public contracts. Out of these, 4 contracts were awarded with competition, and the rest were likely awarded without competition. To determine the exact amount of contracts awarded with competition, we need to check the value_low_confidence field for each contract. The value_low_confidence field is set to true for two of the contracts, indicating that the value is not certain. Therefore, we cannot determine the exact amount of contracts awarded with competition.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P03",
+      "latency_s": 157.3,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros\",\"companies\":[{\"gmr_id\":\"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\",\"name\":\"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.\",\"country\":\"HUN\",\"ticker\":null,\"exchange\":null,\"currency\":null,\"is_active\":null,\"symbol\":null,\"search_name\":\"m\u00e9sz\u00e1ros \u00e9s m\u00e9sz\u00e1ros kft. none\",\"search_keywords\":\"m\u00e9sz\u00e1ros \u00e9s "
+        },
+        {
+          "name": "mcp__gmr__investigate_entity",
+          "args": {
+            "entity_id": "ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520",
+            "depth": 1,
+            "contract_limit": 20
+          },
+          "result_head": "{\"label\": \"Company\", \"entity_id\": \"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\", \"props\": {\"gmr_id\": \"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\", \"company_name\": \"M\\u00e9sz\\u00e1ros \\u00e9s M\\u00e9sz\\u00e1ros Kft.\", \"country\": \"HUN\", \"contract_count\": 4, \"total_contract_value_eur\": 12874355.329999998, \"director"
+        }
+      ],
+      "error": null,
+      "answer": "The company **M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.** has been awarded contracts by several Hungarian authorities, including:\n\n1. **Orsz\u00e1gos V\u00edz\u00fcgyi F\u0151igazgat\u00f3s\u00e1g** (National Water Authority) for two projects:\n   - \"V\u00e1llalkoz\u00e1si szerz\u0151d\u00e9s keret\u00e9ben a 'S\u00e9d-N\u00e1dor-Gaja v\u00edzrendszer rehabilit\u00e1ci\u00f3ja I. \u00fctem' KEHOP-1.5.0-15-2015-00001 projekt sor\u00e1n tervez\u00e9si \u00e9s kivitelez\u00e9s feladatok ell\u00e1t\u00e1sa FIDIC S\u00e1rga k\u00f6nyv szerint\"\n   - \"V\u00e1li-v\u00f6lgy v\u00edzrendez\u00e9si feladatai projekt kivitelez\u00e9si feladatainak FIDIC S\u00e1rga K\u00e9nyv szerinti megval\u00f3s\u00edt\u00e1sa \u00e9s a kiviteli tervek elk\u00e9sz\u00edt\u00e9se\"\n\n2. **NKM F\u00f6ldg\u00e1zh\u00e1l\u00f3zati Kft.** for the project: \n   - \"25. sz\u00e1m\u00fa versenyajrany\u00edt\u00e1s - G\u00e1zh\u00e1l\u00f3zaton v\u00e9gzett rekonstrukci\u00f3s \u00e9s g\u00e1zh\u00e1l\u00f3zat-optimaliz\u00e1ci\u00f3s munk\u00e1k\"\n\n3. **NIF Zrt.** for the project:\n   - \"Kom\u00e1rom-Kom\u00e1rno hat\u00e1ron \u00e1t\u00edvel\u0151 Duna-h\u00edd kivitelez\u00e9si munk\u00e1i v\u00e1llalkoz\u00e1si szerz\u0151d\u00e9s keret\u00e9ben\"\n\nNone of these contracts are directly related to the **Hungarian state railway** (M\u00c1V). The company's contracts are related to water infrastructure, gas network, and bridge construction, but not railway projects.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 4.0,
+          "pct": 75.0,
+          "notes": [
+            "required_tools: never called: mcp__gmr__find_paths"
+          ]
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P04",
+      "latency_s": 24.8,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "M\u00e9sz\u00e1ros",
+            "limit": 100
+          },
+          "result_head": "{\"error\": \"API 422\"}"
+        },
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "M\u00e9sz\u00e1ros",
+            "limit": 100
+          },
+          "result_head": "{\"error\": \"API 422\"}"
+        }
+      ],
+      "error": null,
+      "answer": "It seems there is an issue with the API call. Let me try a different approach to ensure we get the correct results. I'll search for entities related to \"M\u00e9sz\u00e1ros\" with a reasonable limit to capture all possible variations.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P05",
+      "latency_s": 17.9,
+      "rounds": 1,
+      "tools": [],
+      "trace": [],
+      "error": null,
+      "answer": "Fontem is a European public-data platform that provides access to a wide range of data about companies, authorities, procurement contracts, and other entities. It is designed to support transparency, accountability, and informed decision-making by making this data accessible and searchable.\n\nTo connect your own AI client to Fontem, you would typically use its API. However, the specific details for API integration are not provided in this context. For more information on how to connect to Fontem's API, you should consult the official documentation or reach out to Fontem's support team.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P06",
+      "latency_s": 30.7,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__investigate_entity"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__investigate_entity",
+          "args": {
+            "entity_id": "E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB",
+            "depth": 1,
+            "contract_limit": 20
+          },
+          "result_head": "{\"error\": \"entity E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB not found\", \"detail\": \"The id did not match any entity. Do not report this as an entity with no contracts \\u2014 it is not an entity. Use an id returned by search_entities.\", \"tried_labels\": [\"Company\", \"Authority\"]}"
+        }
+      ],
+      "error": null,
+      "answer": "The entity with the ID `E8D4C4E5-3F7D-4F3E-B2C1-1234567890AB` was not found in the system. This suggests that the ID may be incorrect or not associated with any entity in the database. Please ensure the ID is accurate and was obtained from a valid search using the `search_entities` function. If you have more details or a different ID, feel free to share them.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P07",
+      "latency_s": 11.9,
+      "rounds": 1,
+      "tools": [],
+      "trace": [],
+      "error": null,
+      "answer": "<error>\nThe question involves legal and statistical analysis that requires specific data on EU countries' legal changes and crime rates. Fontem does not hold data on legal changes or crime rates, and therefore cannot answer this question. If you have specific data or sources you would like to analyze, please provide them, and I can assist with further analysis.\n</error>",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P08",
+      "latency_s": 98.3,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros\",\"companies\":[{\"gmr_id\":\"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\",\"name\":\"M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft.\",\"country\":\"HUN\",\"ticker\":null,\"exchange\":null,\"currency\":null,\"is_active\":null,\"symbol\":null,\"search_name\":\"m\u00e9sz\u00e1ros \u00e9s m\u00e9sz\u00e1ros kft. none\",\"search_keywords\":\"m\u00e9sz\u00e1ros \u00e9s "
+        },
+        {
+          "name": "mcp__gmr__investigate_entity",
+          "args": {
+            "entity_id": "ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520",
+            "depth": 1,
+            "contract_limit": 20
+          },
+          "result_head": "{\"label\": \"Company\", \"entity_id\": \"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\", \"props\": {\"gmr_id\": \"ef2de5a8-6b5c-5f0b-9cc4-04313d4ce520\", \"company_name\": \"M\\u00e9sz\\u00e1ros \\u00e9s M\\u00e9sz\\u00e1ros Kft.\", \"country\": \"HUN\", \"contract_count\": 4, \"total_contract_value_eur\": 12874355.329999998, \"director"
+        }
+      ],
+      "error": null,
+      "answer": "M\u00e9sz\u00e1ros \u00e9s M\u00e9sz\u00e1ros Kft. holds a record of four EU procurement contracts, primarily in the water management and infrastructure sectors. These contracts include projects such as the rehabilitation of the S\u00e9d-N\u00e1dor-Gaja water system, the implementation of water management tasks in the V\u00e1li-v\u00f6lgy area, and the reconstruction and optimization of gas networks. The company's contracts are awarded by Hungarian authorities, indicating its active participation in public infrastructure projects within the country.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 5.0,
+          "pct": 80.0,
+          "notes": [
+            "required_tools: never called: mcp__gmr__propose_edit"
+          ]
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P09",
+      "latency_s": 24.8,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__search_entities"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Russie",
+            "limit": 10
+          },
+          "result_head": "{\"query\":\"Russie\",\"companies\":[],\"authorities\":[],\"persons\":[],\"lobbyists\":[]}"
+        }
+      ],
+      "error": null,
+      "answer": "Aucune entreprise russe n'a \u00e9t\u00e9 trouv\u00e9e dans les donn\u00e9es de Fontem. Cela peut signifier que les donn\u00e9es ne couvrent pas les entreprises russes ou qu'aucune entreprise russe n'a de contrats publics dans l'UE. Si vous souhaitez explorer davantage, nous pouvons v\u00e9rifier les autorit\u00e9s ou les personnes li\u00e9es \u00e0 la Russie. Voulez-vous poursuivre dans cette direction ?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "language": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P10",
+      "latency_s": 19.5,
+      "rounds": 3,
+      "tools": [
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Israel",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"Israel\",\"companies\":[{\"gmr_id\":\"04e1e611-f157-5224-8a7c-161eb338b32a\",\"name\":\"Israel Acquisitions Corp\",\"country\":\"USA\",\"ticker\":\"ISRLF\",\"exchange\":\"US\",\"currency\":\"USD\",\"is_active\":true,\"symbol\":\"ISRLF\",\"search_name\":\"israel acquisitions corp isrlf\",\"search_keywords\":\"israel acquisitions "
+        },
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Israeli",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"Israeli\",\"companies\":[],\"authorities\":[],\"persons\":[],\"lobbyists\":[]}"
+        }
+      ],
+      "error": null,
+      "answer": "There are no Israeli-domiciled companies in the data held by Fontem. Please provide a different query or specify a country or company name for further assistance.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "partial_abstention: no stated limit"
+          ]
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P11",
+      "latency_s": 34.0,
+      "rounds": 1,
+      "tools": [],
+      "trace": [],
+      "error": null,
+      "answer": "The maps and regional statistics can be found on the **Atlas** page. Navigate to `/map` to view the geographic data and regional statistics.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "navigated: never offered a destination"
+          ]
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P12",
+      "latency_s": 5.7,
+      "rounds": 1,
+      "tools": [],
+      "trace": [],
+      "error": null,
+      "answer": "The Data Studio is where you can write up and explore your own analysis. You can access it by navigating to the `/explore` page.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": -1.0,
+          "max": 2.0,
+          "pct": -50.0,
+          "notes": [
+            "navigated: never offered a destination"
+          ]
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P13",
+      "latency_s": 8.3,
+      "rounds": 1,
+      "tools": [],
+      "trace": [],
+      "error": null,
+      "answer": "The page showing quarterly staff turnover by department is not available in the site map. I cannot navigate to a page that does not exist. Would you like me to help you find a relevant page or explore the data in another way?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "navigation": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P14",
+      "latency_s": 31.7,
+      "rounds": 1,
+      "tools": [],
+      "trace": [],
+      "error": null,
+      "answer": "The Fontem platform offers a variety of tools and features to explore and analyze public data. Here's a brief tour of what you can do:\n\n1. **Home Feed**: Start at the home page to see published data stories and insights.\n2. **Atlas**: Explore the geographic view of data by region using the Atlas.\n3. **Data Exploration Hub**: Dive into the datasets and start exploring the data.\n4. **Geographic Data Browser**: Access and analyze geographic data.\n5. **Edit Data Stories**: If you're signed in, you can edit your own data stories.\n6. **Data Quality Dashboards**: Check the quality and coverage reports of the data.\n7. **Help and FAQ**: Find help and information on how to connect your own AI assistant to Fontem.\n8. **Account Settings**: Manage your account settings, including display preferences and LLM provider keys.\n\nWould you like to navigate to any of these pages to get a closer look?",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 3.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P15",
+      "latency_s": 92.6,
+      "rounds": 6,
+      "tools": [
+        "get_schema",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity",
+        "mcp__gmr__investigate_entity"
+      ],
+      "trace": [
+        {
+          "name": "get_schema",
+          "args": {},
+          "result_head": "{\"error\": \"Unknown tool: get_schema\"}"
+        },
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Russia",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"Russia\",\"companies\":[{\"gmr_id\":\"98ab1f3c-ad43-512c-b5e2-85767ffacfac\",\"name\":\"LYXOR MSCI RUSSIA UCITS ETF\",\"country\":\"LUX\",\"ticker\":\"LU1923627332\",\"exchange\":null,\"currency\":\"EUR\",\"is_active\":true,\"symbol\":\"LU1923627332\",\"search_name\":\"lyxor msci russia ucits etf lu1923627332\",\"search_keyw"
+        },
+        {
+          "name": "mcp__gmr__investigate_entity",
+          "args": {
+            "entity_id": "98ab1f3c-ad43-512c-b5e2-85767ffacfac",
+            "depth": 1,
+            "contract_limit": 20
+          },
+          "result_head": "{\"label\": \"Company\", \"entity_id\": \"98ab1f3c-ad43-512c-b5e2-85767ffacfac\", \"props\": {\"gmr_id\": \"98ab1f3c-ad43-512c-b5e2-85767ffacfac\", \"company_name\": \"LYXOR MSCI RUSSIA UCITS ETF\", \"country\": \"LUX\", \"contract_count\": 0, \"total_contract_value_eur\": 0, \"directors\": [], \"group\": null}, \"summary\": \"LYXO"
+        },
+        {
+          "name": "mcp__gmr__investigate_entity",
+          "args": {
+            "entity_id": "abcdbe6f-5258-5b7b-8f9a-8063a52eed1a",
+            "depth": 1,
+            "contract_limit": 20
+          },
+          "result_head": "{\"label\": \"Company\", \"entity_id\": \"abcdbe6f-5258-5b7b-8f9a-8063a52eed1a\", \"props\": {\"gmr_id\": \"abcdbe6f-5258-5b7b-8f9a-8063a52eed1a\", \"company_name\": \"AMUNDI MSCI EASTERN EUROPE EX RUSSIA\", \"country\": \"LUX\", \"contract_count\": 0, \"total_contract_value_eur\": 0, \"directors\": [], \"group\": null}, \"summar"
+        },
+        {
+          "name": "mcp__gmr__investigate_entity",
+          "args": {
+            "entity_id": "fe6c2ed3-0d93-50ec-9743-4da37365526b",
+            "depth": 1,
+            "contract_limit": 20
+          },
+          "result_head": "{\"label\": \"Company\", \"entity_id\": \"fe6c2ed3-0d93-50ec-9743-4da37365526b\", \"props\": {\"gmr_id\": \"fe6c2ed3-0d93-50ec-9743-4da37365526b\", \"company_name\": \"AMUNDI MSCI EASTERN EUROPE EX RUSSIA\", \"country\": \"LUX\", \"contract_count\": 0, \"total_contract_value_eur\": 0, \"directors\": [], \"group\": null}, \"summar"
+        }
+      ],
+      "error": null,
+      "answer": "Fontem's data does not contain any companies from Russia. The search for \"Russia\" returned companies located in Luxembourg, not Russia. Additionally, none of these companies have any EU procurement contracts recorded in the graph.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 2.0,
+          "max": 3.0,
+          "pct": 66.7,
+          "notes": [
+            "required_tools: never called: mcp__gmr__query_graph"
+          ]
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P16",
+      "latency_s": 42.1,
+      "rounds": 4,
+      "tools": [
+        "mcp__gmr__studio_create_project",
+        "mcp__gmr__studio_add_query",
+        "get_schema"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__studio_create_project",
+          "args": {
+            "name": "RU suppliers"
+          },
+          "result_head": "{\"id\": \"p-1\", \"name\": \"RU suppliers\", \"investigation_id\": null, \"queries\": 0, \"plots\": 0}"
+        },
+        {
+          "name": "mcp__gmr__studio_add_query",
+          "args": {
+            "project_id": "p-1",
+            "name": "Russian companies with EU contracts",
+            "lang": "cypher",
+            "query": "MATCH (c:Company)-[:HAS_CONTRACT]->(contract:Contract) WHERE c.country = 'RU' RETURN c.name AS company, c.id AS company_id, contract.id AS contract_id, contract.value AS contract_value"
+          },
+          "result_head": "{\"error\": \"the query was not saved because it does not work\", \"valid\": false, \"checked\": true, \"errors\": [\"cypher: One of the relationship types in your query is not available in the database, make sure you didn't misspell it or that the label is available when you run this statement in your applica"
+        },
+        {
+          "name": "get_schema",
+          "args": {},
+          "result_head": "{\"error\": \"Unknown tool: get_schema\"}"
+        }
+      ],
+      "error": null,
+      "answer": "I apologize for the confusion. It seems there was an error in accessing the schema. Let me correct that and provide the necessary information to refine the query. \n\nTo proceed, I need to understand the correct relationship types and property names available in the graph. Could you please confirm the correct relationship type for contracts and the property name for contract value? This will help ensure the query is accurate and runs successfully.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 5.0,
+          "pct": 80.0,
+          "notes": [
+            "required_tools: never called: mcp__gmr__studio_run_query"
+          ]
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P17",
+      "latency_s": 24.9,
+      "rounds": 2,
+      "tools": [
+        "mcp__gmr__calculate"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__calculate",
+          "args": {
+            "expression": "(9310000 - 12874355.33) / 12874355.33 * 100",
+            "values": {
+              "a": 12874355.33,
+              "b": 9310000
+            }
+          },
+          "result_head": "{\"expression\": \"(9310000 - 12874355.33) / 12874355.33 * 100\", \"result\": -27.68569950601169}"
+        }
+      ],
+      "error": null,
+      "answer": "The percentage change from 12,874,355.33 EUR to 9,310,000 EUR is a decrease of **-27.69%**.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 4.0,
+          "max": 4.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "completion": {
+          "points": 2.0,
+          "max": 2.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "grounding": {
+          "points": 5.0,
+          "max": 5.0,
+          "pct": 100.0,
+          "notes": []
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    },
+    {
+      "model": "qwen3-8b-q4_k_m",
+      "prompt": "P18",
+      "latency_s": 70.7,
+      "rounds": 7,
+      "tools": [
+        "mcp__gmr__studio_create_project",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities",
+        "mcp__gmr__search_entities"
+      ],
+      "trace": [
+        {
+          "name": "mcp__gmr__studio_create_project",
+          "args": {
+            "name": "Russian suppliers EU contracts analysis"
+          },
+          "result_head": "{\"id\": \"p-1\", \"name\": \"Russian suppliers EU contracts analysis\", \"investigation_id\": null, \"queries\": 0, \"plots\": 0}"
+        },
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Russia",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"Russia\",\"companies\":[{\"gmr_id\":\"98ab1f3c-ad43-512c-b5e2-85767ffacfac\",\"name\":\"LYXOR MSCI RUSSIA UCITS ETF\",\"country\":\"LUX\",\"ticker\":\"LU1923627332\",\"exchange\":null,\"currency\":\"EUR\",\"is_active\":true,\"symbol\":\"LU1923627332\",\"search_name\":\"lyxor msci russia ucits etf lu1923627332\",\"search_keyw"
+        },
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Russian",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"Russian\",\"companies\":[],\"authorities\":[],\"persons\":[],\"lobbyists\":[]}"
+        },
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Russia",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"Russia\",\"companies\":[{\"gmr_id\":\"98ab1f3c-ad43-512c-b5e2-85767ffacfac\",\"name\":\"LYXOR MSCI RUSSIA UCITS ETF\",\"country\":\"LUX\",\"ticker\":\"LU1923627332\",\"exchange\":null,\"currency\":\"EUR\",\"is_active\":true,\"symbol\":\"LU1923627332\",\"search_name\":\"lyxor msci russia ucits etf lu1923627332\",\"search_keyw"
+        },
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Russian companies",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"Russian companies\",\"companies\":[],\"authorities\":[],\"persons\":[],\"lobbyists\":[]}"
+        },
+        {
+          "name": "mcp__gmr__search_entities",
+          "args": {
+            "query": "Russia companies",
+            "limit": 5
+          },
+          "result_head": "{\"query\":\"Russia companies\",\"companies\":[],\"authorities\":[],\"persons\":[],\"lobbyists\":[]}"
+        }
+      ],
+      "error": null,
+      "answer": "It seems that the platform does not hold data on Russian companies holding EU contracts. The search for \"Russia,\" \"Russian,\" \"Russian companies,\" and \"Russia companies\" returned no companies. This could indicate that either the data is not available in the platform's holdings or that the search terms are not yielding relevant results. To proceed, we might need to refine our search or consider alternative approaches to identify relevant entities. Let me know if you'd like to try a different search strategy.",
+      "truncated_results": 0,
+      "categories": {
+        "tool_calling": {
+          "points": 3.0,
+          "max": 7.0,
+          "pct": 42.9,
+          "notes": [
+            "required_tools: never called: mcp__gmr__read_document, mcp__gmr__studio_add_query, mcp__gmr__studio_run_query",
+            "tool_order: mcp__gmr__read_document never called"
+          ]
+        },
+        "completion": {
+          "points": 0.0,
+          "max": 4.0,
+          "pct": 0.0,
+          "notes": [
+            "article_substance: proposed body 0 chars, expected >= 400"
+          ]
+        },
+        "honesty": {
+          "points": 1.0,
+          "max": 1.0,
+          "pct": 100.0,
+          "notes": []
+        }
+      }
+    }
+  ]
+}
