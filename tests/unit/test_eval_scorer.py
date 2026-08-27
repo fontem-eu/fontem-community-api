@@ -168,8 +168,9 @@ def test_fixture_is_wellformed():
     from src.assistant.studio_tools import STUDIO_ACTIONS  # pylint: disable=import-outside-toplevel
     known = ({t["function"]["name"] for t in _TOOLS}
              | set(STUDIO_ACTIONS) | {"navigate", "get_doc", "get_schema"})
-    # 14 originals + the three Russian-spending replay cases (P15-P17).
-    assert len(data["prompts"]) == 17
+    # 14 originals + the Russian-spending replays (P15-P17) + the full
+    # article task (P18).
+    assert len(data["prompts"]) == 18
     ids = [p["id"] for p in data["prompts"]]
     assert len(set(ids)) == len(ids), "duplicate prompt ids"
     for prompt in data["prompts"]:

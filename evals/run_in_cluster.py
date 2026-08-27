@@ -52,7 +52,8 @@ def payload(extra: list[str]) -> str:
     """
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        for name in ("runner.py", "scorer.py", "prompts.yaml"):
+        for name in ("runner.py", "scorer.py", "prompts.yaml",
+                     "harness_ops.py"):
             tar.add(EVALS / name, arcname=f"evals/{name}")
         for path in extra:
             src = pathlib.Path(path)

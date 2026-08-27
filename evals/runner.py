@@ -72,6 +72,7 @@ def load_shipped():
     # reaching a model, which is why there are no results from the last
     # week rather than no appetite to produce them.
     from src.assistant.tool_runtime import _TOOLS, ToolRuntime
+    from src.assistant.studio_tools import STUDIO_TOOLS
     from src.assistant.navigation import navigate_tool_schema, system_context
     try:
         from src.api.di import _DEFAULT_SYSTEM_PROMPT
@@ -85,8 +86,50 @@ def load_shipped():
     # sent a site map. The eval supplies the map from the fixture, so the tool
     # has to be offered here too — otherwise P11-P14 measure a tool the model
     # was never given, which is a harness result, not a model result.
-    return (list(_TOOLS) + [navigate_tool_schema()], ToolRuntime,
-            prompt, origin, system_context)
+    # Studio rides along because production offers it unconditionally: a
+    # harness that withholds it measures a narrower surface than any real
+    # turn sees, and P16/P18 exist to measure exactly that loop.
+    return (list(_TOOLS) + list(STUDIO_TOOLS) + [navigate_tool_schema()],
+            ToolRuntime, prompt, origin, system_context)
+
+
+def make_executor(proxy, spec: dict, gmr_api: str):
+    """One prompt's tool executor: real code, harness-local state.
+
+    Studio ops are the REAL StudioOps over an in-memory store — validation
+    and run_query included, so studio_run_query drives real queries at the
+    real fontem-api proxies. read_document answers from the fixture's
+    `draft` when the scenario supplies one, and with the production
+    "no document is open" refusal when it does not. Everything else is
+    proxy.execute_tool, which is what production dispatch bottoms out in.
+    """
+    from src.assistant.studio_ops import StudioOps  # pylint: disable=import-outside-toplevel
+    from src.assistant.studio_tools import STUDIO_ACTIONS  # pylint: disable=import-outside-toplevel
+    import pathlib as _pl  # pylint: disable=import-outside-toplevel
+    import sys as _sys  # pylint: disable=import-outside-toplevel
+    # The pod unpacks evals/ to /tmp and runs this file by path; its own
+    # directory is not on sys.path there, so the sibling import needs it.
+    _here = str(_pl.Path(__file__).resolve().parent)
+    if _here not in _sys.path:
+        _sys.path.insert(0, _here)
+    from harness_ops import HarnessDoc, InMemoryProjects  # pylint: disable=import-outside-toplevel
+
+    studio = StudioOps(InMemoryProjects(), "eval-user")
+    draft = spec.get("draft")
+    doc = HarnessDoc(draft) if draft else None
+
+    async def execute(http, name, args):
+        if name in STUDIO_ACTIONS:
+            return await studio.execute(name, args, client=http,
+                                        api_url=gmr_api)
+        if name == "mcp__gmr__read_document":
+            if doc is None:
+                return json.dumps(
+                    {"error": "no document is open in this conversation"})
+            return doc.read_json()
+        return await proxy.execute_tool(http, name, args)
+
+    return execute
 
 
 async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
@@ -360,7 +403,6 @@ async def main() -> int:
     # ToolRuntime takes no api_key — the executor talks to fontem-api, not
     # to a model provider — and `execute_tool` is public now.
     proxy = client_cls(gmr_api_url=args.gmr_api)
-    executor = proxy.execute_tool
     results = []
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as http:
         # Model-outer so the router loads each model once. Prompt-outer would
@@ -368,11 +410,20 @@ async def main() -> int:
         for model in [m.strip() for m in args.models.split(",") if m.strip()]:
             print(f"\n=== {model} ===", flush=True)
             for spec in prompts:
+                # Fresh per prompt: P16 asserts a project chain of its own,
+                # and shared state would let one prompt's project satisfy
+                # another's expectations.
+                executor = make_executor(proxy, spec, args.gmr_api)
+                # A prompt may need more rounds than the default: the full
+                # article task is five sequential tool calls plus the
+                # answer, and a cap of six scored "did not converge" against
+                # models that were converging fine.
+                rounds = int(spec.get("max_rounds") or args.max_rounds)
                 trace = await run_prompt(http, executor, args.base_url,
                                          model, spec, tools, system,
                                          args.api_key,
                                          nav_context, args.trace,
-                                         args.max_rounds, args.max_tokens,
+                                         rounds, args.max_tokens,
                                          extra_body)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)
@@ -380,6 +431,13 @@ async def main() -> int:
                     "model": model, "prompt": spec["id"],
                     "latency_s": trace.latency_s, "rounds": trace.rounds,
                     "tools": [c.name for c in trace.calls],
+                    # The full trajectory, auditable. Names alone could not
+                    # answer "why did the schema-informed query return 0" —
+                    # the args are the diagnosis, and the result head shows
+                    # what the model then read.
+                    "trace": [{"name": c.name, "args": c.args,
+                               "result_head": c.result[:300]}
+                              for c in trace.calls],
                     "error": trace.error, "answer": trace.answer[:1200],
                     "truncated_results": trace.truncated,
                     "categories": {k: {"points": v["points"], "max": v["max"],

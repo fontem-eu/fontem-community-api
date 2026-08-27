@@ -340,3 +340,37 @@ prompts:
       from the calculator, where the grounding check can see its
       provenance. In-head arithmetic here is what zeroed a run's grounding
       score as "fabricated" during the model evaluation.
+
+  - id: P18
+    article: "draft"
+    prompt: >
+      This draft is open in the editor. Investigate EU public spending with
+      Russian suppliers using the platform: build the analysis in a Data
+      Studio project of your own (create it, add a query for Russian
+      companies holding EU contracts, RUN it, add one plot), read the
+      draft, and propose a full rewrite that reports what you actually
+      found, with the figures.
+    draft:
+      title: "EU money and Russian suppliers"
+      abstract: "A first draft. Numbers to be confirmed."
+      sections:
+        - "Before sanctions, EU bodies spent heavily with Russian suppliers."
+        - "After 2022 one would expect this to look very different."
+    expect:
+      tools_required: [mcp__gmr__studio_create_project,
+                       mcp__gmr__studio_add_query,
+                       mcp__gmr__studio_run_query,
+                       mcp__gmr__read_document]
+      tools_ordered: [mcp__gmr__read_document, mcp__gmr__replace_body]
+      tools_forbidden: []
+      abstain: false
+    article_min_chars: 400
+    max_rounds: 14
+    why: >
+      The whole task, end to end — the one the 2026-08-25 sessions failed
+      with 51 tool calls and no prose. The trajectory must close the Studio
+      loop (create, add, RUN) and read the draft before rewriting it; the
+      deliverable must be an article of substance whose figures trace to
+      tool results through the calculator-aware evidence pool. Structural
+      "good enough", never style: style is a per-model judgment the
+      summary table can carry, a pass bar cannot.

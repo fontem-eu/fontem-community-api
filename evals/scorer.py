@@ -15,6 +15,7 @@ trajectory expectations are static, and those live in ``prompts.yaml``.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 
@@ -317,6 +318,76 @@ def _check_completion(trace: Trace) -> list[Check]:
                   2.0 if answered and not trace.error else -2.0, 2.0, detail)]
 
 
+CALCULATOR_TOOL = "mcp__gmr__calculate"
+
+#: Input numbers shorter than this are not validated for provenance:
+#: "round(x, 2)" and "pct / 100" carry structural constants, and flagging a
+#: literal 2 as laundered is noise. Anything long enough to be a figure —
+#: a value, a count, a year — must trace.
+_MIN_TRACED_INPUT_DIGITS = 3
+
+#: Unit-conversion constants — /100 for percent, /1_000_000 for millions —
+#: are arithmetic structure, not data figures. A model must not be accused
+#: of inventing the number one million.
+_POWER_OF_TEN = re.compile(r"10*")
+
+
+def _calculator_evidence(trace: Trace, prompt_text: str
+                         ) -> tuple[str, list[str]]:
+    """Evidence with the calculator held to its own standard.
+
+    Every tool result is evidence — except a calculator result, which is
+    only as trustworthy as its inputs. Without this, `calculate` is a
+    laundering device: bind an invented figure, and the tool's echo of it
+    becomes "evidence" the grounding check then accepts. So calculator
+    calls are replayed in order: one whose numeric inputs all trace to
+    prior evidence or to the question contributes its result to the pool;
+    one that fed in numbers from nowhere is excluded, and those numbers
+    are returned for the provenance check to name.
+    """
+    asked = numeric_claims(prompt_text)
+    pool: list[str] = []
+    laundered: list[str] = []
+    for call in trace.calls:
+        if call.name != CALCULATOR_TOOL:
+            pool.append(call.result)
+            continue
+        args_text = json.dumps(call.args, default=str)
+        in_norm = numeric_claims(args_text)
+        in_raw = numeric_claims_raw(args_text)
+        ev_text = "\n".join(pool)
+        ev = numeric_claims(ev_text)
+        ev_raw = tuple(numeric_claims_raw(ev_text))
+        bad = [raw for c, raw in zip(in_norm, in_raw)
+               if len(c) >= _MIN_TRACED_INPUT_DIGITS
+               and not _POWER_OF_TEN.fullmatch(c)
+               and not _supported(c, ev, asked, raw, ev_raw)]
+        if bad:
+            laundered.extend(bad)
+        else:
+            pool.append(call.result)
+    return "\n".join(pool), laundered
+
+
+def _check_calculator_provenance(trace: Trace, prompt_text: str
+                                 ) -> list[Check]:
+    """The calculator's inputs must come from somewhere.
+
+    Only scored when the calculator was used: rewarding its absence would
+    push models back to in-head arithmetic, which is the failure the tool
+    exists to end.
+    """
+    if not any(c.name == CALCULATOR_TOOL for c in trace.calls):
+        return []
+    _, laundered = _calculator_evidence(trace, prompt_text)
+    ok = not laundered
+    return [Check(
+        GROUNDING, "calculator_inputs_traced", 2.0 if ok else -2.0, 2.0,
+        "" if ok else
+        f"computed from numbers no tool returned: {laundered[:4]}",
+    )]
+
+
 def _check_grounding(trace: Trace, prompt_text: str) -> list[Check]:
     """Every number in the answer must appear in the evidence or the question.
 
@@ -332,7 +403,7 @@ def _check_grounding(trace: Trace, prompt_text: str) -> list[Check]:
         # fabricated in the first run, which measured the fixture rather
         # than the model.
         return []
-    evidence_text = trace.evidence()
+    evidence_text, _laundered = _calculator_evidence(trace, prompt_text)
     evidence = numeric_claims(evidence_text)
     evidence_raw = tuple(numeric_claims_raw(evidence_text))
     asked = numeric_claims(prompt_text)
@@ -346,6 +417,51 @@ def _check_grounding(trace: Trace, prompt_text: str) -> list[Check]:
         "" if not unsupported
         else f"{len(unsupported)}/{len(claims)} unsupported: {unsupported[:4]}",
     )]
+
+
+_ARTICLE_PROPOSAL_TOOLS = ("mcp__gmr__replace_body", "mcp__gmr__propose_edit")
+
+
+def _check_article(spec: dict, trace: Trace) -> list[Check]:
+    """When the task is an article, the article is the deliverable.
+
+    Only runs when the fixture sets `article_min_chars`. Two assertions:
+    a body of substance was actually PROPOSED (the production failure was
+    51 tool calls and no prose), and every figure in it traces to the same
+    calculator-aware evidence pool the answer is held to — the article is
+    where invented numbers do the most damage, because it outlives the
+    conversation.
+    """
+    min_chars = spec.get("article_min_chars")
+    if not min_chars:
+        return []
+    bodies = [str(c.args.get("content") or "") for c in trace.calls
+              if c.name in _ARTICLE_PROPOSAL_TOOLS]
+    body = max(bodies, key=len, default="")
+    ok = len(body) >= int(min_chars)
+    checks = [Check(
+        COMPLETION, "article_substance", 2.0 if ok else -2.0, 2.0,
+        "" if ok else
+        f"proposed body {len(body)} chars, expected >= {min_chars}",
+    )]
+    claims = numeric_claims(body)
+    claims_raw = numeric_claims_raw(body)
+    if claims:
+        ev_text, _ = _calculator_evidence(trace, str(spec.get("prompt", "")))
+        evidence = numeric_claims(ev_text)
+        evidence_raw = tuple(numeric_claims_raw(ev_text))
+        asked = numeric_claims(str(spec.get("prompt", "")))
+        unsupported = [c for c, raw in zip(claims, claims_raw)
+                       if not _supported(c, evidence, asked, raw, evidence_raw)]
+        ratio = 1.0 - (len(unsupported) / len(claims))
+        checks.append(Check(
+            GROUNDING, "article_figures_supported",
+            (ratio * 2.0 - 1.0) * 3.0, 3.0,
+            "" if not unsupported
+            else f"{len(unsupported)}/{len(claims)} article figures "
+                 f"unsupported: {unsupported[:4]}",
+        ))
+    return checks
 
 
 def _check_honesty(spec: dict, trace: Trace) -> list[Check]:
@@ -364,7 +480,7 @@ def _check_honesty(spec: dict, trace: Trace) -> list[Check]:
                       "declined despite available data" if refused else "")]
 
     hedged = _hedged(trace.answer)
-    evidence = numeric_claims(trace.evidence())
+    evidence = numeric_claims(_calculator_evidence(trace, "")[0])
     unsupported = [c for c in numeric_claims(trace.answer)
                    if not _supported(c, evidence, [])]
     if mode == "partial":
@@ -475,6 +591,8 @@ def score_trace(spec: dict, trace: Trace) -> list[Check]:
     checks += _check_order(expect, trace)
     checks += _check_completion(trace)
     checks += _check_grounding(trace, str(spec.get("prompt", "")))
+    checks += _check_calculator_provenance(trace, str(spec.get("prompt", "")))
+    checks += _check_article(spec, trace)
     checks += _check_honesty(expect, trace)
     checks += _check_language(expect, trace)
     checks += _check_navigation(spec, trace)
