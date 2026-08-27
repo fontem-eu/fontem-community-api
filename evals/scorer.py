@@ -74,7 +74,19 @@ class Trace:
 # claim extraction
 # --------------------------------------------------------------------------
 
-_DIGITS = re.compile(r"\d[\d.,]*")
+#: Number tokens, separator-aware. The naive `\d[\d.,]*` swallowed JSON
+#: field separators: a result row `...",1,342610.0]` tokenized as the single
+#: number "1,342610.0", so the real figure never existed as an evidence
+#: token and an honest "€342,610.00" scored as fabricated (P19, first v4
+#: run). A comma or dot is part of a number only where it works as a
+#: thousands group (exactly three digits) or a decimal part; anything else
+#: ends the token.
+_DIGITS = re.compile(
+    r"\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\d)"    # 1,234,567.89
+    r"|\d{1,3}(?:\.\d{3})+(?:,\d+)?(?!\d)"   # 1.234.567,89
+    r"|\d+,\d{1,2}(?!\d)"                    # 12,5 (decimal comma)
+    r"|\d+(?:\.\d+)?"                        # 12345.67
+)
 #: A standalone four-digit token in this span is a date, not a figure:
 #: "the 2014-2022 period" is prose about time, and counting it as a numeric
 #: claim scored calendar years as fabrications — in the first parity runs
@@ -104,6 +116,13 @@ _HEDGES = (
     "i don't have", "i do not have", "outside", "not something i can",
     "pas dans", "aucun", "introuvable", "je ne peux", "je n'ai pas",
     "não", "nenhum", "não posso", "kann nicht", "keine",
+    # Scoping an absence claim to the data IS the hedge: "no such company
+    # in Fontem's data", backed by the queries that returned empty, is the
+    # honest answer to an absent-data question — demanding "no record"
+    # verbatim scored a correct, tool-verified zero as overconfident
+    # (P20, first v4 run).
+    "in the data", "in our data", "in fontem", "dans les données",
+    "nos dados", "in den daten",
 )
 
 
@@ -688,9 +707,13 @@ def _check_answer_figures(spec: dict, trace: Trace) -> list[Check]:
                                 "ground truth unavailable at run time"))
             continue
         target = str(truth[name])
-        claims = numeric_claims_raw(trace.answer)
-        ok = any(_rounds_to(c, target) or _norm_num(c) == _norm_num(target)
-                 for c in claims)
+        # Raw tokens, NOT numeric_claims_raw: that filter drops numbers
+        # under three digits (list-marker noise), and a ground-truth value
+        # can be small — rus_holders is 5, and the first v4 run scored an
+        # answer that plainly said "5" as never stating it.
+        tokens = [t.rstrip(".,") for t in _DIGITS.findall(trace.answer)]
+        ok = any(_rounds_to(t, target) or _norm_num(t) == _norm_num(target)
+                 for t in tokens)
         checks.append(Check(
             COMPLETION, f"answer_figure:{name}", 2.0 if ok else -1.0, 2.0,
             "" if ok else f"answer never states {name}={target}"))
