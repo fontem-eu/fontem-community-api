@@ -104,9 +104,8 @@ def test_a_bare_year_is_not_a_numeric_claim():
     # First parity runs: "the 2014-2022 period" scored as two fabrications,
     # and bare years dominated every unsupported list. Prose about time is
     # not a figure.
-    assert scorer.numeric_claims("spending rose over the 2014-2022 period") \
-        == []
-    assert scorer.numeric_claims_raw("as of 2024, and again in 2027") == []
+    assert not scorer.numeric_claims("spending rose over the 2014-2022 period")
+    assert not scorer.numeric_claims_raw("as of 2024, and again in 2027")
 
 
 def test_a_year_inside_a_larger_figure_still_counts():
@@ -118,3 +117,29 @@ def test_a_year_inside_a_larger_figure_still_counts():
 def test_numbers_outside_the_year_span_still_count():
     assert scorer.numeric_claims("1850 soldiers, 2500 horses") \
         == ["1850", "2500"]
+
+
+# ── separator-aware tokenization ──────────────────────────────
+
+def test_json_field_separators_do_not_merge_adjacent_numbers():
+    # Replayed from the first v4 MiniMax run: the studio result row
+    # [..."Росатом Сервис АД",1,342610.0] tokenized as "1,342610.0", so the
+    # honest "€342,610.00" in the answer scored as fabricated.
+    evidence = '[["Росатом Сервис АД",1,342610.0],["ff9412ba",1,76275.16]]'
+    assert supported("the award was €342,610.00 in total", evidence)
+    assert supported("a smaller award of 76,275.16 EUR", evidence)
+
+
+def test_real_thousands_separators_still_tokenize_whole():
+    assert scorer.numeric_claims_raw("worth €55,480,942.93 combined") \
+        == ["55,480,942.93"]
+    assert scorer.numeric_claims_raw("soit 1.234.567,89 EUR") \
+        == ["1.234.567,89"]
+
+
+def test_a_scoped_absence_claim_counts_as_hedged():
+    # "No such company in Fontem's data", backed by empty query results, is
+    # the honest answer to an absent-data question — P20 scored it as
+    # asserting without hedge.
+    assert scorer._hedged(  # pylint: disable=protected-access
+        "No North Korean companies hold EU public contracts in Fontem's data.")
