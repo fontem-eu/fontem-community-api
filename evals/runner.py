@@ -71,26 +71,20 @@ def load_shipped():
     # harness with it: every run since has died on the import before
     # reaching a model, which is why there are no results from the last
     # week rather than no appetite to produce them.
-    from src.assistant.tool_runtime import _TOOLS, ToolRuntime
-    from src.assistant.studio_tools import STUDIO_TOOLS
-    from src.assistant.navigation import navigate_tool_schema, system_context
+    from src.assistant.tool_runtime import ToolRuntime
+    from src.assistant.navigation import system_context
     try:
         from src.api.di import _DEFAULT_SYSTEM_PROMPT
         prompt = _DEFAULT_SYSTEM_PROMPT
         origin = "shipped"
-    except Exception as exc:  # pragma: no cover - env differences
+    except Exception as exc:  # pylint: disable=broad-except # pragma: no cover
         prompt = ("You are Fontem's assistant. Use the tools to ground every "
                   "claim. Never state a figure you did not read from a tool.")
         origin = f"fallback ({type(exc).__name__})"
-    # navigate is offered per turn in production, gated on the client having
-    # sent a site map. The eval supplies the map from the fixture, so the tool
-    # has to be offered here too — otherwise P11-P14 measure a tool the model
-    # was never given, which is a harness result, not a model result.
-    # Studio rides along because production offers it unconditionally: a
-    # harness that withholds it measures a narrower surface than any real
-    # turn sees, and P16/P18 exist to measure exactly that loop.
-    return (list(_TOOLS) + list(STUDIO_TOOLS) + [navigate_tool_schema()],
-            ToolRuntime, prompt, origin, system_context)
+    # Tools are not returned here any more: they are assembled per model and
+    # per prompt in main() with production's own turn_tool_specs, so surface
+    # tiering (compact vs full, navigate gated on routes) matches what ships.
+    return (ToolRuntime, prompt, origin, system_context)
 
 
 def make_executor(proxy, spec: dict, gmr_api: str):
@@ -105,13 +99,11 @@ def make_executor(proxy, spec: dict, gmr_api: str):
     """
     from src.assistant.studio_ops import StudioOps  # pylint: disable=import-outside-toplevel
     from src.assistant.studio_tools import STUDIO_ACTIONS  # pylint: disable=import-outside-toplevel
-    import pathlib as _pl  # pylint: disable=import-outside-toplevel
-    import sys as _sys  # pylint: disable=import-outside-toplevel
     # The pod unpacks evals/ to /tmp and runs this file by path; its own
     # directory is not on sys.path there, so the sibling import needs it.
-    _here = str(_pl.Path(__file__).resolve().parent)
-    if _here not in _sys.path:
-        _sys.path.insert(0, _here)
+    _here = str(pathlib.Path(__file__).resolve().parent)
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
     from harness_ops import HarnessDoc, InMemoryProjects  # pylint: disable=import-outside-toplevel
 
     studio = StudioOps(InMemoryProjects(), "eval-user")
@@ -221,7 +213,7 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                         re.fullmatch(
                             re.sub(r":[^/]+", "[^/]+",
                                    r.get("path", "")).rstrip("/") or "/",
-                            path.split("?")[0].rstrip("/") or "/")
+                            path.split("?", maxsplit=1)[0].rstrip("/") or "/")
                         for r in routes)
                     result = json.dumps(
                         {"navigated": path} if known
@@ -341,8 +333,6 @@ async def main() -> int:
                         help="override the shipped system prompt (A/B testing)")
     parser.add_argument("--only", default=None,
                         help="comma-separated prompt ids to run")
-    parser.add_argument("--tools-only", default=None,
-                        help="restrict the offered tools to these names")
     parser.add_argument(
         "--api-key", default="",
         help="Bearer token for a hosted provider. Omit for llama-server, "
@@ -379,13 +369,7 @@ async def main() -> int:
                         help="dump the exact request and raw reply per round")
     args = parser.parse_args()
 
-    tools, client_cls, system, origin, nav_context = load_shipped()
-    if args.tools_only:
-        # Order-preserving on purpose: position in the tool array is a
-        # variable worth testing, not an implementation detail.
-        wanted = [t.strip() for t in args.tools_only.split(",")]
-        by_name = {t["function"]["name"]: t for t in tools}
-        tools = [by_name[n] for n in wanted if n in by_name]
+    client_cls, system, origin, nav_context = load_shipped()
     if args.system_file:
         system = pathlib.Path(args.system_file).read_text("utf-8")
         origin = f"override:{pathlib.Path(args.system_file).name}"
@@ -398,17 +382,63 @@ async def main() -> int:
         prompts = [p for p in prompts if p["id"] in keep]
     extra_body = parse_extra_body(args.extra_body)
     print(f"fixture v{fixture['version']}: {len(prompts)} prompts | "
-          f"{len(tools)} tools | system prompt: {origin}", flush=True)
+          f"system prompt: {origin}", flush=True)
 
     # ToolRuntime takes no api_key — the executor talks to fontem-api, not
     # to a model provider — and `execute_tool` is public now.
     proxy = client_cls(gmr_api_url=args.gmr_api)
+
+    # ── production parity, per model ─────────────────────────────
+    # The harness used to hand every model one hand-assembled tool list:
+    # no generated tools (the system prompt ADVERTISED get_schema while the
+    # array withheld it — the model called it and was told "Unknown tool"),
+    # no schema prefill for big models, no compact surface for small ones.
+    # Every divergence mis-measured something. The tiering below is the
+    # production tiering, imported, not imitated.
+    # pylint: disable=import-outside-toplevel
+    from src.assistant import (
+        engine_tools, generated_tools, local_models, schema_context,
+    )
+
+    async with httpx.AsyncClient(timeout=30.0) as boot:
+        gen_tools = await generated_tools.fetch_tools(boot, args.gmr_api)
+        schema_block = ""
+        try:
+            resp = await boot.get(args.gmr_api.rstrip("/") + "/schema/graph")
+            resp.raise_for_status()
+            schema_block = schema_context.render(resp.json())
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"warning: no schema prefill available "
+                  f"({type(exc).__name__}) — big models run tool-only",
+                  flush=True)
+
+    by_served = {m.served_name: m for m in local_models.LOCAL_MODELS}
+
+    def tier_of(served: str):
+        """(compact, prefill_schema) for one served model name.
+
+        Unknown served names are treated as frontier models: full surface,
+        schema in prefill — the BYOK shape.
+        """
+        model = by_served.get(served)
+        if model is None:
+            return False, True
+        small = (model.context_tokens
+                 < schema_context.SCHEMA_MIN_CONTEXT_TOKENS)
+        return small, not small
+
     results = []
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as http:
         # Model-outer so the router loads each model once. Prompt-outer would
         # reload 17GB of weights on every switch.
         for model in [m.strip() for m in args.models.split(",") if m.strip()]:
-            print(f"\n=== {model} ===", flush=True)
+            compact, prefill = tier_of(model)
+            model_system = (system + "\n\n" + schema_block
+                            if prefill and schema_block else system)
+            print(f"\n=== {model} === "
+                  f"(surface={'compact' if compact else 'full'}, "
+                  f"schema={'prefill' if prefill and schema_block else 'tool'})",
+                  flush=True)
             for spec in prompts:
                 # Fresh per prompt: P16 asserts a project chain of its own,
                 # and shared state would let one prompt's project satisfy
@@ -419,8 +449,12 @@ async def main() -> int:
                 # answer, and a cap of six scored "did not converge" against
                 # models that were converging fine.
                 rounds = int(spec.get("max_rounds") or args.max_rounds)
+                routes = list((spec.get("expect") or {}).get("known_routes")
+                              or [])
+                tools = engine_tools.turn_tool_specs(
+                    gen_tools, True, routes, compact=compact)
                 trace = await run_prompt(http, executor, args.base_url,
-                                         model, spec, tools, system,
+                                         model, spec, tools, model_system,
                                          args.api_key,
                                          nav_context, args.trace,
                                          rounds, args.max_tokens,
