@@ -162,7 +162,8 @@ def test_fixture_is_wellformed():
     path = pathlib.Path(__file__).resolve().parents[2] / "evals" / "prompts.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     known = {SEARCH, INVESTIGATE, "mcp__gmr__find_paths", "mcp__gmr__propose_edit"}
-    assert len(data["prompts"]) == 14
+    # 14 originals + the three Russian-spending replay cases (P15-P17).
+    assert len(data["prompts"]) == 17
     ids = [p["id"] for p in data["prompts"]]
     assert len(set(ids)) == len(ids), "duplicate prompt ids"
     for prompt in data["prompts"]:
