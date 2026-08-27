@@ -72,6 +72,7 @@ def load_shipped():
     # reaching a model, which is why there are no results from the last
     # week rather than no appetite to produce them.
     from src.assistant.tool_runtime import _TOOLS, ToolRuntime
+    from src.assistant.studio_tools import STUDIO_TOOLS
     from src.assistant.navigation import navigate_tool_schema, system_context
     try:
         from src.api.di import _DEFAULT_SYSTEM_PROMPT
@@ -85,8 +86,43 @@ def load_shipped():
     # sent a site map. The eval supplies the map from the fixture, so the tool
     # has to be offered here too — otherwise P11-P14 measure a tool the model
     # was never given, which is a harness result, not a model result.
-    return (list(_TOOLS) + [navigate_tool_schema()], ToolRuntime,
-            prompt, origin, system_context)
+    # Studio rides along because production offers it unconditionally: a
+    # harness that withholds it measures a narrower surface than any real
+    # turn sees, and P16/P18 exist to measure exactly that loop.
+    return (list(_TOOLS) + list(STUDIO_TOOLS) + [navigate_tool_schema()],
+            ToolRuntime, prompt, origin, system_context)
+
+
+def make_executor(proxy, spec: dict, gmr_api: str):
+    """One prompt's tool executor: real code, harness-local state.
+
+    Studio ops are the REAL StudioOps over an in-memory store — validation
+    and run_query included, so studio_run_query drives real queries at the
+    real fontem-api proxies. read_document answers from the fixture's
+    `draft` when the scenario supplies one, and with the production
+    "no document is open" refusal when it does not. Everything else is
+    proxy.execute_tool, which is what production dispatch bottoms out in.
+    """
+    from src.assistant.studio_ops import StudioOps  # pylint: disable=import-outside-toplevel
+    from src.assistant.studio_tools import STUDIO_ACTIONS  # pylint: disable=import-outside-toplevel
+    from harness_ops import HarnessDoc, InMemoryProjects  # pylint: disable=import-outside-toplevel
+
+    studio = StudioOps(InMemoryProjects(), "eval-user")
+    draft = spec.get("draft")
+    doc = HarnessDoc(draft) if draft else None
+
+    async def execute(http, name, args):
+        if name in STUDIO_ACTIONS:
+            return await studio.execute(name, args, client=http,
+                                        api_url=gmr_api)
+        if name == "mcp__gmr__read_document":
+            if doc is None:
+                return json.dumps(
+                    {"error": "no document is open in this conversation"})
+            return doc.read_json()
+        return await proxy.execute_tool(http, name, args)
+
+    return execute
 
 
 async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
@@ -360,7 +396,6 @@ async def main() -> int:
     # ToolRuntime takes no api_key — the executor talks to fontem-api, not
     # to a model provider — and `execute_tool` is public now.
     proxy = client_cls(gmr_api_url=args.gmr_api)
-    executor = proxy.execute_tool
     results = []
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as http:
         # Model-outer so the router loads each model once. Prompt-outer would
@@ -368,6 +403,10 @@ async def main() -> int:
         for model in [m.strip() for m in args.models.split(",") if m.strip()]:
             print(f"\n=== {model} ===", flush=True)
             for spec in prompts:
+                # Fresh per prompt: P16 asserts a project chain of its own,
+                # and shared state would let one prompt's project satisfy
+                # another's expectations.
+                executor = make_executor(proxy, spec, args.gmr_api)
                 trace = await run_prompt(http, executor, args.base_url,
                                          model, spec, tools, system,
                                          args.api_key,
