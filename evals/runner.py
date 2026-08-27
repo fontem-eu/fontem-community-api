@@ -105,6 +105,13 @@ def make_executor(proxy, spec: dict, gmr_api: str):
     """
     from src.assistant.studio_ops import StudioOps  # pylint: disable=import-outside-toplevel
     from src.assistant.studio_tools import STUDIO_ACTIONS  # pylint: disable=import-outside-toplevel
+    import pathlib as _pl  # pylint: disable=import-outside-toplevel
+    import sys as _sys  # pylint: disable=import-outside-toplevel
+    # The pod unpacks evals/ to /tmp and runs this file by path; its own
+    # directory is not on sys.path there, so the sibling import needs it.
+    _here = str(_pl.Path(__file__).resolve().parent)
+    if _here not in _sys.path:
+        _sys.path.insert(0, _here)
     from harness_ops import HarnessDoc, InMemoryProjects  # pylint: disable=import-outside-toplevel
 
     studio = StudioOps(InMemoryProjects(), "eval-user")
