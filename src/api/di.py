@@ -508,6 +508,10 @@ a page that does not exist costs the user a click and their trust.
 - Every figure in your answer must be traceable to a tool result you
   received in this turn. Before you write a number, find it in the tool
   output; if you cannot point at where it came from, do not write it.
+- Derived figures — sums, differences, ratios, percentage changes — are
+  computed with the `calculate` tool, never in your head. Bind the inputs
+  you read from tool results, quote the result it returns. An answer's
+  arithmetic should be as traceable as its data.
 - Say a figure the way the tool gave it to you. Do not adjust it, round it
   to a rounder number, convert a currency, or restate it as "about" — the
   reader is going to check it against the page.
@@ -538,6 +542,19 @@ Lead with the finding, not a recap of the question. Be concise. Mark
 what the data shows apart from what you are inferring. If you are
 stuck, name the query you would run next. Short bullets for lists,
 sentences for analysis.
+
+## Exploring the data
+
+Exploration happens in the Data Studio, with the Studio tools: create a
+project (name it after the question, e.g. "Russian suppliers 2018-2026"),
+add queries to it, and run them with studio_run_query to see what they
+return. Iterate there — a query you have not run is a guess. Do not
+scatter probe or scratch queries into a user's existing projects; put
+them in your own clearly-named project, and refine or remove them as the
+analysis firms up. Before writing any graph query, get the schema (it is
+in this prompt, or from get_schema): relationship direction and property
+conventions are not guessable, and a wrong direction returns zero rows
+without an error.
 
 ## Limits
 
@@ -638,6 +655,7 @@ class AssistantProvider(Provider):
     def assistant_service(
         self, repo: AssistRepository, proxy: ProxyClient,
         projects: DataProjectService, schema: schema_context.SchemaContext,
+        reports: ReportService,
     ) -> AssistantService:
         return AssistantService(
             repo=repo,
@@ -659,6 +677,9 @@ class AssistantProvider(Provider):
             # it varies per model tier, so the service passes it per turn as
             # extra_prefix_chars once it knows which model is answering.
             schema_provider=schema,
+            # Same trust shape as project_service: server-side, per-request,
+            # as the asking user, with the service checking access per call.
+            report_service=reports,
         )
 
 

@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.assistant import generated_tools, legacy_tools
+from src.assistant import calc_tools, doc_tools, generated_tools, legacy_tools, probe_tools
 from src.assistant.freshness import _format_freshness_summary
 from src.assistant.catalogue import CatalogueCache
 
@@ -192,6 +192,16 @@ _TOOLS: list[dict] = [
     },
 ]
 
+PROPOSAL_TOOL_ACTIONS = doc_tools.PROPOSAL_TOOL_ACTIONS
+WIDGET_TYPES = doc_tools.WIDGET_TYPES
+
+_TOOLS.extend(doc_tools.DOC_TOOLS)
+_TOOLS.extend(probe_tools.PROBE_TOOLS)
+_TOOLS.extend(calc_tools.CALC_TOOLS)
+
+
+
+
 # Canonical action enum for the propose_edit tool. Pinned for the
 # schema-parity test (Python ↔ JS) and exposed so callers don't have
 # to walk the _TOOLS structure to find it.
@@ -212,6 +222,13 @@ _TOOL_LABELS = {
     "mcp__gmr__investigate_entity": "Investigating",
     "mcp__gmr__find_paths": "Finding connections",
     "mcp__gmr__propose_edit": "Proposing report edit",
+    "mcp__gmr__read_document": "Reading the document",
+    "mcp__gmr__set_title": "Proposing a title",
+    "mcp__gmr__set_abstract": "Proposing an abstract",
+    "mcp__gmr__replace_body": "Proposing a rewrite",
+    "mcp__gmr__insert_widget": "Proposing a widget",
+    "mcp__gmr__query_graph": "Probing the data store",
+    "mcp__gmr__calculate": "Calculating",
     # Legacy tools — still implemented for old conversations, but no
     # longer advertised in _TOOLS.
     "mcp__gmr__get_company": "Looking up company",
@@ -597,6 +614,7 @@ class ToolRuntime:
         budget: list[int], name_cache: dict,
         traced: list | None = None, audit=None,
         allowed: frozenset[str] | None = None,
+        doc=None,
     ) -> tuple[str, int]:
         """Run one tool call. Returns (what the model sees, raw result length).
 
@@ -645,7 +663,7 @@ class ToolRuntime:
             return await self._dispatch_inner(
                 client, name, args, studio=studio, nav_routes=nav_routes,
                 pending_nav=pending_nav, budget=budget, name_cache=name_cache,
-                traced=traced, call_id=call_id, started=started,
+                traced=traced, call_id=call_id, started=started, doc=doc,
             )
 
     async def _dispatch_inner(
@@ -653,8 +671,24 @@ class ToolRuntime:
         studio, nav_routes: list, pending_nav: list,
         budget: list[int], name_cache: dict,
         traced: list | None, call_id: str, started: float,
+        doc=None,
     ) -> tuple[str, int]:
         """The dispatch itself, once provenance is in scope."""
+        if name == "mcp__gmr__read_document":
+            # Server-side, as the asking user, against the report this
+            # conversation is bound to. `doc` is absent on non-report
+            # conversations, where there is no document to read.
+            if doc is None:
+                out = json.dumps({
+                    "error": "no document is open in this conversation",
+                })
+                _record_call(traced, call_id, name, args, out, started, 0)
+                return out, 0
+            out = await doc.read()
+            capped, budget[0] = tool_budget.cap_tool_result(out, budget[0])
+            _record_call(traced, call_id, name, args, capped, started, len(out))
+            return capped, len(out)
+
         if name in studio_tools.STUDIO_ACTIONS:
             # Server-side, as the asking user. The service checks access on
             # every call, so this cannot reach a project the user could not
@@ -725,9 +759,16 @@ class ToolRuntime:
                         "to": args.get("to_id", ""),
                     },
                 )
-            elif name == "mcp__gmr__propose_edit":
-                # Pure notification; the frontend applies the edit with user auth.
-                return json.dumps({"proposed": True, "action": args.get("action")})
+            elif (name == probe_tools.PROBE_TOOL_NAME
+                  or name == calc_tools.CALC_TOOL_NAME
+                  or name == "mcp__gmr__propose_edit"
+                  or name in doc_tools.FIELD_PROPOSALS
+                  or name == "mcp__gmr__insert_widget"):
+                # Locally-answered tools, one delegating return: the probe
+                # passes through the guarded proxies (its result rides the
+                # shared budget cap like any other), and proposals are
+                # notifications the frontend applies with user auth.
+                return await self._local_tool(client, name, args)
             elif name in legacy_tools.LEGACY_TOOLS:
                 r = await legacy_tools.fetch(
                     client, self._gmr_api_url, name, args)
@@ -741,6 +782,69 @@ class ToolRuntime:
                     if r.status_code >= 400 else r.text)
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
             return json.dumps({"error": str(exc)[:200]})
+
+    async def _local_tool(
+        self, client: httpx.AsyncClient, name: str, args: dict,
+    ) -> str:
+        """Tools answered here rather than by a fontem-api GET."""
+        if name == probe_tools.PROBE_TOOL_NAME:
+            return await probe_tools.execute(client, self._gmr_api_url, args)
+        if name == calc_tools.CALC_TOOL_NAME:
+            return calc_tools.execute(args)
+        return await self._propose(client, name, args)
+
+    async def _propose(
+        self, client: httpx.AsyncClient, name: str, args: dict,
+    ) -> str:
+        """One proposal, validated to the standard its verb declares."""
+        if name == "mcp__gmr__propose_edit":
+            # Legacy: replays from stored conversations. Never advertised.
+            return json.dumps({"proposed": True, "action": args.get("action")})
+        if name in doc_tools.FIELD_PROPOSALS:
+            field = doc_tools.FIELD_PROPOSALS[name]
+            if not str(args.get(field) or "").strip():
+                return json.dumps(
+                    {"error": f"{field} is required and was empty"})
+            return json.dumps({"proposed": True,
+                               "action": PROPOSAL_TOOL_ACTIONS[name]})
+        return await self._validate_widget(client, args)
+
+    async def _validate_widget(
+        self, client: httpx.AsyncClient, args: dict,
+    ) -> str:
+        """Refuse a widget that would not render, before it becomes a card.
+
+        The user's Apply button must never be the discovery mechanism for a
+        typo'd widget type or an entity id the model invented. The entity
+        check goes through `_resolve_profile`, which knows the skeleton-200
+        trap: a name proves existence, a 200 alone proves nothing.
+        """
+        widget_type = str(args.get("widget_type") or "")
+        if widget_type not in WIDGET_TYPES:
+            return json.dumps({
+                "error": f"unknown widget_type {widget_type!r}",
+                "hint": f"one of: {', '.join(WIDGET_TYPES)}",
+            })
+        entity_id = str(args.get("entityId") or "").strip()
+        if not entity_id:
+            return json.dumps({"error": "entityId is required"})
+        label, profile = await self._resolve_profile(client, entity_id)
+        if not label:
+            return json.dumps({
+                "error": f"no entity with id {entity_id!r}",
+                "hint": "resolve the id with search_entities first",
+            })
+        depth = args.get("depth")
+        if depth is not None and not 1 <= int(depth) <= 3:
+            return json.dumps({"error": "depth must be between 1 and 3"})
+        return json.dumps({
+            "proposed": True,
+            "action": PROPOSAL_TOOL_ACTIONS["mcp__gmr__insert_widget"],
+            # The resolved name rides back so the model can narrate the
+            # card ("added a graph view of Siemens AG") without a second
+            # lookup.
+            "entity_name": profile.get("name"),
+        })
 
     #: The labels an id may resolve to, and the endpoint that serves each.
     #: Order is dispatch order — companies are the common case.

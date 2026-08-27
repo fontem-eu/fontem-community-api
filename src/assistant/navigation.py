@@ -152,7 +152,14 @@ def navigate_result(path: str, routes: list[dict]) -> tuple[str, dict | None]:
 # a turn discovering that, and learns to distrust what it is offered.
 
 #: Tools that require an editing surface to be registered.
-EDITOR_ONLY_TOOLS = frozenset({"mcp__gmr__propose_edit"})
+EDITOR_ONLY_TOOLS = frozenset({
+    "mcp__gmr__propose_edit",
+    "mcp__gmr__read_document",
+    "mcp__gmr__set_title",
+    "mcp__gmr__set_abstract",
+    "mcp__gmr__replace_body",
+    "mcp__gmr__insert_widget",
+})
 
 
 def scope_tools(tools: list[dict], *, has_editor: bool) -> list[dict]:

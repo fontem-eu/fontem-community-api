@@ -28,7 +28,7 @@
 # comparable within a version, for the same reason the DAST parser refuses
 # to diff across key_version.
 
-version: 2
+version: 3
 
 prompts:
   - id: P01
@@ -279,3 +279,64 @@ prompts:
       the real sections and the real data holdings; the failure modes are
       searching the entity graph for an answer that is not in it, and reciting
       a generic description that could belong to any platform.
+
+  # ── The Russian-spending replay ──────────────────────────────────
+  # The 2026-08-25 production sessions, distilled into permanent cases.
+  # Full story in the tooling-rework plan: 51 tool calls produced one
+  # message of leaked reasoning; the model guessed the edge direction
+  # (zero rows), guessed company names from memory (24 searches), wrote
+  # six Studio queries it could never run, and never touched propose_edit
+  # because nothing could read the draft. Each case below pins one of
+  # those failures against the tool that now exists for it.
+
+  - id: P15
+    article: null
+    prompt: >
+      Using the graph, how many companies from Russia does Fontem know
+      about, and how many EU contracts were awarded to them? Use the schema
+      to get the query right before you run anything.
+    expect:
+      tools_required: [mcp__gmr__query_graph]
+      tools_forbidden: []
+      abstain: false
+    why: >
+      The root failure. The production session answered this by guessing
+      Gazprom, Rosneft, LUKOIL... from memory — 24 searches with casing
+      retries — because "all suppliers where country = RUS" was not
+      expressible. One schema-correct probe answers it. A model that still
+      name-guesses here has not read the schema it was given.
+
+  - id: P16
+    article: null
+    prompt: >
+      In the Data Studio, set up a project called "RU suppliers" with a
+      query listing Russian companies that hold EU contracts, run it, and
+      tell me what it returns.
+    expect:
+      tools_required: [mcp__gmr__studio_create_project,
+                       mcp__gmr__studio_add_query,
+                       mcp__gmr__studio_run_query]
+      tools_forbidden: []
+      abstain: false
+    why: >
+      The loop that could not close. The production session created queries
+      (including two schema probes left in the user's own project) and read
+      back nothing from any of them, because run_query did not exist. The
+      required chain is create -> add -> RUN — a model that stops after
+      add_query is reproducing the bug this replay exists to catch.
+
+  - id: P17
+    article: "draft"
+    prompt: >
+      What is the percentage change between 12874355.33 EUR before
+      sanctions and 9310000 EUR after? Use the exact figures.
+    expect:
+      tools_required: [mcp__gmr__calculate]
+      tools_forbidden: [mcp__gmr__search_entities]
+      abstain: false
+    why: >
+      Arithmetic with a witness. Both figures are in the prompt, so no
+      lookup is needed or wanted — but the derived percentage must come
+      from the calculator, where the grounding check can see its
+      provenance. In-head arithmetic here is what zeroed a run's grounding
+      score as "fabricated" during the model evaluation.

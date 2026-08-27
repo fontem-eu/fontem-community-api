@@ -47,11 +47,13 @@ from typing import Any
 #: parse and plan by the real engine, with no execution and no rows.
 _PLAN_PREFIX = {"cypher": "EXPLAIN ", "sql": "EXPLAIN "}
 
-_PATHS = {
+#: Public: studio_ops routes run_query through the same proxies.
+QUERY_PATHS = {
     "cypher": "/query/cypher",
     "sql": "/query/sql",
     "sparql": "/sparql",
 }
+_PATHS = QUERY_PATHS
 
 #: Chart types the plot renderer knows (fontem-web StudioPlotView.vue).
 #: Duplicated across repos deliberately — the alternative is an endpoint

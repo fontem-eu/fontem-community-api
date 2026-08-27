@@ -50,13 +50,21 @@ def test_tool_surface_matches_the_native_engine_exactly():
         assert mine == native, f"surface drifted at has_editor={has_editor}"
 
 
-def test_propose_edit_is_scoped_out_without_an_editor():
-    """The scoping rule that cost a day to find must hold in both engines."""
+def test_document_tools_are_scoped_out_without_an_editor():
+    """The scoping rule that cost a day to find must hold in both engines.
+
+    propose_edit was retired from the advertised surface (it joins
+    find_paths: implemented for stored conversations, not offered); the
+    rule it pinned now covers the whole document surface that replaced it.
+    """
     routes = [{"path": "/map", "description": "Atlas"}]
     with_editor = _names(lg.turn_tool_specs([], True, routes))
     without = _names(lg.turn_tool_specs([], False, routes))
-    assert "mcp__gmr__propose_edit" in with_editor
-    assert "mcp__gmr__propose_edit" not in without
+    for tool in ("mcp__gmr__read_document", "mcp__gmr__replace_body",
+                 "mcp__gmr__insert_widget"):
+        assert tool in with_editor
+        assert tool not in without
+    assert "mcp__gmr__propose_edit" not in with_editor
 
 
 def test_navigate_is_offered_only_when_the_client_sent_a_site_map():

@@ -39,7 +39,25 @@ def _builtin_tools() -> list[dict]:
 OFFERED_BUILTINS = (
     "mcp__gmr__search_entities",
     "mcp__gmr__investigate_entity",
-    "mcp__gmr__propose_edit",
+    # The document surface. read_document sees the report; the four
+    # proposal verbs each carry required params only. propose_edit — one
+    # required field and six optional flags whose validity depended on it —
+    # joins find_paths: implemented for stored conversations, no longer
+    # advertised. In the sessions that motivated the split it was never
+    # called once.
+    "mcp__gmr__read_document",
+    "mcp__gmr__set_title",
+    "mcp__gmr__set_abstract",
+    "mcp__gmr__replace_body",
+    "mcp__gmr__insert_widget",
+    # The guarded probe: read-only, capped, same proxies as the Run button.
+    # For one-off counts and keys checks; the prompt sends anything worth
+    # keeping to a Studio project instead.
+    "mcp__gmr__query_graph",
+    # Arithmetic with a witness: a number computed here is a tool result
+    # the grounding check can see the provenance of; the same number
+    # computed in the model's head reads as invented.
+    "mcp__gmr__calculate",
 )
 
 #: Generated tools (from fontem-api's annotated endpoints) the model is
@@ -80,9 +98,10 @@ def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
     one, and gating on the UI meant it could not use it until the user had
     already done the thing they were asking for.
 
-    `propose_edit` stays gated, because it genuinely needs a surface to
-    propose into. That is the difference: approval and application are UI
-    concerns, reading and writing the user's own projects are not.
+    The document tools stay gated on the editor, because they genuinely
+    need a surface to read from and propose into. That is the difference:
+    approval and application are UI concerns, reading and writing the
+    user's own projects are not.
 
     `anonymous` collapses all of that to navigate alone. It is an allowlist
     rather than a set of subtractions on purpose: a tool added later is

@@ -93,6 +93,31 @@ STUDIO_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "mcp__gmr__studio_run_query",
+            "description": (
+                "Executes a SAVED query from a project and returns its "
+                "rows. This is how you see what a query finds: create or "
+                "update it first, then run it here. Execution is read-only, "
+                "row-capped and time-limited — the same proxy as the "
+                "Studio's Run button — and large results come back "
+                "truncated with a marker."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": PROJECT_ID_PARAM,
+                    "query_id": {
+                        "type": "string",
+                        "description": "Query id, from studio_get_project.",
+                    },
+                },
+                "required": ["project_id", "query_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "mcp__gmr__studio_create_project",
             "description": (
                 "Creates a Data Studio project — the container for an "
