@@ -161,7 +161,13 @@ def test_fixture_is_wellformed():
     """Every prompt must name only tools that exist, or the run is meaningless."""
     path = pathlib.Path(__file__).resolve().parents[2] / "evals" / "prompts.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    known = {SEARCH, INVESTIGATE, "mcp__gmr__find_paths", "mcp__gmr__propose_edit"}
+    # Derive from the real tool surface instead of a copied list: a fixture
+    # naming a tool that no longer exists (or never did) is exactly what
+    # this check exists to catch, and a hand-copied set rots the same way.
+    from src.assistant.tool_runtime import _TOOLS  # pylint: disable=import-outside-toplevel
+    from src.assistant.studio_tools import STUDIO_ACTIONS  # pylint: disable=import-outside-toplevel
+    known = ({t["function"]["name"] for t in _TOOLS}
+             | set(STUDIO_ACTIONS) | {"navigate", "get_doc", "get_schema"})
     # 14 originals + the three Russian-spending replay cases (P15-P17).
     assert len(data["prompts"]) == 17
     ids = [p["id"] for p in data["prompts"]]
