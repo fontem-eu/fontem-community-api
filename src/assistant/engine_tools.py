@@ -19,7 +19,12 @@ to have more than one.
 """
 from __future__ import annotations
 
-from src.assistant import generated_tools, navigation, studio_tools
+from src.assistant import (
+    local_models,
+    navigation,
+    schema_context,
+    studio_tools,
+)
 
 
 def _builtin_tools() -> list[dict]:
@@ -88,8 +93,50 @@ OFFERED_GENERATED = ("get_doc", "get_schema")
 ANONYMOUS_TOOLS = frozenset({navigation.NAVIGATE_TOOL_NAME})
 
 
+#: What a small-context model is offered. The full surface is 16+ tools on
+#: a plain page and the repo has already measured what that does: "sixteen
+#: broke the 4B outright — it stopped finishing turns", and the staging
+#: gate caught the 1.7B failing to select `navigate` the first time the
+#: widened surface shipped. Small models get the verbs a task needs — the
+#: discovery chain, the document loop, the calculator, and the Studio loop
+#: from create to RUN — not the full instrument panel. The boundary reuses
+#: the schema tier: a model too small to carry the schema in prefill is too
+#: small to choose among twenty tools.
+COMPACT_BUILTINS = (
+    "mcp__gmr__search_entities",
+    "mcp__gmr__investigate_entity",
+    "mcp__gmr__read_document",
+    "mcp__gmr__set_title",
+    "mcp__gmr__replace_body",
+    "mcp__gmr__calculate",
+)
+
+COMPACT_STUDIO = (
+    "mcp__gmr__studio_list_projects",
+    "mcp__gmr__studio_get_project",
+    "mcp__gmr__studio_create_project",
+    "mcp__gmr__studio_add_query",
+    "mcp__gmr__studio_run_query",
+    "mcp__gmr__studio_add_plot",
+)
+
+
+def compact_for(payload: dict) -> bool:
+    """Whether this turn's model gets the compact surface.
+
+    A BYOK credential means a hosted frontier model — full surface. For
+    platform models the boundary is the schema tier: too small for the
+    schema in prefill means too small to choose among twenty tools.
+    """
+    if payload.get("credential"):
+        return False
+    model = local_models.resolve(payload.get("local_model_id"))
+    return model.context_tokens < schema_context.SCHEMA_MIN_CONTEXT_TOKENS
+
+
 def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
-                    nav_routes: list, *, anonymous: bool = False) -> list[dict]:
+                    nav_routes: list, *, anonymous: bool = False,
+                    compact: bool = False) -> list[dict]:
     """Tool schemas for one turn, in the order the model should see them.
 
     The Studio tools are unconditional. They run server-side against the
@@ -114,10 +161,14 @@ def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
         # gives a small model something to fail at.
         return [navigation.navigate_tool_schema()] if nav_routes else []
 
+    offered = COMPACT_BUILTINS if compact else OFFERED_BUILTINS
     builtins = [t for t in _builtin_tools()
-                if t["function"]["name"] in OFFERED_BUILTINS]
+                if t["function"]["name"] in offered]
     specs = list(navigation.scope_tools(builtins, has_editor=has_editor))
-    specs = specs + list(studio_tools.STUDIO_TOOLS)
+    studio = [t for t in studio_tools.STUDIO_TOOLS
+              if not compact
+              or t["function"]["name"] in COMPACT_STUDIO]
+    specs = specs + studio
     if nav_routes:
         specs = [navigation.navigate_tool_schema()] + specs
     docs = [t for t in gen_tools

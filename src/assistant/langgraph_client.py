@@ -46,6 +46,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from src.assistant import (
+    engine_tools,
     tool_runtime,
     generated_tools,
     navigation,
@@ -279,8 +280,10 @@ class LangGraphProxyClient:
                 gen_tools = await generated_tools.fetch_tools(
                     client, self._gmr_api_url,
                 )
-                specs = turn_tool_specs(gen_tools, has_editor, nav_routes,
-                                        anonymous=anonymous)
+                specs = turn_tool_specs(
+                        gen_tools, has_editor, nav_routes,
+                        anonymous=anonymous,
+                        compact=engine_tools.compact_for(payload))
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 traced: list = []
                 # Navigate emits queue here; the tool closures cannot yield.

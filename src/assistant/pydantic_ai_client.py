@@ -39,7 +39,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from src.assistant import studio_tools, tool_runtime, tool_budget, tool_trace
+from src.assistant import engine_tools, studio_tools, tool_runtime, tool_budget, tool_trace
 from src.assistant.engine_tools import ANONYMOUS_TOOLS, turn_tool_specs
 from src.assistant import generated_tools
 from src.assistant.tool_runtime import (
@@ -226,8 +226,10 @@ class PydanticAIProxyClient:
                 gen_tools = await generated_tools.fetch_tools(
                     client, self._gmr_api_url,
                 )
-                specs = turn_tool_specs(gen_tools, has_editor, nav_routes,
-                                        anonymous=anonymous)
+                specs = turn_tool_specs(
+                        gen_tools, has_editor, nav_routes,
+                        anonymous=anonymous,
+                        compact=engine_tools.compact_for(payload))
                 budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 # Navigate emits queue here; the tool closures cannot yield.
                 pending_nav: list = []
