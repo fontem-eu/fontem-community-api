@@ -54,6 +54,10 @@ OFFERED_BUILTINS = (
     # For one-off counts and keys checks; the prompt sends anything worth
     # keeping to a Studio project instead.
     "mcp__gmr__query_graph",
+    # Arithmetic with a witness: a number computed here is a tool result
+    # the grounding check can see the provenance of; the same number
+    # computed in the model's head reads as invented.
+    "mcp__gmr__calculate",
 )
 
 #: Generated tools (from fontem-api's annotated endpoints) the model is
