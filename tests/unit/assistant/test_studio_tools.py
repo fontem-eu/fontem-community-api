@@ -58,7 +58,10 @@ def test_the_narrow_generated_endpoints_are_gone():
     for dropped in ("get_series", "list_datasets", "contract_sectors",
                     "single_bidder_rate"):
         assert dropped not in got
-    assert OFFERED_GENERATED == ("get_doc",)
+    # get_schema joined 2026-08-27: without it the model guessed the graph's
+    # edge direction and got zero rows where the data lives. Still a curated
+    # pair, not a drift back toward eleven.
+    assert OFFERED_GENERATED == ("get_doc", "get_schema")
 
 
 def test_find_paths_is_no_longer_advertised():

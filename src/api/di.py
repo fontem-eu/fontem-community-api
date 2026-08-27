@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from src.assistant.context import TurnLimits
-from src.assistant import langgraph_client, pydantic_ai_client
+from src.assistant import langgraph_client, pydantic_ai_client, schema_context
 from src.assistant.tool_runtime import _DEFAULT_GMR_API
 from src.assistant.pg_repository import PgAssistRepository
 from src.assistant.proxy_client import ClaudeProxyClient
@@ -613,6 +613,13 @@ class AssistantProvider(Provider):
         )
         return ClaudeProxyClient(url=url)
 
+    @provide(scope=Scope.APP)
+    def schema_provider(self) -> schema_context.SchemaContext:
+        # App-scoped so the fetched schema is cached once per process, not
+        # once per request — the block is the same for every user.
+        return schema_context.SchemaContext(
+            os.environ.get("GMR_API_INTERNAL", _DEFAULT_GMR_API))
+
     @provide(scope=Scope.REQUEST)
     def credential_repository(self, session: AsyncSession) -> CredentialRepository:
         return CredentialRepository(session)
@@ -630,7 +637,7 @@ class AssistantProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def assistant_service(
         self, repo: AssistRepository, proxy: ProxyClient,
-        projects: DataProjectService,
+        projects: DataProjectService, schema: schema_context.SchemaContext,
     ) -> AssistantService:
         return AssistantService(
             repo=repo,
@@ -648,6 +655,10 @@ class AssistantProvider(Provider):
             # budget it feeds decides whether a turn overflows its window.
             fixed_prefix_chars=_fixed_prefix_chars(),
             context_char_budget=_CONTEXT_CHAR_BUDGET,
+            # The schema block's own length is NOT part of the fixed prefix:
+            # it varies per model tier, so the service passes it per turn as
+            # extra_prefix_chars once it knows which model is answering.
+            schema_provider=schema,
         )
 
 

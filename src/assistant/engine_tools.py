@@ -54,8 +54,12 @@ OFFERED_BUILTINS = (
 #:
 #: `get_doc` earns its place because the documentation index rides in the
 #: prefill, so the model already knows what exists and needs only a way to
-#: read it.
-OFFERED_GENERATED = ("get_doc",)
+#: read it. `get_schema` earns its place the hard way: without it the model
+#: guessed the graph's edge direction and got zero rows where the data
+#: lives. Models whose context clears the schema_context threshold carry
+#: the same payload in prefill and rarely need the tool; everyone else
+#: pays a turn for it instead of prefix.
+OFFERED_GENERATED = ("get_doc", "get_schema")
 
 
 #: The only tool a signed-out visitor is offered. Everything else either
