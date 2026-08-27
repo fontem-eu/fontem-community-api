@@ -240,9 +240,33 @@ def _echo_step(messages: list[dict]) -> dict:
     return {"text": "MOCK-OK: " + _last_user_text(messages)[:200]}
 
 
+def _edit_step(messages: list[dict]) -> dict:
+    """Read the draft, then propose a whole-body rewrite.
+
+    The scripted twin of the document surface: read_document must come
+    first (you cannot revise what you have not read), and the rewrite
+    quotes a marker from what the read returned, so the smoke test can
+    assert the proposal was derived from the document rather than
+    invented alongside it.
+    """
+    results = _tool_results(messages)
+    done = {name for name, _ in results}
+    if "mcp__gmr__read_document" not in done:
+        return {"tool": "mcp__gmr__read_document", "args": {}}
+    read = next(r for n, r in results if n == "mcp__gmr__read_document")
+    if "error" in read and "title" not in read:
+        return {"text": "MOCK-FAIL: read_document errored. " + read[:200]}
+    if "mcp__gmr__replace_body" not in done:
+        return {"tool": "mcp__gmr__replace_body", "args": {
+            "content": "<p>MOCK-REWRITE derived from the saved draft.</p>",
+        }}
+    return {"text": "MOCK-OK: proposed a rewrite of the draft."}
+
+
 SCRIPTS = {
     "toolchain": _toolchain_step,
     "echo": _echo_step,
+    "edit": _edit_step,
 }
 
 

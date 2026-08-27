@@ -348,3 +348,37 @@ def test_the_env_default_is_off():
     # Belt and braces on the default, read from the process the suite runs
     # in rather than from the source.
     assert os.environ.get("ASSIST_MOCK_MODEL", "") != "" or not mock_llm.enabled()
+
+
+class TestEditScenario:
+    """The scripted twin of the document surface."""
+
+    def _msgs(self, results=()):
+        msgs = [{"role": "user",
+                 "content": "E2E-SCENARIO: edit rewrite this draft"}]
+        for name, result in results:
+            msgs.append({"role": "tool", "name": name, "content": result})
+        return msgs
+
+    def test_it_reads_before_it_proposes(self):
+        step = mock_llm.next_step(self._msgs())
+        assert step == {"tool": "mcp__gmr__read_document", "args": {}}
+
+    def test_it_proposes_a_whole_body_rewrite_after_reading(self):
+        step = mock_llm.next_step(self._msgs(
+            [("mcp__gmr__read_document",
+              '{"title": "Draft", "sections": "[...]"}')]))
+        assert step["tool"] == "mcp__gmr__replace_body"
+        assert "MOCK-REWRITE" in step["args"]["content"]
+
+    def test_a_failed_read_stops_the_script_loudly(self):
+        step = mock_llm.next_step(self._msgs(
+            [("mcp__gmr__read_document", '{"error": "no document is open"}')]))
+        assert "MOCK-FAIL" in step["text"]
+
+    def test_it_finishes_after_the_proposal(self):
+        step = mock_llm.next_step(self._msgs([
+            ("mcp__gmr__read_document", '{"title": "Draft"}'),
+            ("mcp__gmr__replace_body", '{"proposed": true}'),
+        ]))
+        assert "MOCK-OK" in step["text"]
