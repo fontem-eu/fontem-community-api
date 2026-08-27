@@ -27,6 +27,7 @@ from typing import AsyncIterator as TypingAsyncIterator, Protocol
 
 from src.assistant import (
     context_budget,
+    schema_context,
     local_models,
     navigation,
     summariser,
@@ -146,6 +147,9 @@ class AssistantService:
         #: guessed: it is the same for every turn, and guessing it is how a
         #: budget overflows in production but not in a test.
         fixed_prefix_chars: int = 7_176,
+        #: Best-effort provider of the rendered graph-schema prompt block
+        #: (see schema_context). None keeps every existing wiring working.
+        schema_provider=None,
         #: Tokens reserved for the model's own reply. Not slack — a window
         #: that fits the conversation and leaves nothing to answer with fails
         #: the same way an overflow does, one step later.
@@ -156,6 +160,7 @@ class AssistantService:
         self._base_prompt = base_system_prompt
         self._turn_limits = turn_limits
         self._fixed_prefix_chars = fixed_prefix_chars
+        self._schema = schema_provider
         self._reply_tokens = reply_tokens
         self._context_budget = context_char_budget
         self._projects = project_service
@@ -196,12 +201,26 @@ class AssistantService:
         # not from a module constant. The constant was sized for the smallest
         # context we serve, which handed a 1M-token model the same ~7,700
         # tokens of conversation as a 32k one.
+        # The schema block is tiered: models whose context clears the
+        # threshold carry it in prefill; smaller ones keep the get_schema
+        # tool instead. Fetched before the budget is derived, because a
+        # prefix the budget does not know about is how windows overflow in
+        # production and nowhere else.
+        schema_block = ""
+        if self._schema is not None and schema_context.wants_schema(
+                local_models.resolve(req.local_model_id).context_tokens):
+            schema_block = await self._schema.block()
+
         stored = await self._repo.history_turns(conv.id)
         # What the stored summary already covers is represented by the
         # summary, not by the turns themselves — otherwise they fall off again
         # every turn and get folded in again, and the summary restates itself.
         prior = summariser.unsummarised(stored, conv.summary_through)
-        windowed, overflow = fit_history(prior, self._limits_for(req.local_model_id))
+        windowed, overflow = fit_history(
+            prior,
+            self._limits_for(req.local_model_id,
+                             extra_prefix_chars=len(schema_block)),
+        )
 
         # Summarise only what just fell off, and only when something did.
         #
@@ -227,6 +246,7 @@ class AssistantService:
             budgeted_context,
             windowed,
             site_map=navigation.system_context(req.nav),
+            schema_block=schema_block,
         )
 
         # Persist the user row immediately with an estimate.
@@ -493,17 +513,21 @@ class AssistantService:
         """
         return self._budget_for(local_model_id).tool_chars
 
-    def _budget_for(self, local_model_id: str | None) -> context_budget.ContextBudget:
+    def _budget_for(
+        self, local_model_id: str | None, extra_prefix_chars: int = 0,
+    ) -> context_budget.ContextBudget:
         model = local_models.resolve(local_model_id)
         return context_budget.derive(
             context_tokens=model.context_tokens,
-            fixed_prefix_chars=self._fixed_prefix_chars,
+            fixed_prefix_chars=self._fixed_prefix_chars + extra_prefix_chars,
             reply_tokens=self._reply_tokens,
             floor_history_chars=self._turn_limits.max_chars,
             floor_tool_chars=tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN,
         )
 
-    def _limits_for(self, local_model_id: str | None) -> TurnLimits:
+    def _limits_for(
+        self, local_model_id: str | None, extra_prefix_chars: int = 0,
+    ) -> TurnLimits:
         """Turn limits sized to the model this turn will run on.
 
         `self._turn_limits` stays the floor: whatever the arithmetic says, no
@@ -515,7 +539,8 @@ class AssistantService:
         """
         return TurnLimits(
             max_turns=self._turn_limits.max_turns,
-            max_chars=self._budget_for(local_model_id).history_chars,
+            max_chars=self._budget_for(
+                local_model_id, extra_prefix_chars).history_chars,
             keep_fraction=self._turn_limits.keep_fraction,
         )
 

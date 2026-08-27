@@ -185,6 +185,7 @@ def build_system_prompt(
     context_block: str,
     history: list[Turn],
     site_map: str = "",
+    schema_block: str = "",
 ) -> str:
     """Stitch the base system prompt, caller context, and history.
 
@@ -214,6 +215,11 @@ def build_system_prompt(
 
     if site_map:
         parts.append(site_map.strip())
+
+    if schema_block:
+        # Stable for at least the schema cache's TTL, so it sits with the
+        # other stable sections, ahead of everything that changes per turn.
+        parts.append(schema_block.strip())
 
     if context_block:
         parts.append("Current context:\n" + context_block.rstrip())
