@@ -45,6 +45,7 @@ def test_the_offered_surface_is_deliberately_small():
         "mcp__gmr__insert_widget",
         "mcp__gmr__studio_list_projects",
         "mcp__gmr__studio_get_project",
+        "mcp__gmr__studio_run_query",
         "mcp__gmr__studio_create_project",
         "mcp__gmr__studio_rename_project",
         "mcp__gmr__studio_add_query",
