@@ -414,11 +414,16 @@ async def main() -> int:
                 # and shared state would let one prompt's project satisfy
                 # another's expectations.
                 executor = make_executor(proxy, spec, args.gmr_api)
+                # A prompt may need more rounds than the default: the full
+                # article task is five sequential tool calls plus the
+                # answer, and a cap of six scored "did not converge" against
+                # models that were converging fine.
+                rounds = int(spec.get("max_rounds") or args.max_rounds)
                 trace = await run_prompt(http, executor, args.base_url,
                                          model, spec, tools, system,
                                          args.api_key,
                                          nav_context, args.trace,
-                                         args.max_rounds, args.max_tokens,
+                                         rounds, args.max_tokens,
                                          extra_body)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)
@@ -426,6 +431,13 @@ async def main() -> int:
                     "model": model, "prompt": spec["id"],
                     "latency_s": trace.latency_s, "rounds": trace.rounds,
                     "tools": [c.name for c in trace.calls],
+                    # The full trajectory, auditable. Names alone could not
+                    # answer "why did the schema-informed query return 0" —
+                    # the args are the diagnosis, and the result head shows
+                    # what the model then read.
+                    "trace": [{"name": c.name, "args": c.args,
+                               "result_head": c.result[:300]}
+                              for c in trace.calls],
                     "error": trace.error, "answer": trace.answer[:1200],
                     "truncated_results": trace.truncated,
                     "categories": {k: {"points": v["points"], "max": v["max"],

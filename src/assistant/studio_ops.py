@@ -200,7 +200,14 @@ class StudioOps:
             return self._refusal(verdict, "query")
         created = await self._svc.add_query(
             self._user, project_id, name, lang, query)
-        return self._with_notes(self._query_dict(created, full=True), verdict)
+        result = self._query_dict(created, full=True)
+        # Both a 1.7B and a 30B wrote queries and never ran them — they
+        # reached for the ad-hoc probe instead, or stopped. The affordance
+        # rides in the result, where the model is already looking.
+        result["next"] = (
+            f"run it: studio_run_query(project_id={project_id!r}, "
+            f"query_id={result['id']!r})")
+        return self._with_notes(result, verdict)
 
     async def update_query(self, project_id: str = "", query_id: str = "",
                            name: str | None = None, lang: str | None = None,

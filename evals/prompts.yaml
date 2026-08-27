@@ -365,6 +365,7 @@ prompts:
       tools_forbidden: []
       abstain: false
     article_min_chars: 400
+    max_rounds: 14
     why: >
       The whole task, end to end — the one the 2026-08-25 sessions failed
       with 51 tool calls and no prose. The trajectory must close the Studio
