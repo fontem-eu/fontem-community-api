@@ -50,6 +50,10 @@ OFFERED_BUILTINS = (
     "mcp__gmr__set_abstract",
     "mcp__gmr__replace_body",
     "mcp__gmr__insert_widget",
+    # The guarded probe: read-only, capped, same proxies as the Run button.
+    # For one-off counts and keys checks; the prompt sends anything worth
+    # keeping to a Studio project instead.
+    "mcp__gmr__query_graph",
 )
 
 #: Generated tools (from fontem-api's annotated endpoints) the model is

@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.assistant import doc_tools, generated_tools, legacy_tools
+from src.assistant import doc_tools, generated_tools, legacy_tools, probe_tools
 from src.assistant.freshness import _format_freshness_summary
 from src.assistant.catalogue import CatalogueCache
 
@@ -196,6 +196,7 @@ PROPOSAL_TOOL_ACTIONS = doc_tools.PROPOSAL_TOOL_ACTIONS
 WIDGET_TYPES = doc_tools.WIDGET_TYPES
 
 _TOOLS.extend(doc_tools.DOC_TOOLS)
+_TOOLS.extend(probe_tools.PROBE_TOOLS)
 
 
 
@@ -225,6 +226,7 @@ _TOOL_LABELS = {
     "mcp__gmr__set_abstract": "Proposing an abstract",
     "mcp__gmr__replace_body": "Proposing a rewrite",
     "mcp__gmr__insert_widget": "Proposing a widget",
+    "mcp__gmr__query_graph": "Probing the data store",
     # Legacy tools — still implemented for old conversations, but no
     # longer advertised in _TOOLS.
     "mcp__gmr__get_company": "Looking up company",
@@ -755,6 +757,12 @@ class ToolRuntime:
                         "to": args.get("to_id", ""),
                     },
                 )
+            elif name == probe_tools.PROBE_TOOL_NAME:
+                # Thin pass-through to the same guarded proxies the Studio's
+                # Run button uses. The result flows through the shared
+                # budget cap on the way back like any other tool result.
+                return await probe_tools.execute(
+                    client, self._gmr_api_url, args)
             elif (name == "mcp__gmr__propose_edit"
                   or name in doc_tools.FIELD_PROPOSALS
                   or name == "mcp__gmr__insert_widget"):
