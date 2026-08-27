@@ -14,6 +14,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
+
 from src.assistant import probe_tools
 from src.assistant.tool_runtime import ToolRuntime
 
@@ -94,7 +96,6 @@ def test_a_fat_result_rides_the_shared_budget_cap():
 
 
 def test_a_dead_engine_is_an_answer_not_an_exception():
-    import httpx
     client = MagicMock()
     client.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
     out = json.loads(_dispatch({"lang": "sql", "query": "SELECT 1"}, client))

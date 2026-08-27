@@ -757,19 +757,15 @@ class ToolRuntime:
                         "to": args.get("to_id", ""),
                     },
                 )
-            elif name == probe_tools.PROBE_TOOL_NAME:
-                # Thin pass-through to the same guarded proxies the Studio's
-                # Run button uses. The result flows through the shared
-                # budget cap on the way back like any other tool result.
-                return await probe_tools.execute(
-                    client, self._gmr_api_url, args)
-            elif (name == "mcp__gmr__propose_edit"
+            elif (name == probe_tools.PROBE_TOOL_NAME
+                  or name == "mcp__gmr__propose_edit"
                   or name in doc_tools.FIELD_PROPOSALS
                   or name == "mcp__gmr__insert_widget"):
-                # Proposals are notifications; the frontend applies with
-                # user auth off the proposal SSE. The split verbs validate
-                # before proposing — that is the whole point of the split.
-                return await self._propose(client, name, args)
+                # Locally-answered tools, one delegating return: the probe
+                # passes through the guarded proxies (its result rides the
+                # shared budget cap like any other), and proposals are
+                # notifications the frontend applies with user auth.
+                return await self._local_tool(client, name, args)
             elif name in legacy_tools.LEGACY_TOOLS:
                 r = await legacy_tools.fetch(
                     client, self._gmr_api_url, name, args)
@@ -783,6 +779,14 @@ class ToolRuntime:
                     if r.status_code >= 400 else r.text)
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
             return json.dumps({"error": str(exc)[:200]})
+
+    async def _local_tool(
+        self, client: httpx.AsyncClient, name: str, args: dict,
+    ) -> str:
+        """Tools answered here rather than by a fontem-api GET."""
+        if name == probe_tools.PROBE_TOOL_NAME:
+            return await probe_tools.execute(client, self._gmr_api_url, args)
+        return await self._propose(client, name, args)
 
     async def _propose(
         self, client: httpx.AsyncClient, name: str, args: dict,
