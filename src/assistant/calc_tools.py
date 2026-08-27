@@ -105,7 +105,12 @@ _MAX_OPS = 100_000
 #: Wall-clock bound, checked every few hundred ticks.
 _MAX_SECONDS = 2.0
 
-_NUMERIC_STR = re.compile(r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?")
+#: Unambiguous on purpose: the optional fraction must start with a literal
+#: dot, so a digit run cannot be split between two quantifiers and the
+#: engine never backtracks polynomially (S5852). Inputs are length-bounded
+#: in _coerce_number before this is applied.
+_NUMERIC_STR = re.compile(r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?")
+_MAX_NUMERIC_STR_CHARS = 64
 
 
 def _bounded_range(*args):
@@ -156,7 +161,7 @@ def _coerce_number(name: str, value: str):
     arithmetic, which is the failure this tool exists to end.
     """
     s = value.strip()
-    if not _NUMERIC_STR.fullmatch(s):
+    if len(s) > _MAX_NUMERIC_STR_CHARS or not _NUMERIC_STR.fullmatch(s):
         raise ValueError(f"{name}: {value!r} is not a number")
     return float(s)
 
@@ -436,7 +441,7 @@ def execute(args: dict) -> str:
         return json.dumps({"error": "division by zero"})
     except RecursionError:
         return json.dumps({"error": "expression is nested too deeply"})
-    except (ValueError, SyntaxError, TypeError, OverflowError,
-            statistics.StatisticsError) as exc:
+    # statistics.StatisticsError is a ValueError subclass — already caught.
+    except (ValueError, SyntaxError, TypeError, OverflowError) as exc:
         return json.dumps({"error": str(exc) or type(exc).__name__})
     return json.dumps({"expression": expression, "result": result})
