@@ -28,6 +28,10 @@ from typing import Any
 
 from src.services import studio_validation
 
+#: One run may not eat the whole turn: same order as any single
+#: tool result, minus headroom for the envelope around it.
+_RESULT_CHARS = 7_500
+
 #: Query text is long and rarely needed in full when listing. Reading one
 #: query in full is what get_project's `query_id` filter is for.
 _QUERY_PREVIEW_CHARS = 400
@@ -133,6 +137,53 @@ class StudioOps:
         project = await self._svc.get_project(self._user, project_id)
         return self._project_dict(project, deep=True, full_query=query_id or None)
 
+    async def run_query(self, project_id: str = "", query_id: str = "", **_) -> dict:
+        """Execute a saved query and return its rows.
+
+        The missing verb. The model could create and update queries but never
+        see what they returned — in the sessions that motivated this it wrote
+        six queries, including two schema probes, and read back exactly
+        nothing from any of them.
+
+        Execution goes through the same read-only, size- and row-capped
+        proxies the Studio's own Run button uses (fontem-api /query/*,
+        /sparql). Nothing model-facing gets a weaker guarantee than the
+        button, and there is no second query engine to diverge from the
+        first.
+        """
+        if self._client is None:
+            return {"error": "no query engine is reachable this turn",
+                    "hint": "the saved query is intact; run it again later"}
+        query = await self._existing_query(project_id, query_id)
+        if query is None:
+            return {"error": f"no query {query_id!r} in project {project_id!r}",
+                    "hint": "studio_get_project lists the ids"}
+        lang = (getattr(query, "lang", "") or "cypher").strip().lower()
+        path = studio_validation.QUERY_PATHS.get(lang)
+        if path is None:
+            return {"error": f"stored query has unknown language {lang!r}"}
+        try:
+            resp = await self._client.post(
+                self._api_url.rstrip("/") + path,
+                json={"query": getattr(query, "query", "") or ""},
+                timeout=30.0,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            return {"error": f"the {lang} engine did not answer: "
+                             f"{type(exc).__name__}"}
+        if resp.status_code >= 400:
+            return {"error": f"the {lang} engine rejected the query "
+                             f"(HTTP {resp.status_code})",
+                    "detail": resp.text[:600]}
+        body = resp.text
+        if len(body) > _RESULT_CHARS:
+            body = (body[:_RESULT_CHARS]
+                    + f' …[truncated at {_RESULT_CHARS} characters; narrow '
+                      f'the query to see the rest]')
+        return {"query_id": getattr(query, "id", None),
+                "name": getattr(query, "name", ""), "lang": lang,
+                "result": body}
+
     async def create_project(self, name: str = "", investigation_id: str = "", **_) -> dict:
         project = await self._svc.create_project(
             self._user, name, investigation_id or None)
@@ -207,6 +258,7 @@ class StudioOps:
     OPS = {
         "mcp__gmr__studio_list_projects": "list_projects",
         "mcp__gmr__studio_get_project": "get_project",
+        "mcp__gmr__studio_run_query": "run_query",
         "mcp__gmr__studio_create_project": "create_project",
         "mcp__gmr__studio_rename_project": "rename_project",
         "mcp__gmr__studio_add_query": "add_query",
