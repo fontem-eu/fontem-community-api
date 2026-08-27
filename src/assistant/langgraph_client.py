@@ -46,6 +46,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from src.assistant import (
+    tool_runtime,
     generated_tools,
     navigation,
     studio_tools,
@@ -172,6 +173,7 @@ class LangGraphProxyClient:
                      specs: list[dict], nav_routes: list, seen: list,
                      budget: list[int], traced: list, studio,
                      pending_nav: list, name_cache: dict, audit=None,
+                     doc=None,
                      allowed: frozenset[str] | None = None):
         """Wrap our tool schemas as LangChain tools over the shared executor.
 
@@ -202,7 +204,7 @@ class LangGraphProxyClient:
                 seen.append((_name, kwargs))
                 capped, _raw_len = await self._tools.dispatch(
                     client, _name, kwargs,
-                    studio=studio, nav_routes=nav_routes,
+                    studio=studio, doc=doc, nav_routes=nav_routes,
                     pending_nav=pending_nav, budget=budget,
                     name_cache=name_cache, traced=traced, audit=audit,
                     allowed=allowed,
@@ -291,6 +293,7 @@ class LangGraphProxyClient:
                     traced, None if anonymous else payload.get("studio_ops"),
                     pending_nav, name_cache,
                     allowed=ANONYMOUS_TOOLS if anonymous else None,
+                    doc=None if anonymous else payload.get("doc_ops"),
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves
@@ -338,6 +341,14 @@ class LangGraphProxyClient:
             # The frontend renders the Apply card off this field.
             if name == "mcp__gmr__propose_edit":
                 status["proposal"] = args
+            elif name in tool_runtime.PROPOSAL_TOOL_ACTIONS:
+                # The split tools carry the action in their NAME; the card
+                # renderer still dispatches on an `action` field, so it is
+                # restored here.
+                status["proposal"] = {
+                    **args,
+                    "action": tool_runtime.PROPOSAL_TOOL_ACTIONS[name],
+                }
             elif name in studio_tools.STUDIO_ACTIONS:
                 status["studio_action"] = {"action": name, "args": args}
             events.append(_sse("status", status))

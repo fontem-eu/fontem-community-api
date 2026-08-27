@@ -27,6 +27,7 @@ import re
 from pathlib import Path
 
 from src.assistant.tool_runtime import (
+    PROPOSAL_TOOL_ACTIONS,
     PROPOSE_EDIT_ACTIONS,
     PROPOSE_EDIT_LEGACY_ACTIONS,
     _TOOLS,
@@ -74,9 +75,13 @@ def _read_js_advertised_actions() -> list[str]:
     We grep rather than try to evaluate JS — the constant is
     formatted on multiple lines as a string array; capture the
     string contents in declaration order."""
-    js_path = (
-        Path(__file__).resolve().parents[3].parent
-        / "gmr-web" / "src" / "composables" / "useEditProposals.js"
+    root = Path(__file__).resolve().parents[3].parent
+    js_path = next(
+        (root / repo / "src" / "composables" / "useEditProposals.js"
+         for repo in ("gmr-web", "fontem-web")
+         if (root / repo / "src" / "composables"
+             / "useEditProposals.js").exists()),
+        root / "gmr-web" / "src" / "composables" / "useEditProposals.js",
     )
     if not js_path.exists():
         # Repo layout when running CI in just-this-repo mode: skip
@@ -97,10 +102,13 @@ def _read_js_advertised_actions() -> list[str]:
 def test_python_and_js_advertised_actions_match():
     """The user-visible bug — model proposes an action the frontend
     doesn't handle, Apply does nothing — is exactly the drift this
-    test guards against. The two sides must declare the same enum,
-    in the same order (so review diffs are trivially readable)."""
+    test guards against.
+
+    The advertised surface is the SPLIT tools now (propose_edit is
+    implemented-but-unadvertised for stored conversations), so the parity
+    is between PROPOSAL_TOOL_ACTIONS' action names and the JS constant."""
     js_actions = _read_js_advertised_actions()
-    assert tuple(js_actions) == PROPOSE_EDIT_ACTIONS, (
-        f"Python advertises {PROPOSE_EDIT_ACTIONS}; JS advertises "
-        f"{tuple(js_actions)}. Update both sides together."
+    assert tuple(js_actions) == tuple(PROPOSAL_TOOL_ACTIONS.values()), (
+        f"Python advertises {tuple(PROPOSAL_TOOL_ACTIONS.values())}; JS "
+        f"advertises {tuple(js_actions)}. Update both sides together."
     )

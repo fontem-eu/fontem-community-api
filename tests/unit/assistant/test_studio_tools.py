@@ -38,7 +38,11 @@ def test_the_offered_surface_is_deliberately_small():
         "navigate",
         "mcp__gmr__search_entities",
         "mcp__gmr__investigate_entity",
-        "mcp__gmr__propose_edit",
+        "mcp__gmr__read_document",
+        "mcp__gmr__set_title",
+        "mcp__gmr__set_abstract",
+        "mcp__gmr__replace_body",
+        "mcp__gmr__insert_widget",
         "mcp__gmr__studio_list_projects",
         "mcp__gmr__studio_get_project",
         "mcp__gmr__studio_create_project",
@@ -90,7 +94,15 @@ def test_studio_tools_need_no_open_project():
 def test_the_only_ui_gated_tool_is_the_one_that_needs_a_surface():
     with_editor = _names(turn_tool_specs(GENERATED, True, ROUTES))
     without = _names(turn_tool_specs(GENERATED, False, ROUTES))
-    assert set(with_editor) - set(without) == {"mcp__gmr__propose_edit"}
+    # The whole document surface needs the editor: reading a document you
+    # cannot propose into invites edits with nowhere to land.
+    assert set(with_editor) - set(without) == {
+        "mcp__gmr__read_document",
+        "mcp__gmr__set_title",
+        "mcp__gmr__set_abstract",
+        "mcp__gmr__replace_body",
+        "mcp__gmr__insert_widget",
+    }
 
 
 def test_reading_comes_before_writing_in_the_array():
