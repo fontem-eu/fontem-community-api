@@ -16,6 +16,7 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+from src.assistant import pydantic_ai_client as pai
 from src.assistant.doc_ops import DocOps
 from src.assistant.tool_runtime import ToolRuntime
 
@@ -167,3 +168,42 @@ def test_a_silly_depth_is_refused():
         {"widget_type": "graph_explorer", "entityId": "e-1", "depth": 9},
         client=_client_resolving("Siemens AG"))
     assert "depth" in json.loads(out)["error"]
+
+
+# ── engine threading ──────────────────────────────────────────
+#
+# The regression that Sonar caught before any test did: the pydantic
+# engine — the production default — built its tool closures without
+# passing `doc` through, so read_document answered "no document is open"
+# on every real turn while the unit tests, which call dispatch directly,
+# stayed green. Both engines must thread it.
+
+def test_the_pydantic_engine_threads_doc_into_dispatch():
+    class _FakeTool:  # pylint: disable=too-few-public-methods
+        def __init__(self, function, name, **_):
+            self.function = function
+            self.name = name
+
+        @classmethod
+        def from_schema(cls, function, name, **kw):
+            return cls(function, name, **kw)
+
+    client = pai.PydanticAIProxyClient(gmr_api_url="http://fake")
+    seen = {}
+
+    async def _capture(_client, _name, _args, **kwargs):
+        seen.update(kwargs)
+        return "{}", 0
+
+    client._tools = MagicMock()
+    client._tools.dispatch = _capture
+    specs = [{"function": {"name": "mcp__gmr__read_document",
+                           "description": "d", "parameters": {}}}]
+    marker = object()
+    tools = client._build_tools(
+        None, _FakeTool, specs, [], [10_000], None, [], {}, [],
+        doc=marker,
+    )
+    _run(tools[0].function())
+    assert seen.get("doc") is marker, \
+        "read_document is dead on this engine if doc does not arrive"

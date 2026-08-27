@@ -159,7 +159,7 @@ class PydanticAIProxyClient:
             async def run(_name=name, **kwargs):
                 capped, _raw_len = await self._tools.dispatch(
                     client, _name, kwargs,
-                    studio=studio, nav_routes=nav_routes,
+                    studio=studio, doc=doc, nav_routes=nav_routes,
                     pending_nav=pending_nav, budget=budget,
                     name_cache=name_cache, traced=traced, audit=audit,
                     allowed=allowed,
