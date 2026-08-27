@@ -96,3 +96,25 @@ def test_european_decimal_comma():
 
 def test_plain_thousands_separators():
     assert supported("1,234,567", '{"v": 1234567}')
+
+
+# ── calendar years are dates, not figures ─────────────────────
+
+def test_a_bare_year_is_not_a_numeric_claim():
+    # First parity runs: "the 2014-2022 period" scored as two fabrications,
+    # and bare years dominated every unsupported list. Prose about time is
+    # not a figure.
+    assert scorer.numeric_claims("spending rose over the 2014-2022 period") \
+        == []
+    assert scorer.numeric_claims_raw("as of 2024, and again in 2027") == []
+
+
+def test_a_year_inside_a_larger_figure_still_counts():
+    assert scorer.numeric_claims("the contract was worth 92014 EUR") \
+        == ["92014"]
+    assert scorer.numeric_claims("total 2021.50") == ["202150"]
+
+
+def test_numbers_outside_the_year_span_still_count():
+    assert scorer.numeric_claims("1850 soldiers, 2500 horses") \
+        == ["1850", "2500"]

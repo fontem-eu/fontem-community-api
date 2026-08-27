@@ -37,11 +37,20 @@ from scorer import (  # noqa: E402  pylint: disable=wrong-import-position
     Trace, ToolCall, aggregate, score_trace,
 )
 
-MAX_ROUNDS = 6
-# Enough for the local models, which answer directly. Reasoning models need
-# several times this before they emit a single token of answer -- see
-# --max-tokens.
-MAX_TOKENS = 900
+# Fallbacks for a served name the model registry does not know. Registry
+# entries carry their own eval budgets (`eval_max_rounds`/`eval_max_tokens`
+# on LocalModel) — the configuration each model would actually be deployed
+# with — and CLI flags override both. An unknown name is assumed to be a
+# frontier/BYOK reasoning model, which needs rounds for multi-call sweeps
+# and reply budget for its reasoning trace before the first answer token.
+FALLBACK_MAX_ROUNDS = 12
+FALLBACK_MAX_TOKENS = 4000
+
+WRAP_UP_NUDGE = (
+    "Round budget nearly spent: this is the final round. Answer now with "
+    "what you have — state what was found, what remains unverified, and "
+    "stop calling tools."
+)
 # Long enough for the 30B, which generates at ~14 tok/s.
 REQUEST_TIMEOUT = 600.0
 
@@ -128,8 +137,8 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                      model: str, spec: dict, tools: list, system: str,
                      api_key: str, nav_context,
                      trace_io: bool = False,
-                     max_rounds: int = MAX_ROUNDS,
-                     max_tokens: int = MAX_TOKENS,
+                     max_rounds: int = FALLBACK_MAX_ROUNDS,
+                     max_tokens: int = FALLBACK_MAX_TOKENS,
                      extra_body: dict | None = None) -> Trace:
     """One prompt, one model, bounded tool loop."""
     extra_body = extra_body or {}
@@ -149,7 +158,15 @@ async def run_prompt(http: httpx.AsyncClient, executor, base_url: str,
                 {"role": "user", "content": str(spec["prompt"]).strip()}]
     started = time.monotonic()
     try:
-        for _ in range(max_rounds):
+        for round_no in range(max_rounds):
+            if round_no == max_rounds - 1:
+                # Mirrors production's stall rescue rather than the old
+                # cliff: an investigation cut mid-sweep by the round budget
+                # scored as the model failing to answer, when a deployed
+                # assistant would have been told to conclude. A model that
+                # synthesises on request now measures as a success; only
+                # refusing to conclude still scores as non-convergence.
+                messages.append({"role": "user", "content": WRAP_UP_NUDGE})
             trace.rounds += 1
             if trace_io:
                 print("=" * 70, flush=True)
@@ -311,8 +328,10 @@ def run_metadata(args, fixture: dict, origin: str, n_prompts: int) -> dict:
         # caller record what it shipped; an unattributable run cannot be
         # compared against a later one with any confidence.
         "code_sha": getattr(args, "code_sha", "") or git_sha(),
-        "max_rounds": getattr(args, "max_rounds", MAX_ROUNDS),
-        "max_tokens": getattr(args, "max_tokens", MAX_TOKENS),
+        # None means "per-model budgets from the registry"; the actual
+        # budget each turn ran under is recorded per result row.
+        "max_rounds": getattr(args, "max_rounds", None),
+        "max_tokens": getattr(args, "max_tokens", None),
         "extra_body": parse_extra_body(getattr(args, "extra_body", "")),
         "tool_result_char_budget": MAX_TOOL_RESULT_CHARS,
     }
@@ -338,8 +357,9 @@ async def main() -> int:
         help="Bearer token for a hosted provider. Omit for llama-server, "
              "which takes none. Never logged.")
     parser.add_argument(
-        "--max-rounds", type=int, default=MAX_ROUNDS,
-        help="tool-loop rounds before a turn is scored as non-converging. "
+        "--max-rounds", type=int, default=None,
+        help="override the per-model round budget from the model registry. "
+             "tool-loop rounds before a turn is scored as non-converging. "
              "The default suits models that call one tool at a time; a model "
              "that fans out several calls per round can be cut off mid-chain, "
              "which scores as the model failing to answer when it is really "
@@ -355,8 +375,9 @@ async def main() -> int:
              "difference big enough that measuring only the default measures "
              "something nobody would deploy. Recorded in the metadata.")
     parser.add_argument(
-        "--max-tokens", type=int, default=MAX_TOKENS,
-        help="per-reply token budget. A reasoning model emits its reasoning "
+        "--max-tokens", type=int, default=None,
+        help="override the per-model reply budget from the model registry. "
+             "A reasoning model emits its reasoning "
              "trace first, so a budget sized for a direct answer is spent "
              "before the answer starts and the reply comes back empty. "
              "Recorded in the metadata.")
@@ -412,6 +433,33 @@ async def main() -> int:
                   f"({type(exc).__name__}) — big models run tool-only",
                   flush=True)
 
+    # Bar-raiser prompts carry ground-truth QUERIES, never answers: the
+    # graph is re-ingested continuously and a stored answer silently rots.
+    # Resolving them here, before any model runs, means drift in the
+    # staging data fails the run loudly instead of mis-scoring it — an
+    # unreachable proxy or an empty result is a harness error, not a model
+    # result.
+    async with httpx.AsyncClient(timeout=30.0) as boot:
+        for spec in prompts:
+            queries = spec.get("ground_truth") or {}
+            if not queries:
+                continue
+            resolved = {}
+            for name, query in queries.items():
+                resp = await boot.post(args.gmr_api.rstrip("/")
+                                       + "/query/cypher",
+                                       json={"query": query})
+                resp.raise_for_status()
+                rows = resp.json().get("rows") or []
+                if not rows or rows[0][0] is None:
+                    raise RuntimeError(
+                        f"{spec['id']}: ground truth {name!r} came back "
+                        f"empty — fix the fixture or the graph before "
+                        f"trusting a score")
+                resolved[name] = rows[0][0]
+            spec["_ground_truth"] = resolved
+            print(f"ground truth {spec['id']}: {resolved}", flush=True)
+
     by_served = {m.served_name: m for m in local_models.LOCAL_MODELS}
 
     def tier_of(served: str):
@@ -433,22 +481,34 @@ async def main() -> int:
         # reload 17GB of weights on every switch.
         for model in [m.strip() for m in args.models.split(",") if m.strip()]:
             compact, prefill = tier_of(model)
+            registered = by_served.get(model)
+            # The registry knows each model's deployable budgets; a served
+            # name it does not know is treated as a frontier reasoner. The
+            # CLI flags override both — for experiments, not for routine
+            # runs, because runs with different caps are not comparable.
+            model_rounds = args.max_rounds or (
+                registered.eval_max_rounds if registered
+                else FALLBACK_MAX_ROUNDS)
+            model_tokens = args.max_tokens or (
+                registered.eval_max_tokens if registered
+                else FALLBACK_MAX_TOKENS)
             model_system = (system + "\n\n" + schema_block
                             if prefill and schema_block else system)
             print(f"\n=== {model} === "
                   f"(surface={'compact' if compact else 'full'}, "
-                  f"schema={'prefill' if prefill and schema_block else 'tool'})",
+                  f"schema={'prefill' if prefill and schema_block else 'tool'}, "
+                  f"r{model_rounds}/t{model_tokens})",
                   flush=True)
             for spec in prompts:
                 # Fresh per prompt: P16 asserts a project chain of its own,
                 # and shared state would let one prompt's project satisfy
                 # another's expectations.
                 executor = make_executor(proxy, spec, args.gmr_api)
-                # A prompt may need more rounds than the default: the full
-                # article task is five sequential tool calls plus the
-                # answer, and a cap of six scored "did not converge" against
-                # models that were converging fine.
-                rounds = int(spec.get("max_rounds") or args.max_rounds)
+                # A prompt may declare the rounds its chain minimally needs
+                # (the article task is five sequential calls plus the
+                # answer); the larger of that and the model's own budget
+                # applies, so neither the fixture nor the model starves.
+                rounds = max(int(spec.get("max_rounds") or 0), model_rounds)
                 routes = list((spec.get("expect") or {}).get("known_routes")
                               or [])
                 tools = engine_tools.turn_tool_specs(
@@ -457,22 +517,32 @@ async def main() -> int:
                                          model, spec, tools, model_system,
                                          args.api_key,
                                          nav_context, args.trace,
-                                         rounds, args.max_tokens,
+                                         rounds, model_tokens,
                                          extra_body)
                 checks = score_trace(spec, trace)
                 cats = aggregate(checks)
                 results.append({
                     "model": model, "prompt": spec["id"],
+                    "budget": {"max_rounds": rounds,
+                               "max_tokens": model_tokens},
+                    # What the graph said at run time; rescore.py feeds it
+                    # back so old runs stay scorable against THEIR truth.
+                    **({"ground_truth": spec["_ground_truth"]}
+                       if spec.get("_ground_truth") else {}),
                     "latency_s": trace.latency_s, "rounds": trace.rounds,
                     "tools": [c.name for c in trace.calls],
-                    # The full trajectory, auditable. Names alone could not
-                    # answer "why did the schema-informed query return 0" —
-                    # the args are the diagnosis, and the result head shows
-                    # what the model then read.
+                    # The full trajectory, auditable AND rescorable:
+                    # rescore.py replays the scorer over these files, so a
+                    # scorer change gets a before/after on every committed
+                    # run without re-running a model. That only works if the
+                    # stored trace is what the scorer saw — full results,
+                    # full answer. The first parity runs stored 300-char
+                    # heads and cannot be faithfully rescored; do not
+                    # reintroduce truncation here to save file size.
                     "trace": [{"name": c.name, "args": c.args,
-                               "result_head": c.result[:300]}
+                               "result": c.result}
                               for c in trace.calls],
-                    "error": trace.error, "answer": trace.answer[:1200],
+                    "error": trace.error, "answer": trace.answer,
                     "truncated_results": trace.truncated,
                     "categories": {k: {"points": v["points"], "max": v["max"],
                                        "pct": round(v["pct"], 1),

@@ -11,6 +11,7 @@ import ast
 import asyncio
 import inspect
 import json
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -65,8 +66,9 @@ def test_calls_outside_the_whitelist_are_refused():
         assert "error" in out, expr
 
 
-def test_attributes_comprehensions_and_strings_are_not_syntax():
-    for expr in ("a.b", "[x for x in v]", "'abc'", "f'{1}'"):
+def test_attributes_strings_subscripts_and_lambdas_are_not_syntax():
+    for expr in ("a.b", "'abc'", "f'{1}'", "v[0]", "lambda: 1",
+                 "import os", "while 1 < 2: 1", "x := 1"):
         out = _calc(expr, {"v": [1]})
         assert "error" in out, expr
 
@@ -105,3 +107,88 @@ def test_the_module_never_calls_eval_exec_or_compile():
     calls = [n.func.id for n in ast.walk(tree)
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
     assert not {"eval", "exec", "compile"} & set(calls)
+
+
+# ── the Python-subset script form ─────────────────────────────
+
+def test_the_exact_shapes_minimax_sent_now_work():
+    # Replayed verbatim from evals/results/2026-08-27-parity-minimax-*.json:
+    # numbers as strings, the list wrapped in {"item": [...]} by the model's
+    # serializer. The tool refused these twice per prompt and the model
+    # burned rounds falling back — correct intent, lost on a technicality.
+    out = _calc("sum(v)", {"v": {"item": ["30862249.55", "24141817.03",
+                                          "342610.0", "76275.16",
+                                          "57991.19"]}})
+    assert out["result"] == pytest.approx(55480942.93)
+
+
+def test_numeric_strings_are_coerced_and_junk_is_not():
+    assert _calc("a + b", {"a": "10.5", "b": "2"})["result"] == 12.5
+    assert "not a number" in _calc("a + 1", {"a": "12,5"})["error"]
+
+
+def test_a_script_returns_its_last_expression():
+    out = _calc("total = 30862249.55 + 24141817.03\n"
+                "delta = total - 50000000\n"
+                "delta / 50000000 * 100")
+    assert out["result"] == pytest.approx(10.008, abs=0.001)
+
+
+def test_assigning_result_also_works():
+    assert _calc("result = mean([1, 2, 3, 6])")["result"] == 3.0
+
+
+def test_statistics_functions():
+    v = {"v": [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]}
+    assert _calc("pstdev(v)", v)["result"] == pytest.approx(2.0)
+    assert _calc("median(v)", v)["result"] == 4.5
+    assert _calc("round(sqrt(2), 3)")["result"] == 1.414
+    assert "error" in _calc("stdev([1])")  # needs two points, said plainly
+
+
+def test_comprehensions_and_logic():
+    out = _calc("big = [x for x in v if x > 1000000]\n"
+                "sum(big) / sum(v) * 100",
+                {"v": [30862249.55, 24141817.03, 342610.0, 76275.16]})
+    assert out["result"] == pytest.approx(99.245, abs=0.001)
+    assert _calc("sum(v) > 100", {"v": [60, 50]})["result"] is True
+    out = _calc("total = 0\n"
+                "for x in v:\n"
+                "    if x > 10:\n"
+                "        total += x\n"
+                "result = total", {"v": [5.0, 20.0, 30.0]})
+    assert out["result"] == 50.0
+
+
+def test_scripts_are_capped_at_six_lines():
+    assert "6 lines" in _calc("\n".join(f"x{i} = {i}" for i in range(7))
+                              + "\nx0")["error"]
+
+
+def test_runaway_loops_hit_the_step_budget_not_the_server():
+    started = time.monotonic()
+    out = _calc("t = 0\n"
+                "for i in range(10000):\n"
+                "    for j in range(10000):\n"
+                "        t += 1\n"
+                "t")
+    assert "steps" in out["error"] or "seconds" in out["error"]
+    assert time.monotonic() - started < 5
+
+
+def test_memory_bombs_are_refused():
+    # Repeated squaring turns an int into gigabytes without a single big
+    # literal; the width guard stops it while it is still kilobytes.
+    out = _calc("x = 2 ** 1000\n"
+                "for i in range(100):\n"
+                "    x = x * x\n"
+                "x")
+    assert "too large" in out["error"]
+    # A comprehension fanning out past the list bound is stopped mid-build.
+    out = _calc("[0 for i in range(10000) for j in range(10)]")
+    assert "bounded" in out["error"]
+
+
+def test_range_is_bounded():
+    assert _calc("sum(range(1, 5))")["result"] == 10
+    assert "bounded" in _calc("len(range(100000))")["error"]

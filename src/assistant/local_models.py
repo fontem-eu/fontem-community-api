@@ -57,7 +57,7 @@ NEBIUS_BASE_URL = HOSTED_PROVIDERS[NEBIUS_PROVIDER]["base_url"]
 
 
 @dataclass(frozen=True)
-class LocalModel:
+class LocalModel:  # pylint: disable=too-many-instance-attributes
     """One offered model. `served_name` is what the provider calls it."""
 
     id: str
@@ -75,6 +75,18 @@ class LocalModel:
     #: provider for one we pay per token for — the turn then leaves the
     #: cluster and costs money, so the two are not interchangeable.
     provider: str = ""
+    #: Whether replies open with a reasoning trace before the answer. A
+    #: reasoning model needs a reply budget several times a direct
+    #: answerer's, or the budget is spent before the first answer token —
+    #: measured, not assumed: MiniMax at 900 tokens truncated on every
+    #: prompt of an eval run before emitting any answer.
+    reasoning: bool = False
+    #: Evaluation budgets: the configuration this model would actually be
+    #: deployed with, per model rather than one global constant pretending
+    #: to fit a 1.7B and a frontier reasoner at once. The eval harness
+    #: reads these; CLI flags override them.
+    eval_max_rounds: int = 6
+    eval_max_tokens: int = 900
 
     @property
     def hosted(self) -> bool:
@@ -135,6 +147,7 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         served_name="Qwen/Qwen3.5-397B-A17B",
         provider=NEBIUS_PROVIDER,
         tokens_per_second=40, context_tokens=131072,
+        reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
         note="Hosted by Nebius. Thorough but long-winded: it took 122 tool "
              "calls across our evaluation fixture where the 8B took 15.",
     ),
@@ -143,6 +156,7 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         served_name="MiniMaxAI/MiniMax-M3",
         provider=NEBIUS_PROVIDER,
         tokens_per_second=40, context_tokens=131072,
+        reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
         note="Hosted by Nebius — your question leaves the cluster.",
     ),
     LocalModel(
@@ -150,6 +164,7 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         served_name="zai-org/GLM-5.1",
         provider=NEBIUS_PROVIDER,
         tokens_per_second=25, context_tokens=131072,
+        reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
         note="Hosted by Nebius. Scored worst of these on sticking to figures "
              "the tools returned.",
     ),
@@ -158,6 +173,7 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         served_name="stealth/ox-alpha",
         provider=OPENROUTER_PROVIDER,
         tokens_per_second=20, context_tokens=1048576,
+        reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
         note="Hosted by OpenRouter, on an undisclosed provider's preview "
              "model. Prompts are shared with them. For evaluation, not "
              "everyday use.",
