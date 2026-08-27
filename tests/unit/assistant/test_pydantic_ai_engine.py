@@ -202,3 +202,20 @@ def test_a_tool_argument_delta_produces_nothing():
     state = {"streaming": False, "text_len": 0, "name_cache": {},
              "usage": {"input_tokens": 0, "output_tokens": 0}}
     assert not client._translate(_ToolArgsDelta(), state, 0.0)  # pylint: disable=protected-access
+
+
+def test_a_split_proposal_tool_restores_the_action_the_card_dispatches_on():
+    """The split tools carry the action in their NAME (set_title, not
+    propose_edit{action:...}); the card renderer still dispatches on an
+    `action` field, so the status event has to restore it."""
+    class Part:
+        tool_name = "mcp__gmr__set_title"
+        args = '{"title": "A better headline"}'
+
+    class Ev:
+        part = Part()
+
+    out = pai.PydanticAIProxyClient._tool_status(Ev(), {}, 0.0)  # pylint: disable=protected-access
+    assert '"proposal"' in out
+    assert '"action": "set_title"' in out or '"action":"set_title"' in out
+    assert "A better headline" in out

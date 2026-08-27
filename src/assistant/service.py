@@ -40,6 +40,7 @@ from src.assistant.context import (
     build_system_prompt,
     fit_history,
 )
+from src.assistant.doc_ops import DocOps
 from src.assistant.repository import AssistRepository, DailyUsage
 from src.assistant.tokens import (
     TokenUsage,
@@ -150,6 +151,10 @@ class AssistantService:
         #: Best-effort provider of the rendered graph-schema prompt block
         #: (see schema_context). None keeps every existing wiring working.
         schema_provider=None,
+        #: ReportService (or None). Enables the document tools: read_document
+        #: and the proposal verbs are bound per turn to the report the
+        #: conversation key names, as the asking user.
+        report_service=None,
         #: Tokens reserved for the model's own reply. Not slack — a window
         #: that fits the conversation and leaves nothing to answer with fails
         #: the same way an overflow does, one step later.
@@ -161,6 +166,7 @@ class AssistantService:
         self._turn_limits = turn_limits
         self._fixed_prefix_chars = fixed_prefix_chars
         self._schema = schema_provider
+        self._reports = report_service
         self._reply_tokens = reply_tokens
         self._context_budget = context_char_budget
         self._projects = project_service
@@ -309,6 +315,18 @@ class AssistantService:
                 message_id=None,
             )
         )
+
+        if (self._reports is not None
+                and req.conversation_key.startswith("report:")
+                and payload["has_editor"]):
+            # Bound to THIS user and THIS report for this turn only — the
+            # same shape as studio_ops below, for the same reason. Gated on
+            # the editor because the whole surface is: reading a document
+            # you cannot propose into invites edits with nowhere to land.
+            payload["doc_ops"] = DocOps(
+                self._reports, req.user_id,
+                req.conversation_key.split(":", 1)[1],
+            )
 
         if self._projects is not None:
             # An object, not JSON: these clients run in-process, and the

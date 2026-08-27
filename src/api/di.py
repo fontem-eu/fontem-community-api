@@ -638,6 +638,7 @@ class AssistantProvider(Provider):
     def assistant_service(
         self, repo: AssistRepository, proxy: ProxyClient,
         projects: DataProjectService, schema: schema_context.SchemaContext,
+        reports: ReportService,
     ) -> AssistantService:
         return AssistantService(
             repo=repo,
@@ -659,6 +660,9 @@ class AssistantProvider(Provider):
             # it varies per model tier, so the service passes it per turn as
             # extra_prefix_chars once it knows which model is answering.
             schema_provider=schema,
+            # Same trust shape as project_service: server-side, per-request,
+            # as the asking user, with the service checking access per call.
+            report_service=reports,
         )
 
 
