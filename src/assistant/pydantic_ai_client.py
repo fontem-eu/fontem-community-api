@@ -33,6 +33,7 @@ a retry with an error the model can read rather than an exception mid-turn.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator
@@ -51,6 +52,8 @@ from src.assistant.tool_runtime import (
     ToolRuntime,
 )
 from src.assistant.language import _language_directive
+
+logger = logging.getLogger(__name__)
 
 #: Matches the other engines so a comparison measures the loop, not a
 #: different budget.
@@ -143,28 +146,41 @@ class PydanticAIProxyClient:
     def _build_tools(self, client: httpx.AsyncClient, tool_cls,
                      specs: list[dict], nav_routes: list, budget: list[int],
                      studio, pending_nav: list, name_cache: dict,
-                     traced: list, audit=None,
-                     allowed: frozenset[str] | None = None, doc=None):
+                     traced: list,
+                     ctx: tool_runtime.ToolTurnContext | None = None):
         """Wrap our JSON-schema tools over the shared executor.
 
         ``Tool.from_schema`` takes the schema as-is, so the model sees exactly
         the descriptions the other engines send — the wording of those has
         been tuned against real failures and must not be paraphrased here.
         """
+        c = ctx or tool_runtime.ToolTurnContext()
         tools = []
         for spec in specs:
             fn = spec["function"]
             name = fn["name"]
 
             async def run(_name=name, **kwargs):
-                capped, _raw_len = await self._tools.dispatch(
-                    client, _name, kwargs,
-                    studio=studio, doc=doc, nav_routes=nav_routes,
-                    pending_nav=pending_nav, budget=budget,
-                    name_cache=name_cache, traced=traced, audit=audit,
-                    allowed=allowed,
-                )
-                return capped
+                # Serialized per turn: a fanning-out model runs several of
+                # these closures concurrently, and studio/doc ops (plus the
+                # authz audit inside them) all touch the request-scoped
+                # AsyncSession, which corrupts its own state under
+                # concurrent use — a production stream died two seconds
+                # into a turn from exactly that (2026-08-28). DB work is
+                # milliseconds; correctness wins over fan-out here.
+                async def _dispatch():
+                    capped, _raw_len = await self._tools.dispatch(
+                        client, _name, kwargs,
+                        studio=studio, doc=c.doc, nav_routes=nav_routes,
+                        pending_nav=pending_nav, budget=budget,
+                        name_cache=name_cache, traced=traced,
+                        audit=c.audit, allowed=c.allowed,
+                    )
+                    return capped
+                if c.turn_lock is not None:
+                    async with c.turn_lock:
+                        return await _dispatch()
+                return await _dispatch()
 
             tools.append(tool_cls.from_schema(
                 function=run, name=name, description=fn["description"],
@@ -247,8 +263,11 @@ class PydanticAIProxyClient:
                     client, tool_cls, specs, nav_routes, budget,
                     None if anonymous else payload.get("studio_ops"),
                     pending_nav, name_cache, traced,
-                    allowed=ANONYMOUS_TOOLS if anonymous else None,
-                    doc=None if anonymous else payload.get("doc_ops"),
+                    ctx=tool_runtime.ToolTurnContext(
+                        allowed=ANONYMOUS_TOOLS if anonymous else None,
+                        doc=None if anonymous else payload.get("doc_ops"),
+                        turn_lock=payload.get("turn_lock"),
+                    ),
                 )
                 # The name the SERVER serves, not the id we store. The
                 # production agent runs in router mode and answers to
@@ -268,6 +287,15 @@ class PydanticAIProxyClient:
                     yield event
         except (httpx.HTTPError, ValueError, TypeError, KeyError,
                 RuntimeError) as exc:
+            yield _sse("error", {"error": f"{type(exc).__name__}: {exc}"})
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Anything not anticipated above used to escape this generator
+            # and close the SSE stream with no error event and no log — a
+            # mid-answer cut the panel rendered as the model just stopping
+            # (2026-08-28: a SQLAlchemy session-state error did exactly
+            # this). At the stream boundary, unexpected means "tell the
+            # client and log loudly", never "vanish".
+            logger.exception("pydantic-ai stream died unexpectedly")
             yield _sse("error", {"error": f"{type(exc).__name__}: {exc}"})
         yield _sse("done", {})
 

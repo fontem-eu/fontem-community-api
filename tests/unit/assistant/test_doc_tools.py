@@ -200,9 +200,10 @@ def test_the_pydantic_engine_threads_doc_into_dispatch():
     specs = [{"function": {"name": "mcp__gmr__read_document",
                            "description": "d", "parameters": {}}}]
     marker = object()
+    from src.assistant import tool_runtime
     tools = client._build_tools(
         None, _FakeTool, specs, [], [10_000], None, [], {}, [],
-        doc=marker,
+        ctx=tool_runtime.ToolTurnContext(doc=marker),
     )
     _run(tools[0].function())
     assert seen.get("doc") is marker, \
