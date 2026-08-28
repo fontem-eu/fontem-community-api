@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from src.assistant import pydantic_ai_client
+from src.assistant import pydantic_ai_client, tool_runtime
 
 
 class _OverlapProbe:
@@ -59,7 +59,7 @@ def _build(probe, lock):
     engine._tools = probe  # pylint: disable=protected-access
     return engine._build_tools(  # pylint: disable=protected-access
         None, _Tool, _specs(4), [], [8000], None, [], {}, [],
-        turn_lock=lock,
+        ctx=tool_runtime.ToolTurnContext(turn_lock=lock),
     )
 
 

@@ -176,10 +176,8 @@ class LangGraphProxyClient:
     def _build_tools(self, client: httpx.AsyncClient, structured_tool,
                      specs: list[dict], nav_routes: list, seen: list,
                      budget: list[int], traced: list, studio,
-                     pending_nav: list, name_cache: dict, audit=None,
-                     doc=None,
-                     allowed: frozenset[str] | None = None,
-                     turn_lock=None):
+                     pending_nav: list, name_cache: dict,
+                     ctx: tool_runtime.ToolTurnContext | None = None):
         """Wrap our tool schemas as LangChain tools over the shared executor.
 
         ``budget`` is a one-element list so the closures can spend a single
@@ -188,6 +186,7 @@ class LangGraphProxyClient:
         the turn outright, and that failure does not become less real for
         being inside a framework.
         """
+        c = ctx or tool_runtime.ToolTurnContext()
         tools = []
         for spec in specs:
             fn = spec["function"]
@@ -207,28 +206,24 @@ class LangGraphProxyClient:
 
             async def arun(_name=name, **kwargs):
                 seen.append((_name, kwargs))
+
                 # Serialized per turn: concurrent tool calls share the
                 # request-scoped AsyncSession through studio/doc/audit, and
                 # that session corrupts its own state under concurrency —
                 # see the matching comment in pydantic_ai_client.
-                if turn_lock is not None:
-                    async with turn_lock:
-                        capped, _raw_len = await self._tools.dispatch(
-                            client, _name, kwargs,
-                            studio=studio, doc=doc, nav_routes=nav_routes,
-                            pending_nav=pending_nav, budget=budget,
-                            name_cache=name_cache, traced=traced,
-                            audit=audit, allowed=allowed,
-                        )
+                async def _dispatch():
+                    capped, _raw_len = await self._tools.dispatch(
+                        client, _name, kwargs,
+                        studio=studio, doc=c.doc, nav_routes=nav_routes,
+                        pending_nav=pending_nav, budget=budget,
+                        name_cache=name_cache, traced=traced,
+                        audit=c.audit, allowed=c.allowed,
+                    )
                     return capped
-                capped, _raw_len = await self._tools.dispatch(
-                    client, _name, kwargs,
-                    studio=studio, doc=doc, nav_routes=nav_routes,
-                    pending_nav=pending_nav, budget=budget,
-                    name_cache=name_cache, traced=traced, audit=audit,
-                    allowed=allowed,
-                )
-                return capped
+                if c.turn_lock is not None:
+                    async with c.turn_lock:
+                        return await _dispatch()
+                return await _dispatch()
 
             tools.append(structured_tool(
                 name=name, description=fn["description"],
@@ -317,9 +312,11 @@ class LangGraphProxyClient:
                     client, structured_tool, specs, nav_routes, seen, budget,
                     traced, None if anonymous else payload.get("studio_ops"),
                     pending_nav, name_cache,
-                    allowed=ANONYMOUS_TOOLS if anonymous else None,
-                    doc=None if anonymous else payload.get("doc_ops"),
-                    turn_lock=payload.get("turn_lock"),
+                    ctx=tool_runtime.ToolTurnContext(
+                        allowed=ANONYMOUS_TOOLS if anonymous else None,
+                        doc=None if anonymous else payload.get("doc_ops"),
+                        turn_lock=payload.get("turn_lock"),
+                    ),
                 )
                 # What the id resolves to on the server, not the id itself.
                 # The production agent runs in router mode and serves

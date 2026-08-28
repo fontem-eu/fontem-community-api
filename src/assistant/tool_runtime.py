@@ -481,6 +481,24 @@ def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
     return tools
 
 
+@dataclass(frozen=True)
+class ToolTurnContext:
+    """Per-turn extras the tool closures need, bundled.
+
+    One object instead of four trailing parameters (Sonar S107, and the
+    lists were only growing): the audit context, the open document's ops,
+    the allowed-tool restriction for anonymous turns, and the lock that
+    serializes every DB-touching dispatch — concurrent tool calls share
+    the request-scoped AsyncSession, which corrupts its own state under
+    concurrency (the 2026-08-28 production stream death).
+    """
+
+    audit: object | None = None
+    doc: object | None = None
+    allowed: frozenset | None = None
+    turn_lock: object | None = None
+
+
 def _sse(event: str, data: dict) -> str:
     """Serialize an SSE event block (one per ``yield``)."""
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"

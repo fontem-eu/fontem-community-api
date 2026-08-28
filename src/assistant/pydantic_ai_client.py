@@ -146,15 +146,15 @@ class PydanticAIProxyClient:
     def _build_tools(self, client: httpx.AsyncClient, tool_cls,
                      specs: list[dict], nav_routes: list, budget: list[int],
                      studio, pending_nav: list, name_cache: dict,
-                     traced: list, audit=None,
-                     allowed: frozenset[str] | None = None, doc=None,
-                     turn_lock=None):
+                     traced: list,
+                     ctx: tool_runtime.ToolTurnContext | None = None):
         """Wrap our JSON-schema tools over the shared executor.
 
         ``Tool.from_schema`` takes the schema as-is, so the model sees exactly
         the descriptions the other engines send — the wording of those has
         been tuned against real failures and must not be paraphrased here.
         """
+        c = ctx or tool_runtime.ToolTurnContext()
         tools = []
         for spec in specs:
             fn = spec["function"]
@@ -168,24 +168,19 @@ class PydanticAIProxyClient:
                 # concurrent use — a production stream died two seconds
                 # into a turn from exactly that (2026-08-28). DB work is
                 # milliseconds; correctness wins over fan-out here.
-                if turn_lock is not None:
-                    async with turn_lock:
-                        capped, _raw_len = await self._tools.dispatch(
-                            client, _name, kwargs,
-                            studio=studio, doc=doc, nav_routes=nav_routes,
-                            pending_nav=pending_nav, budget=budget,
-                            name_cache=name_cache, traced=traced,
-                            audit=audit, allowed=allowed,
-                        )
+                async def _dispatch():
+                    capped, _raw_len = await self._tools.dispatch(
+                        client, _name, kwargs,
+                        studio=studio, doc=c.doc, nav_routes=nav_routes,
+                        pending_nav=pending_nav, budget=budget,
+                        name_cache=name_cache, traced=traced,
+                        audit=c.audit, allowed=c.allowed,
+                    )
                     return capped
-                capped, _raw_len = await self._tools.dispatch(
-                    client, _name, kwargs,
-                    studio=studio, doc=doc, nav_routes=nav_routes,
-                    pending_nav=pending_nav, budget=budget,
-                    name_cache=name_cache, traced=traced, audit=audit,
-                    allowed=allowed,
-                )
-                return capped
+                if c.turn_lock is not None:
+                    async with c.turn_lock:
+                        return await _dispatch()
+                return await _dispatch()
 
             tools.append(tool_cls.from_schema(
                 function=run, name=name, description=fn["description"],
@@ -268,9 +263,11 @@ class PydanticAIProxyClient:
                     client, tool_cls, specs, nav_routes, budget,
                     None if anonymous else payload.get("studio_ops"),
                     pending_nav, name_cache, traced,
-                    allowed=ANONYMOUS_TOOLS if anonymous else None,
-                    doc=None if anonymous else payload.get("doc_ops"),
-                    turn_lock=payload.get("turn_lock"),
+                    ctx=tool_runtime.ToolTurnContext(
+                        allowed=ANONYMOUS_TOOLS if anonymous else None,
+                        doc=None if anonymous else payload.get("doc_ops"),
+                        turn_lock=payload.get("turn_lock"),
+                    ),
                 )
                 # The name the SERVER serves, not the id we store. The
                 # production agent runs in router mode and answers to

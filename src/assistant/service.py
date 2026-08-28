@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import traceback
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -429,9 +428,9 @@ class AssistantService:
             # and no server log tying the traceback to a turn. The panel
             # showed a reply that just... stopped. Log it with the turn's
             # coordinates, tell the client, and mark the turn errored.
-            logger.error(
-                "assistant stream died mid-turn user=%s conversation=%s:\n%s",
-                req.user_id, conv.id, traceback.format_exc(),
+            logger.exception(
+                "assistant stream died mid-turn user=%s conversation=%s",
+                req.user_id, conv.id,
             )
             errored = True
             yield _sse_event("error", {
