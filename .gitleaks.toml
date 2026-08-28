@@ -1,0 +1,16 @@
+# Repo-local gitleaks config, consumed by ci-actions/secret-scan when present.
+# Keep the default rules; only the narrow allowlist below.
+[extend]
+useDefault = true
+
+# Committed eval results carry full tool-call traces, and the graph answers
+# with UUID-shaped identifiers next to key-looking names (contract_key,
+# element_id, gmr_id) — the generic-api-key rule reads that as a pasted
+# credential. Allowlist ONLY findings whose captured secret contains a UUID:
+# node ids are UUID-shaped by construction, real credentials are not.
+# (No path clause: gitleaks treats allowlist clauses as OR, so a path clause
+# would exempt the whole directory — verified against v8.30.1.)
+[[allowlists]]
+description = "UUID-shaped identifiers are graph node ids, not credentials"
+regexTarget = "secret"
+regexes = ['''[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}''']
