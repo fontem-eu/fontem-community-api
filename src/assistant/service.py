@@ -19,7 +19,10 @@ fake. The service itself has no httpx dependency.
 # pylint: disable=too-few-public-methods,import-outside-toplevel
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import traceback
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -42,6 +45,8 @@ from src.assistant.context import (
     fit_history,
 )
 from src.assistant.doc_ops import DocOps
+
+logger = logging.getLogger(__name__)
 from src.assistant.repository import AssistRepository, DailyUsage
 from src.assistant.tokens import (
     TokenUsage,
@@ -342,6 +347,18 @@ class AssistantService:
             from src.assistant.studio_ops import StudioOps
             payload["studio_ops"] = StudioOps(self._projects, req.user_id)
 
+        # One turn, one DB session, MANY concurrent touchers: a model
+        # that fans out tool calls (MiniMax does) runs studio/doc ops in
+        # parallel with each other and with this loop's tool-row
+        # persistence, all on the request-scoped AsyncSession — which is
+        # not concurrency-safe, corrupts its own state
+        # (IllegalStateChangeError), and killed a production stream two
+        # seconds into a turn with no error event and no log line
+        # pointing anywhere (2026-08-28 19:43Z). Everything that touches
+        # the session during the stream serializes on this lock; the
+        # engines take it around tool dispatch.
+        turn_lock = asyncio.Lock()
+        payload["turn_lock"] = turn_lock
         if req.local_model_id:
             payload["local_model_id"] = req.local_model_id
         # The per-turn tool-output ceiling, sized to THIS model's context —
@@ -377,30 +394,50 @@ class AssistantService:
                 "provider": provider, "api_key": api_key, "model": model,
             }
 
-        async for line in self._proxy.stream(payload):
-            yield line
-            parsed = _parse_sse_line(line)
-            if parsed is None:
-                continue
-            event, data = parsed
-            if event == "chunk":
-                text = _extract_chunk_text(data)
-                if text:
-                    assistant_buf.append(text)
-            elif event == "tool_result":
-                # One row per tool call: what was called, with which
-                # arguments, and what came back. The result is capped at
-                # MAX_TOOL_RESULT_CHARS so a tool returning 90k of JSON
-                # cannot make the conversation store mostly tool output.
-                # The id is the one minted where the call ran, so an
-                # activity entry can point straight at this row.
-                await self._persist_tool_call(conv.id, req.user_id, data)
-            elif event == "error":
-                errored = True
-            else:
-                usage = parse_sse_usage(event, data)
-                if usage is not None:
-                    real_usage = usage
+        try:
+            async for line in self._proxy.stream(payload):
+                yield line
+                parsed = _parse_sse_line(line)
+                if parsed is None:
+                    continue
+                event, data = parsed
+                if event == "chunk":
+                    text = _extract_chunk_text(data)
+                    if text:
+                        assistant_buf.append(text)
+                elif event == "tool_result":
+                    # One row per tool call: what was called, with which
+                    # arguments, and what came back. The result is capped at
+                    # MAX_TOOL_RESULT_CHARS so a tool returning 90k of JSON
+                    # cannot make the conversation store mostly tool output.
+                    # The id is the one minted where the call ran, so an
+                    # activity entry can point straight at this row.
+                    async with turn_lock:
+                        await self._persist_tool_call(conv.id, req.user_id, data)
+                elif event == "error":
+                    errored = True
+                else:
+                    usage = parse_sse_usage(event, data)
+                    if usage is not None:
+                        real_usage = usage
+        except Exception:  # pylint: disable=broad-exception-caught
+            # Last-resort netting at the stream boundary. The engines catch
+            # what they anticipate; what they don't (the 2026-08-28 case: a
+            # SQLAlchemy IllegalStateChangeError from the shared-session
+            # race) used to propagate out of this generator, closing the
+            # SSE stream mid-answer with no error event, nothing persisted,
+            # and no server log tying the traceback to a turn. The panel
+            # showed a reply that just... stopped. Log it with the turn's
+            # coordinates, tell the client, and mark the turn errored.
+            logger.error(
+                "assistant stream died mid-turn user=%s conversation=%s:\n%s",
+                req.user_id, conv.id, traceback.format_exc(),
+            )
+            errored = True
+            yield _sse_event("error", {
+                "error": "The assistant hit an internal error mid-answer. "
+                         "The turn was cut short; please try again.",
+            })
 
         # Only persist the assistant row if we actually accumulated text.
         # An error-before-any-chunks turn leaves a dangling user row — that's

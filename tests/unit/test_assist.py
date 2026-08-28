@@ -703,3 +703,36 @@ class TestToolBudgetScalesWithTheModel:
         big_chars = service._tool_chars_for(big.id)
         assert big_chars > tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN * 4, \
             "131k+ of context must buy materially more tool output than 16k"
+
+
+class TestStreamBoundaryNetting:
+    """An unexpected exception mid-stream becomes a loud error event.
+
+    The 2026-08-28 production failure: a SQLAlchemy session-state error
+    escaped the turn generator, the SSE stream closed mid-answer with no
+    error event and no log tying the traceback to a turn, and the panel
+    rendered a reply that just stopped.
+    """
+
+    class _DyingProxy:
+        async def stream(self, payload):
+            yield "event: chunk\ndata: {\"text\": \"partial\"}\n\n"
+            raise ArithmeticError("session state corrupted mid-stream")
+
+    def test_the_turn_yields_an_error_event_not_a_silent_close(
+            self, client, services):
+        services["assistant_service"]._proxy = self._DyingProxy()  # pylint: disable=protected-access
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1"))
+        res = client.post(
+            "/assist/chat/stream",
+            json={"message": "go", "conversation_key": "standalone:net",
+                  "context_block": ""},
+            headers=make_headers("user-1"),
+        )
+        assert res.status_code == 200
+        body = res.text
+        assert "partial" in body, "content before the death still streams"
+        assert "event: error" in body, \
+            "the death must be announced, not swallowed"
+        assert "cut short" in body
