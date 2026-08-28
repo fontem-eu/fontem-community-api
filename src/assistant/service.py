@@ -344,21 +344,28 @@ class AssistantService:
 
         if req.local_model_id:
             payload["local_model_id"] = req.local_model_id
-        # The per-turn tool-output ceiling, sized to THIS model's context.
-        # `_tool_chars_for` existed and nothing called it: both engines
-        # hardcoded the 14k floor that was measured against a 16k window,
-        # so a 131k-context model investigating in production had its
-        # tools answer "budget spent" after two searches (reported live,
-        # 2026-08-28 — the second arbitrary-limit complaint in one day).
+        # The per-turn tool-output ceiling, sized to THIS model's context —
+        # but only for models at or above the schema tier. The first cut
+        # scaled it for everyone, and the staging e2e caught what that does
+        # to a small local model: doubling the 1.7B's tool input roughly
+        # doubles its prefill per round on the shared iGPU, and the real-
+        # model smoke turns blew straight past their 200s wait (attest runs
+        # 27451/27452). Small models keep the floor they were measured at;
+        # the scaling exists for the frontier models whose investigations
+        # the flat 14k cap was strangling (reported live, 2026-08-28).
         # A BYOK credential means a frontier model whose real window we
-        # don't know; assume the schema-tier boundary rather than the
-        # smallest local model.
-        payload["tool_chars"] = (
-            self._budget_for_context(
+        # don't know; assume the schema-tier boundary.
+        if req.credential:
+            payload["tool_chars"] = self._budget_for_context(
                 schema_context.SCHEMA_MIN_CONTEXT_TOKENS).tool_chars
-            if req.credential
-            else self._tool_chars_for(req.local_model_id)
-        )
+        else:
+            model = local_models.resolve(req.local_model_id)
+            payload["tool_chars"] = (
+                self._tool_chars_for(req.local_model_id)
+                if model.context_tokens
+                >= schema_context.SCHEMA_MIN_CONTEXT_TOKENS
+                else tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN
+            )
         if req.credential:
             # Spending the user's own key, not the platform's. Passed per
             # turn rather than held on the client instance, because the

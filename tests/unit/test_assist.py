@@ -674,6 +674,21 @@ class TestToolBudgetScalesWithTheModel:
         assert proxy.payloads[0]["tool_chars"] >= \
             tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN
 
+    def test_small_local_models_keep_exactly_the_floor(self, client, services,
+                                                       recording):
+        # The staging e2e caught the first cut of this scaling: doubling a
+        # 1.7B's tool input doubles its prefill per round on the shared
+        # iGPU, and the real-model smoke turns blew their 200s wait. Below
+        # the schema tier the floor is not a fallback, it is the measured
+        # right answer.
+        self._post(client, services)
+        proxy, _ = recording
+        from src.assistant import local_models, schema_context, tool_budget
+        default = local_models.resolve(None)
+        if default.context_tokens < schema_context.SCHEMA_MIN_CONTEXT_TOKENS:
+            assert proxy.payloads[0]["tool_chars"] == \
+                tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN
+
     def test_a_large_context_model_gets_more_than_the_floor(self, services):
         # On the private derivation on purpose (same precedent as the
         # scorer's predicate tests): the payload plumbing is pinned by the
@@ -686,8 +701,5 @@ class TestToolBudgetScalesWithTheModel:
         small = min(local_models.LOCAL_MODELS,
                     key=lambda m: m.context_tokens)
         big_chars = service._tool_chars_for(big.id)
-        small_chars = service._tool_chars_for(small.id)
         assert big_chars > tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN * 4, \
             "131k+ of context must buy materially more tool output than 16k"
-        assert small_chars >= tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN
-        assert big_chars > small_chars
