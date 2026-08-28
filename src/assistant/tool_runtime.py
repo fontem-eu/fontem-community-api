@@ -32,6 +32,7 @@ What stayed is everything that was never the framework's business:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -499,6 +500,17 @@ class ToolTurnContext:
     turn_lock: object | None = None
 
 
+#: Hard ceiling on one tool call, whatever it is doing. Two reasons this
+#: is not optional: fontem-api's own query paths already bound themselves
+#: at 8s, but a tool can also hang on a dead upstream (the ESMA-proxy
+#: outage produced exactly that shape) — and since 2026-08-28 every
+#: DB-touching dispatch serializes on the per-turn lock, so ONE hung call
+#: would freeze the entire turn: every later tool, the tool-row
+#: persistence, the stream. A timed-out call becomes an error result the
+#: model can read and route around; the turn keeps moving.
+TOOL_CALL_TIMEOUT_S = 30.0
+
+
 def _sse(event: str, data: dict) -> str:
     """Serialize an SSE event block (one per ``yield``)."""
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
@@ -678,11 +690,25 @@ class ToolRuntime:
         # JSON and which a module does not survive.
         scope = (audit or audit_context).tool_call(call_id, name)
         with scope:
-            return await self._dispatch_inner(
-                client, name, args, studio=studio, nav_routes=nav_routes,
-                pending_nav=pending_nav, budget=budget, name_cache=name_cache,
-                traced=traced, call_id=call_id, started=started, doc=doc,
-            )
+            try:
+                return await asyncio.wait_for(
+                    self._dispatch_inner(
+                        client, name, args, studio=studio,
+                        nav_routes=nav_routes, pending_nav=pending_nav,
+                        budget=budget, name_cache=name_cache,
+                        traced=traced, call_id=call_id, started=started,
+                        doc=doc,
+                    ),
+                    timeout=TOOL_CALL_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                out = json.dumps({
+                    "error": (f"{name} timed out after "
+                              f"{TOOL_CALL_TIMEOUT_S:.0f}s"),
+                    "hint": "narrow the query, or try a different tool",
+                })
+                _record_call(traced, call_id, name, args, out, started, 0)
+                return out, 0
 
     async def _dispatch_inner(
         self, client, name: str, args: dict, *,
