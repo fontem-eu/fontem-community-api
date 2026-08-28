@@ -1,15 +1,31 @@
 # Repo-local gitleaks config, consumed by ci-actions/secret-scan when present.
-# Keep the default rules; only the narrow allowlist below.
+# IMPORTANT: this REPLACES the action's built-in config (it is not merged),
+# so the action's default path allowlist is reproduced below — dropping it
+# put the checked-out ci-actions source inside the scan, and its
+# `curl -u "${SONAR_TOKEN}:"` line (a variable, not a secret) failed the job.
 [extend]
 useDefault = true
+
+[[allowlists]]
+description = "Paths that aren't this repo's own source — noise only."
+paths = [
+  '''(^|/)\.fontem-ci(/|$)''',
+  '''(^|/)\.ci-actions(/|$)''',
+  '''(^|/)node_modules(/|$)''',
+  '''(^|/)\.venv(/|$)''',
+  '''(^|/)dist(/|$)''',
+  '''(^|/)coverage(/|$)''',
+  '''(^|/)test-results(/|$)''',
+]
 
 # Committed eval results carry full tool-call traces, and the graph answers
 # with UUID-shaped identifiers next to key-looking names (contract_key,
 # element_id, gmr_id) — the generic-api-key rule reads that as a pasted
 # credential. Allowlist ONLY findings whose captured secret contains a UUID:
 # node ids are UUID-shaped by construction, real credentials are not.
-# (No path clause: gitleaks treats allowlist clauses as OR, so a path clause
-# would exempt the whole directory — verified against v8.30.1.)
+# (regexTarget=secret, no path clause: gitleaks ORs allowlist clauses, so a
+# path clause would exempt whole directories — verified against v8.30.1
+# with a planted github-pat, which stays caught.)
 [[allowlists]]
 description = "UUID-shaped identifiers are graph node ids, not credentials"
 regexTarget = "secret"
