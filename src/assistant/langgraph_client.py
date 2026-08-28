@@ -284,7 +284,11 @@ class LangGraphProxyClient:
                         gen_tools, has_editor, nav_routes,
                         anonymous=anonymous,
                         compact=engine_tools.compact_for(payload))
-                budget = [tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
+                # Sized by the service to the answering model's context; the
+                # constant is only the floor for payloads that predate the
+                # field (and the anonymous turn, which never sets it).
+                budget = [payload.get("tool_chars")
+                          or tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN]
                 traced: list = []
                 # Navigate emits queue here; the tool closures cannot yield.
                 pending_nav: list = []
