@@ -33,6 +33,7 @@ from src.assistant import (
     summariser,
     tool_budget,
 )
+from src.assistant.tool_runtime import _sse as _sse_event
 from src.services import audit_context
 from src.assistant.context import (
     TurnLimits,
@@ -462,6 +463,19 @@ class AssistantService:
             # anonymous turn a model the platform pays for.
             "local_model_id": local_models.anonymous_model_id(),
         }
+        # Say OUT LOUD that this is the reduced assistant, first, before any
+        # content. The signed-out tier is a deliberate product decision; the
+        # silence about it was not: a visitor whose session had expired got
+        # the smallest model with navigate as its only tool and no memory,
+        # while the panel looked exactly like the full assistant — the turn
+        # "worked", investigated nothing, and could not understand
+        # "continue". The client renders this into a visible notice.
+        yield _sse_event("meta", {
+            "anonymous": True,
+            "model": local_models.anonymous_model_id(),
+            "detail": ("Signed-out assistant: smallest model, navigation "
+                       "only, no conversation memory."),
+        })
         async for line in self._proxy.stream(payload):
             yield line
 

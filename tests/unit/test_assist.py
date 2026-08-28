@@ -594,3 +594,54 @@ class TestAnonymousRateLimit:
         for _ in range(self._allowance() + 5):
             resp = self._turn(client, "203.0.113.9", **make_headers("user-1"))
             assert resp.status_code == 200
+
+
+class TestSilentDowngradeIsGone:
+    """A caller PRESENTING credentials is never quietly served as anonymous.
+
+    The trap this pins shut: an expired session put the platform owner on
+    the signed-out assistant — smallest model, navigate-only, no memory —
+    while the panel looked exactly like the full assistant. The turn
+    "worked", investigated nothing, and could not understand "continue"
+    because anonymous turns store no history (2026-08-28).
+    """
+
+    def test_a_bad_bearer_token_is_a_401_not_an_anonymous_turn(
+            self, client, recording):
+        res = client.post(
+            "/assist/chat/stream",
+            json={"message": "hi", "conversation_key": "standalone:x",
+                  "context_block": ""},
+            headers={"Authorization": "Bearer expired-or-garbage"},
+        )
+        assert res.status_code == 401
+        proxy, _ = recording
+        assert not proxy.payloads, \
+            "the turn must not run at all — a silent anonymous answer is " \
+            "exactly the failure this guards against"
+
+    def test_no_credentials_at_all_still_means_anonymous(
+            self, client, recording):
+        res = _anon_post(client)
+        assert res.status_code == 200
+        proxy, _ = recording
+        assert proxy.payloads[0]["anonymous"] is True
+
+    def test_the_anonymous_stream_declares_itself_first(self, client):
+        res = _anon_post(client)
+        body = res.text
+        first = body.split("\n\n")[0]
+        assert first.startswith("event: meta"), \
+            "the reduced tier must announce itself before any content"
+        assert '"anonymous":true' in first
+        assert "Signed-out" in first
+
+
+class TestContinuationRule:
+    def test_the_prompt_tells_the_model_what_continue_means(self):
+        from src.api.di import _DEFAULT_SYSTEM_PROMPT
+        assert '"continue"' in _DEFAULT_SYSTEM_PROMPT
+        assert "resume" in _DEFAULT_SYSTEM_PROMPT
+        # And the anti-early-convergence rule that came from the same
+        # review: leads on the table mean the investigation is not done.
+        assert "one more tool call over an early" in _DEFAULT_SYSTEM_PROMPT

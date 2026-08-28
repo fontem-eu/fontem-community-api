@@ -82,9 +82,17 @@ async def get_optional_user(
     """Auth dep that returns None for anonymous callers instead of 401-ing.
 
     Use on endpoints that must serve unauthenticated clients for at least
-    some code paths (e.g. public feed browsing). A malformed token is
-    treated as anonymous rather than a hard error — routes that truly
-    require auth should keep using ``get_current_user``.
+    some code paths (e.g. public feed browsing). NO credentials means
+    anonymous; PRESENTED credentials that fail to resolve mean 401. The
+    distinction matters: a caller sending a Bearer token believes they are
+    signed in, and answering them with the anonymous tier instead of an
+    error hides the expiry from the client entirely. That is not
+    hypothetical — an expired session put the platform owner on the
+    signed-out assistant (smallest model, navigate-only, no history) with
+    nothing anywhere saying so; the turn "worked", investigated nothing,
+    and could not understand "continue" because anonymous turns store no
+    history (2026-08-28). Routes that truly require auth should keep
+    using ``get_current_user``.
 
     Parses ``Authorization`` straight off the request rather than going
     through ``HTTPBearer``: doing so deliberately keeps the security
@@ -103,7 +111,7 @@ async def get_optional_user(
     if scheme.lower() != "bearer" or not token:
         return None
     credentials = HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
-    try:
-        return await _resolve_user(credentials, user_repo)
-    except HTTPException:
-        return None
+    # No try/except: a token that fails to resolve propagates as 401 so the
+    # client learns its session is gone and can re-authenticate, instead of
+    # silently becoming an anonymous visitor mid-conversation.
+    return await _resolve_user(credentials, user_repo)
