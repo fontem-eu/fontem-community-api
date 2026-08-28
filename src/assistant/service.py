@@ -344,6 +344,21 @@ class AssistantService:
 
         if req.local_model_id:
             payload["local_model_id"] = req.local_model_id
+        # The per-turn tool-output ceiling, sized to THIS model's context.
+        # `_tool_chars_for` existed and nothing called it: both engines
+        # hardcoded the 14k floor that was measured against a 16k window,
+        # so a 131k-context model investigating in production had its
+        # tools answer "budget spent" after two searches (reported live,
+        # 2026-08-28 — the second arbitrary-limit complaint in one day).
+        # A BYOK credential means a frontier model whose real window we
+        # don't know; assume the schema-tier boundary rather than the
+        # smallest local model.
+        payload["tool_chars"] = (
+            self._budget_for_context(
+                schema_context.SCHEMA_MIN_CONTEXT_TOKENS).tool_chars
+            if req.credential
+            else self._tool_chars_for(req.local_model_id)
+        )
         if req.credential:
             # Spending the user's own key, not the platform's. Passed per
             # turn rather than held on the client instance, because the
@@ -549,8 +564,14 @@ class AssistantService:
         self, local_model_id: str | None, extra_prefix_chars: int = 0,
     ) -> context_budget.ContextBudget:
         model = local_models.resolve(local_model_id)
+        return self._budget_for_context(
+            model.context_tokens, extra_prefix_chars)
+
+    def _budget_for_context(
+        self, context_tokens: int, extra_prefix_chars: int = 0,
+    ) -> context_budget.ContextBudget:
         return context_budget.derive(
-            context_tokens=model.context_tokens,
+            context_tokens=context_tokens,
             fixed_prefix_chars=self._fixed_prefix_chars + extra_prefix_chars,
             reply_tokens=self._reply_tokens,
             floor_history_chars=self._turn_limits.max_chars,

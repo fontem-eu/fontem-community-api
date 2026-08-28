@@ -645,3 +645,49 @@ class TestContinuationRule:
         # And the anti-early-convergence rule that came from the same
         # review: leads on the table mean the investigation is not done.
         assert "one more tool call over an early" in _DEFAULT_SYSTEM_PROMPT
+
+
+class TestToolBudgetScalesWithTheModel:
+    """The per-turn tool-output ceiling is a property of the model's context.
+
+    _tool_chars_for existed and nothing called it: both engines hardcoded
+    the 14k floor measured against a 16k window, so a 131k-context model
+    investigating in production had its tools answer "budget spent" after
+    two searches (2026-08-28). The service now sends the derived ceiling
+    with the payload and the engines consume it.
+    """
+
+    def _post(self, client, services, **extra):
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1"))
+        body = {"message": "investigate", "conversation_key": "standalone:b",
+                "context_block": ""}
+        body.update(extra)
+        return client.post("/assist/chat/stream", json=body,
+                           headers=make_headers("user-1"))
+
+    def test_the_payload_carries_a_tool_budget(self, client, services,
+                                               recording):
+        self._post(client, services)
+        proxy, _ = recording
+        from src.assistant import tool_budget
+        assert proxy.payloads[0]["tool_chars"] >= \
+            tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN
+
+    def test_a_large_context_model_gets_more_than_the_floor(self, services):
+        # On the private derivation on purpose (same precedent as the
+        # scorer's predicate tests): the payload plumbing is pinned by the
+        # test above; this pins that the number actually scales with the
+        # window instead of being the floor wearing a new name.
+        # pylint: disable=protected-access
+        from src.assistant import local_models, tool_budget
+        service = services["assistant_service"]
+        big = max(local_models.LOCAL_MODELS, key=lambda m: m.context_tokens)
+        small = min(local_models.LOCAL_MODELS,
+                    key=lambda m: m.context_tokens)
+        big_chars = service._tool_chars_for(big.id)
+        small_chars = service._tool_chars_for(small.id)
+        assert big_chars > tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN * 4, \
+            "131k+ of context must buy materially more tool output than 16k"
+        assert small_chars >= tool_budget.MAX_TOOL_RESULT_CHARS_PER_TURN
+        assert big_chars > small_chars
