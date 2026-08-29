@@ -817,7 +817,10 @@ class ToolRuntime:
                 r = await legacy_tools.fetch(
                     client, self._gmr_api_url, name, args)
             elif any(t["function"]["name"] == name
-                     for t in (self._generated or [])):
+                     for t in await self._get_generated_tools(client)):
+                # Fetched here, not read from the cache: the engines fetch
+                # their tool specs directly, so nothing else fills it and a
+                # bare cache read made every generated tool "Unknown".
                 return await self._execute_generated(client, name, args)
             else:
                 return json.dumps({"error": f"Unknown tool: {name}"})
