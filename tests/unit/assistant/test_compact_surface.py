@@ -51,6 +51,19 @@ def test_the_boundary_is_the_schema_tier():
     assert compact_for({"local_model_id": "ox-alpha"}) is False
 
 
+def test_the_mock_model_gets_the_full_surface_where_it_exists(monkeypatch):
+    # The scripted e2e model stands in for the frontier models; `resolve`
+    # falling back to the smallest local model quietly gave it the compact
+    # tier, which trimmed query_graph out of the marathon scenario and
+    # failed the ASSIST-27 gate on a five-call chain.
+    monkeypatch.setenv("ASSIST_MOCK_MODEL", "true")
+    assert compact_for({"local_model_id": "mock-e2e"}) is False
+    monkeypatch.delenv("ASSIST_MOCK_MODEL")
+    # Outside an e2e environment the id is just a stale preference row and
+    # falls back with the default model's tier.
+    assert compact_for({"local_model_id": "mock-e2e"}) is True
+
+
 def test_a_byok_credential_always_gets_the_full_surface():
     payload = {"local_model_id": "qwen3-1.7b",
                "credential": {"provider": "mistral", "api_key": "k"}}

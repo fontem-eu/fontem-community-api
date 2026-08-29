@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from src.assistant import (
     local_models,
+    mock_llm,
     navigation,
     schema_context,
     studio_tools,
@@ -127,8 +128,16 @@ def compact_for(payload: dict) -> bool:
     A BYOK credential means a hosted frontier model — full surface. For
     platform models the boundary is the schema tier: too small for the
     schema in prefill means too small to choose among twenty tools.
+
+    The scripted e2e model gets the full surface where it exists: it stands
+    in for the frontier models, and `resolve` falling back to the smallest
+    local model silently trimmed query_graph out of the marathon scenario —
+    the ASSIST-27 gate then failed on a five-call chain.
     """
     if payload.get("credential"):
+        return False
+    wanted = (payload.get("local_model_id") or "").strip().lower()
+    if wanted == mock_llm.MOCK_MODEL_ID and mock_llm.enabled():
         return False
     model = local_models.resolve(payload.get("local_model_id"))
     return model.context_tokens < schema_context.SCHEMA_MIN_CONTEXT_TOKENS
