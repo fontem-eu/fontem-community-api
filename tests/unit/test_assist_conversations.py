@@ -125,11 +125,20 @@ async def test_deleting_someone_elses_conversation_does_nothing(repo):
 
 # --- what the switcher shows -------------------------------------------------
 
-def test_report_chats_are_not_standalone():
-    """A report's chat belongs to that report and opens with it. Listing it
-    in the switcher fills the sidebar with entries nobody chose to start."""
-    assert "report:abc".startswith(STANDALONE_PREFIX) is False
-    assert "chat:abc".startswith(STANDALONE_PREFIX) is True
+@pytest.mark.asyncio
+async def test_the_list_shows_report_and_global_chats_too(repo):
+    """A prompt sent from a report page must stay findable. The list used to
+    show only chat:* keys, which hid report conversations — and the prompts
+    in them — from every list the UI could render."""
+    for key in ("report:abc", "global", "chat:mine"):
+        conv = await repo.find_or_create_conversation("u1", key)
+        await _say(repo, conv.id, "u1", "user", f"hello via {key}", BASE)
+    keys = {c.conversation_key for c in await repo.list_conversations("u1")}
+    assert keys == {"report:abc", "global", "chat:mine"}
+
+
+def test_minted_keys_are_standalone():
+    assert f"{STANDALONE_PREFIX}abc".startswith(STANDALONE_PREFIX) is True
 
 
 @pytest.mark.parametrize("asked,expected", [
