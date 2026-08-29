@@ -80,6 +80,30 @@ class TestAssistRouter:
         assert "Hello" in body
         assert "world" in body
 
+    def test_the_conversation_list_includes_report_chats(
+        self, client, services, fake_assistant,
+    ):
+        # The list used to filter to chat:* keys, so a prompt sent from a
+        # report page landed in a conversation no list would ever show.
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1")
+        )
+        resp = client.post(
+            "/assist/chat/stream",
+            json={
+                "message": "Who won the most tenders?",
+                "conversation_key": "report:abc",
+                "context_block": "Report: tenders",
+            },
+            headers=make_headers("user-1"),
+        )
+        assert resp.status_code == 200
+        listed = client.get("/assist/conversations",
+                            headers=make_headers("user-1"))
+        assert listed.status_code == 200
+        keys = [c["conversation_key"] for c in listed.json()["conversations"]]
+        assert "report:abc" in keys
+
     def test_chat_stream_serves_signed_out_visitors(self, client, fake_assistant):
         # This used to assert 401. The contract changed deliberately: the
         # assistant's first job on a public platform is helping a visitor

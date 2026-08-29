@@ -478,7 +478,12 @@ async def list_conversations(
     service: FromDishka[AssistantService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    """The user's standalone conversations, newest activity first."""
+    """Every conversation the user has, newest activity first.
+
+    Report chats and the global chat are listed too, not just standalone
+    ones. Hiding them made a prompt sent from a report page vanish into a
+    chat no list would ever show again.
+    """
     # pylint: disable=protected-access
     rows = await service._repo.list_conversations(user.id)
     # pylint: enable=protected-access
@@ -492,7 +497,6 @@ async def list_conversations(
                 "last_snippet": c.last_snippet,
             }
             for c in rows
-            if c.conversation_key.startswith(STANDALONE_PREFIX)
         ]
     }
 
