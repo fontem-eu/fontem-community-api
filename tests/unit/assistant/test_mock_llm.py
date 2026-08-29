@@ -382,3 +382,70 @@ class TestEditScenario:
             ("mcp__gmr__replace_body", '{"proposed": true}'),
         ]))
         assert "MOCK-OK" in step["text"]
+
+
+def _marathon_history(*pairs) -> list[dict]:
+    msgs: list[dict] = [{"role": "user",
+                         "content": "E2E-SCENARIO: marathon investigate it all"}]
+    for i, (name, result) in enumerate(pairs):
+        call_id = f"m{i}"
+        msgs.append({"role": "assistant", "content": None, "tool_calls": [
+            {"id": call_id, "type": "function", "function": {"name": name}}]})
+        msgs.append({"role": "tool", "tool_call_id": call_id, "name": name,
+                     "content": result})
+    return msgs
+
+
+class TestMarathonScenario:
+    """The open-ended-investigation twin: six tools, then the marker.
+
+    Scripted because the production blocker was exactly this stream shape
+    — half a dozen tool calls in one turn froze the panel while every
+    short scripted turn passed. The e2e that drives this scenario is the
+    regression net for that class.
+    """
+
+    def test_the_full_chain_runs_six_tools_in_order_then_answers(self):
+        search = _search_result([{"gmr_id": "sie-1"}])
+        steps = []
+        pairs = []
+        replies = {
+            "mcp__gmr__search_entities": search,
+            "mcp__gmr__investigate_entity": json.dumps({"props": {}}),
+            "mcp__gmr__query_graph": json.dumps({"rows": [[1861]]}),
+            "mcp__gmr__calculate": json.dumps({"result": 1861}),
+            "navigate": "{}",
+        }
+        for _ in range(10):
+            step = mock_llm.next_step(_marathon_history(*pairs))
+            if "tool" not in step:
+                steps.append(("answer", step["text"]))
+                break
+            steps.append((step["tool"], None))
+            pairs.append((step["tool"], replies[step["tool"]]))
+        tool_order = [name for name, _ in steps[:-1]]
+        assert tool_order == [
+            "mcp__gmr__search_entities",
+            "mcp__gmr__investigate_entity",
+            "mcp__gmr__query_graph",
+            "mcp__gmr__calculate",
+            "mcp__gmr__search_entities",
+            "navigate",
+        ]
+        assert steps[-1][0] == "answer"
+        assert "MOCK-MARATHON-DONE" in steps[-1][1]
+
+    def test_the_calculator_gets_the_number_the_graph_returned(self):
+        pairs = [
+            ("mcp__gmr__search_entities", _search_result([{"gmr_id": "x"}])),
+            ("mcp__gmr__investigate_entity", json.dumps({"props": {}})),
+            ("mcp__gmr__query_graph", json.dumps({"rows": [[777]]})),
+        ]
+        step = mock_llm.next_step(_marathon_history(*pairs))
+        assert step["tool"] == "mcp__gmr__calculate"
+        assert "777" in step["args"]["expression"]
+
+    def test_a_search_with_no_id_fails_loudly_not_inventively(self):
+        pairs = [("mcp__gmr__search_entities", _search_result([]))]
+        step = mock_llm.next_step(_marathon_history(*pairs))
+        assert "MOCK-FAIL" in step["text"]

@@ -29,6 +29,7 @@ is a claim about configuration and configuration drifts.
 from __future__ import annotations
 
 import json
+import re
 import os
 import time
 import uuid
@@ -234,6 +235,63 @@ def _toolchain_after_search(results: list[tuple[str, str]],
                     f"the graph (entity {entity_id})."}
 
 
+QUERY_GRAPH = "mcp__gmr__query_graph"
+CALCULATE = "mcp__gmr__calculate"
+
+
+def _marathon_step(messages: list[dict]) -> dict:
+    """Six tool calls, then an answer — the open-ended-investigation twin.
+
+    The production blocker this scripts (2026-08-28): a real open-ended
+    prompt produces half a dozen tool calls, and the panel froze under
+    exactly that stream shape while every short scripted turn passed. The
+    chain is chosen by what has already come back, like _toolchain_step,
+    so retries cannot drift it: two searches, an investigate, a graph
+    count, a calculation over numbers a tool returned, a navigation, then
+    the marker the smoke test asserts on.
+    """
+    results = _tool_results(messages)
+    done = [name for name, _ in results]
+    if done.count(SEARCH) == 0:
+        return {"tool": SEARCH, "args": {"query": "Siemens AG", "limit": 5}}
+    search_raw = next(raw for name, raw in results if name == SEARCH)
+    entity_id = _first_entity_id(search_raw)
+    if not entity_id:
+        return {"text": "MOCK-FAIL: search returned no usable id. "
+                        f"raw={search_raw[:200]}"}
+    if INVESTIGATE not in done:
+        return {"tool": INVESTIGATE,
+                "args": {"entity_id": entity_id, "contract_limit": 5}}
+    if QUERY_GRAPH not in done:
+        return {"tool": QUERY_GRAPH,
+                "args": {"lang": "cypher",
+                         "query": "MATCH (c:Company) RETURN count(c) "
+                                  "AS companies"}}
+    if CALCULATE not in done:
+        graph_raw = next(raw for name, raw in results
+                         if name == QUERY_GRAPH)
+        count = _first_int(graph_raw) or 0
+        return {"tool": CALCULATE,
+                "args": {"expression": f"{count} + 1 - 1"}}
+    if done.count(SEARCH) == 1:
+        return {"tool": SEARCH,
+                "args": {"query": "Volkswagen", "limit": 5}}
+    if "navigate" not in done:
+        return {"tool": "navigate",
+                "args": {"path": NAVIGATE_TARGET,
+                         "reason": "showing the source pages"}}
+    calc_raw = next(raw for name, raw in results if name == CALCULATE)
+    return {"text": "MOCK-MARATHON-DONE: six tools ran; the graph count "
+                    f"survived the calculator round-trip "
+                    f"({calc_raw[:80]})."}
+
+
+def _first_int(raw: str) -> int | None:
+    """First integer in a tool result, for chaining a count onward."""
+    m = re.search(r"\d+", raw)
+    return int(m.group()) if m else None
+
+
 def _echo_step(messages: list[dict]) -> dict:
     """No tools, one deterministic sentence. For turns that only need a
     reply — checking the stream itself rather than the tool loop."""
@@ -265,6 +323,7 @@ def _edit_step(messages: list[dict]) -> dict:
 
 SCRIPTS = {
     "toolchain": _toolchain_step,
+    "marathon": _marathon_step,
     "echo": _echo_step,
     "edit": _edit_step,
 }
