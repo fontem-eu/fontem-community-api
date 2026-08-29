@@ -85,3 +85,25 @@ async def test_api_error_surfaces_as_a_tool_error():
     out = await proxy._execute_generated(_Client(status=503), "get_series",  # pylint: disable=protected-access
                                          {"dataset": "x"})
     assert json.loads(out)["error"] == "API 503"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_fetches_the_generated_list_itself(monkeypatch):
+    # The engines fetch their own tool specs, so nothing else fills the
+    # runtime's cache; execute_tool reading the bare cache made every
+    # generated tool "Unknown tool" at dispatch — the e2e's persisted rows
+    # showed get_doc erroring while being served to the model.
+    from src.assistant import generated_tools
+
+    async def fake_fetch(client, api_url):  # pylint: disable=unused-argument
+        return [{"function": {"name": "get_doc"},
+                 "_route": {"method": "GET", "path": "/docs/{article_id}",
+                            "group": "docs", "core": True}}]
+
+    monkeypatch.setattr(generated_tools, "fetch_tools", fake_fetch)
+    proxy = ToolRuntime(gmr_api_url="http://api")
+    http = _Client()
+    out = await proxy.execute_tool(http, "get_doc",
+                                   {"article_id": "methodology"})
+    assert "Unknown tool" not in out
+    assert http.calls, "the generated executor should have hit the API"
