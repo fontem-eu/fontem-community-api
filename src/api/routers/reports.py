@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth import get_current_user, get_optional_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath, UuidStr
@@ -21,6 +21,34 @@ from src.services.upload_urls import presign_uploads
 # module use empty/relative paths so the prefix is supplied at include
 # time.
 router = APIRouter(tags=["data-stories"], responses=RESOURCE_RESPONSES)
+
+
+class ReportResponse(BaseModel):
+    """Contract surface of a data story.
+
+    ``extra="allow"``: handlers enrich the payload (sections, content_doc,
+    tags, translation overlays), and the enrichments may evolve without a
+    contract break. What is DECLARED here is what API consumers (and the
+    pact ↔ spec validation) may rely on.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    title: str
+    abstract: str | None = None
+    visibility: str
+    language: str
+    content_version: int
+    created_by: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ReportSearchItem(ReportResponse):
+    """Search results additionally carry the story's tags."""
+
+    tags: list[str] = []
 
 
 class CreateReportRequest(BaseModel):
@@ -76,7 +104,7 @@ class SaveTranslationRequest(BaseModel):
 LangPath = Annotated[str, Path(pattern="^[a-z]{2}$")]
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=ReportResponse)
 @inject
 async def create_report(
     body: CreateReportRequest,
@@ -162,7 +190,7 @@ async def list_reports(
 
 # Declared before /{report_id} so the literal "search" segment routes here
 # rather than being parsed as a (non-UUID) report id.
-@router.get("/search", openapi_extra={"security": []})
+@router.get("/search", openapi_extra={"security": []}, response_model=list[ReportSearchItem])
 @inject
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def search_reports(
@@ -209,7 +237,7 @@ async def search_reports(
 # public_open reports are readable anonymously; mark the operation as
 # unauthenticated in the OpenAPI spec so schemathesis stops flagging
 # the 200 responses as "accepts requests without authentication".
-@router.get("/{report_id}", openapi_extra={"security": []})
+@router.get("/{report_id}", openapi_extra={"security": []}, response_model=ReportResponse)
 @inject
 async def get_report(
     report_id: UuidPath,

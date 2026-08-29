@@ -102,7 +102,13 @@ class FollowTagRequest(BaseModel):
     tag: str = Field(..., min_length=1, max_length=80, pattern=r".*[A-Za-z0-9].*")
 
 
-@router.get("/me/followed-tags", summary="List the user's followed tags")
+class FollowedTagsResponse(BaseModel):
+    """The signed-in user's followed tag slugs."""
+
+    tags: list[str]
+
+
+@router.get("/me/followed-tags", summary="List the user's followed tags", response_model=FollowedTagsResponse)
 @inject
 async def list_followed_tags(
     *,

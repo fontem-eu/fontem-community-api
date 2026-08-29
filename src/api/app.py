@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Annotated, AsyncGenerator
 
 from dishka.integrations.fastapi import setup_dishka
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -156,6 +156,16 @@ def _mount_mock_llm(application: FastAPI) -> None:
     application.include_router(mock_llm_router.router)
 
 
+def _accept_lang(
+    # Aliased on purpose: some routes carry a {lang} PATH param
+    # (/translations/{lang}); a dependency argument literally named
+    # ``lang`` would be captured as that path parameter there.
+    accept_lang: Annotated[str | None, Query(alias="lang", pattern="^[a-z]{2}$")] = None,
+) -> str | None:
+    """App-wide ?lang= declaration (see FastAPI(dependencies=...))."""
+    return accept_lang
+
+
 def build_app(database_url: str | None = None) -> FastAPI:
     """Create a fully-wired FastAPI application.
 
@@ -168,6 +178,12 @@ def build_app(database_url: str | None = None) -> FastAPI:
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
+        # Every endpoint tolerates ?lang= — the frontend's withLang()
+        # appends it to every call, and handlers that localise read it
+        # explicitly. Declaring it app-wide makes the OpenAPI spec match
+        # that reality, which the contract validation (pact ↔ spec)
+        # checks against.
+        dependencies=[Depends(_accept_lang)],
     )
 
     application.state.limiter = limiter

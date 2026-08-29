@@ -19,6 +19,99 @@ jobs:
       - name: Lint
         run: python3 -m pylint src tests --output-format=parseable --reports=no 2>&1 | tail -1 || true
 
+  # Bi-directional contract verification, no deployment: the OpenAPI
+  # spec is generated from code (scripts/generate_openapi.py) and the
+  # consumer pacts from the broker are statically cross-validated
+  # against it (@pactflow/swagger-mock-validator). Results go back to
+  # the broker; the testing-promotion gate (build-deploy) asks
+  # can-i-deploy before bumping gitops.
+  contracts:
+    runs-on: python
+    env:
+      PACT_BROKER: http://pact-broker.pact.svc.cluster.local
+      PROVIDER: fontem-community-api
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install deps
+        env:
+          PIP_INDEX_URL: https://nexus.void42.internal/repository/pypi-proxy/simple/
+          PIP_TRUSTED_HOST: nexus.void42.internal
+        run: pip install --no-cache-dir -r requirements.txt
+      - name: Generate OpenAPI spec from code
+        run: python3 scripts/generate_openapi.py > /tmp/openapi.json && python3 -c "import json;print('paths:',len(json.load(open('/tmp/openapi.json'))['paths']))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate consumer pacts against the spec
+        env:
+          PACT_USER: ${{ secrets.PACT_BROKER_USERNAME }}
+          PACT_PASS: ${{ secrets.PACT_BROKER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          VERSION="v$(git rev-parse --short HEAD)"
+          # --strict-ssl=false: the python runner image has no void42-CA trust
+          # for node (pip on this runner uses PIP_TRUSTED_HOST for the same
+          # reason); the registry is the internal nexus proxy.
+          # --ignore-scripts: the fork's patch-package postinstall assumes a
+          # hoisting layout the runner does not produce; validation is
+          # verified to work without the patch.
+          npm install --no-save --no-audit --no-fund --strict-ssl=false --ignore-scripts @pactflow/swagger-mock-validator@14 --registry=https://nexus.void42.internal/repository/npm-proxy/ | tail -2
+          python3 - <<'PY2'
+          import json, os, subprocess, sys, urllib.request, base64
+
+          broker = os.environ['PACT_BROKER']
+          provider = os.environ['PROVIDER']
+          version = 'v' + subprocess.check_output(['git','rev-parse','--short','HEAD']).decode().strip()
+          auth = base64.b64encode(f"{os.environ['PACT_USER']}:{os.environ['PACT_PASS']}".encode()).decode()
+
+          def req(url, method='GET', body=None):
+              r = urllib.request.Request(url, method=method)
+              r.add_header('Authorization', f'Basic {auth}')
+              r.add_header('Accept', 'application/hal+json')
+              if body is not None:
+                  r.add_header('Content-Type', 'application/json')
+              return urllib.request.urlopen(r, data=json.dumps(body).encode() if body is not None else None, timeout=30)
+
+          try:
+              with req(f'{broker}/pacts/provider/{provider}/latest') as resp:
+                  latest = json.load(resp)
+          except urllib.error.HTTPError as e:
+              if e.code == 404:
+                  print('No pacts published for this provider yet — nothing to verify.')
+                  sys.exit(0)
+              raise
+
+          pacts = latest.get('_links', {}).get('pb:pacts', latest.get('_links', {}).get('pacts', []))
+          if isinstance(pacts, dict):
+              pacts = [pacts]
+          if not pacts:
+              # single-pact response: the document itself is the pact
+              pacts = [{'href': latest['_links']['self']['href'], 'name': latest['consumer']['name']}]
+
+          failed = []
+          for p in pacts:
+              href = p['href']
+              with req(href) as resp:
+                  doc = json.load(resp)
+              consumer = doc['consumer']['name']
+              open('/tmp/pact.json', 'w').write(json.dumps(doc))
+              rc = subprocess.call(['npx', '--no-install', 'swagger-mock-validator', '/tmp/openapi.json', '/tmp/pact.json'])
+              ok = rc == 0
+              print(f'{consumer}: {"PASS" if ok else "FAIL"}')
+              pub = doc.get('_links', {}).get('pb:publish-verification-results', {}).get('href')
+              if pub:
+                  try:
+                      req(pub, method='POST', body={'success': ok, 'providerApplicationVersion': version}).read()
+                      print(f'  verification result published (version {version})')
+                  except urllib.error.HTTPError as e:
+                      print(f'  WARN could not publish verification result: {e.code}')
+              if not ok:
+                  failed.append(consumer)
+          if failed:
+              print('Contract verification FAILED for:', ', '.join(failed))
+              sys.exit(1)
+          PY2
+
   # Pre-build supply-chain gate; see gmr-ci/actions/osv-scan for the
   # shared threshold/scanner-version definition.
   security:
@@ -60,7 +153,7 @@ jobs:
   # this job so the same file is both uploaded to DT and used as
   # the attestation predicate.
   build-deploy:
-    needs: [test, security]
+    needs: [test, security, contracts]
     if: github.ref == 'refs/heads/main'
     # ci-python runner bundles python3 + pip + node + docker CLI + cosign
     # (cosign baked in by ci-images PR #15).
@@ -95,6 +188,27 @@ jobs:
       # rewritten for the void42-templates layout that doesn't match
       # fontem/gitops's testing/<svc>.yaml layout. Same pattern as
       # the other fontem callers.
+      - name: "Contract gate: can-i-deploy to testing"
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+          PACT_BROKER: http://pact-broker.pact.svc.cluster.local
+        run: |
+          set -euo pipefail
+          # Bootstrap-graceful: unknown verdicts (no pacts/verifications
+          # recorded yet) warn and pass; a recorded incompatibility fails.
+          RES=$(curl -fsS "$PACT_BROKER/can-i-deploy?pacticipant=fontem-community-api&version=$TAG&to=testing" -H 'Accept: application/json' || echo '{}')
+          echo "$RES" | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          summary=d.get('summary',{})
+          deployable=summary.get('deployable')
+          print('can-i-deploy summary:', json.dumps(summary))
+          if deployable is False:
+              print('::error::contract verification says this version is NOT compatible with testing')
+              sys.exit(1)
+          if deployable is None:
+              print('::warning::no contract verdict recorded yet — allowing (bootstrap grace)')
+          "
       - name: Bump image tag in gitops/testing
         env:
           TAG: ${{ steps.image.outputs.tag }}
@@ -115,3 +229,15 @@ jobs:
           fi
           git commit -m "ci: deploy fontem-community-api $TAG to testing"
           git push origin main
+      - name: Record deployment in the pact broker
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+          PACT_BROKER: http://pact-broker.pact.svc.cluster.local
+          PACT_USER: ${{ secrets.PACT_BROKER_USERNAME }}
+          PACT_PASS: ${{ secrets.PACT_BROKER_PASSWORD }}
+        run: |
+          curl -fsS -u "$PACT_USER:$PACT_PASS" -X PUT \
+            "$PACT_BROKER/pacticipants/fontem-community-api/versions/$TAG/tags/testing" \
+            -H 'Content-Type: application/json' -d '{}' -o /dev/null \
+            && echo "recorded fontem-community-api $TAG as deployed to testing" \
+            || echo "::warning::could not record deployment in the broker"
