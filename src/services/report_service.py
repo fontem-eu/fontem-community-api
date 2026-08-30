@@ -20,6 +20,7 @@ import re
 from datetime import datetime, time, timezone
 
 from src.domain.report import DocRevision, Report, ReportTranslation, Section
+from src.services import doc_diff
 from src.repositories.report_repository import ReportRepository
 from src.services.activity_service import ActivityService
 from src.services.authz import (
@@ -284,6 +285,9 @@ class ReportService:  # pylint: disable=too-many-public-methods
             return None
         return await self._reports.get_revision(branch.head_revision_id)
 
+    # Six, and each one is load-bearing: who is writing, which article,
+    # what, on top of what, and whether a human or the assistant wrote it.
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def save_document(
         self, user_id: str, report_id: str, content: dict,
         base_revision: str | None = None, *, author_kind: str = "human",
@@ -341,6 +345,91 @@ class ReportService:  # pylint: disable=too-many-public-methods
         report.content_version += 1
         await self._reports.update(report)
         return revision
+
+    # ── revision history ───────────────────────────────────────
+
+    async def list_document_revisions(
+        self, user_id: str, report_id: str, limit: int = 50,
+    ) -> list[dict]:
+        """The article's history, newest first, with what each save did.
+
+        Each row carries the difference from its parent, so a reader can
+        see "three paragraphs and a widget" without fetching two full
+        documents per row.
+        """
+        await self._load_for(user_id, report_id, Action.STORIES_READ)
+        revisions = await self._reports.list_revisions(report_id, limit)
+        by_id = {r.id: r for r in revisions}
+
+        rows = []
+        for revision in revisions:
+            parent = by_id.get(revision.parent_id)
+            if parent is None and revision.parent_id:
+                parent = await self._reports.get_revision(revision.parent_id)
+            rows.append({
+                "id": revision.id,
+                "parent_id": revision.parent_id,
+                "author_id": revision.author_id,
+                "author_kind": revision.author_kind,
+                "created_at": (revision.created_at.isoformat()
+                               if revision.created_at else None),
+                "changes": doc_diff.summary(doc_diff.diff(
+                    parent.content_json if parent else None,
+                    revision.content_json)),
+            })
+        return rows
+
+    async def diff_document(
+        self, user_id: str, report_id: str,
+        from_revision: str | None, to_revision: str | None,
+    ) -> dict:
+        """Block operations between two revisions of one article.
+
+        Defaults are the useful ones: ``to`` is the current head and
+        ``from`` is its parent, so "what changed last" costs no
+        parameters.
+        """
+        await self._load_for(user_id, report_id, Action.STORIES_READ)
+
+        target = (await self._reports.get_revision(to_revision)
+                  if to_revision else await self.document_head(report_id))
+        if target is None or target.report_id != report_id:
+            raise NotFound("No such revision.")
+
+        if from_revision:
+            base = await self._reports.get_revision(from_revision)
+            if base is None or base.report_id != report_id:
+                raise NotFound("No such revision.")
+        else:
+            base = (await self._reports.get_revision(target.parent_id)
+                    if target.parent_id else None)
+
+        operations = doc_diff.diff(
+            base.content_json if base else None, target.content_json)
+        return {
+            "from": base.id if base else None,
+            "to": target.id,
+            "changes": doc_diff.summary(operations),
+            "operations": operations,
+        }
+
+    async def restore_document_revision(
+        self, user_id: str, report_id: str, revision_id: str,
+    ) -> DocRevision:
+        """Bring an older revision back as a NEW revision on top.
+
+        Never a rewrite of history: restoring is an edit like any other,
+        and the revision it restored from stays exactly where it was. A
+        history you can quietly rewrite is not evidence of anything.
+        """
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        wanted = await self._reports.get_revision(revision_id)
+        if wanted is None or wanted.report_id != report_id:
+            raise NotFound("No such revision.")
+        head = await self.document_head(report_id)
+        return await self.save_document(
+            user_id, report_id, wanted.content_json,
+            head.id if head else None)
 
     # ── translations ───────────────────────────────────────────
     # An article has one original text (report.title/abstract/document,

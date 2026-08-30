@@ -432,6 +432,61 @@ async def save_document(
     return {"ok": True, "revision": revision.id}
 
 
+# ── Revision history ─────────────────────────────────────────
+
+
+@router.get("/{report_id}/revisions")
+@inject
+async def list_revisions(
+    report_id: UuidPath,
+    *,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    """The article's revisions, newest first, each with what it changed."""
+    return await svc.list_document_revisions(user.id, report_id, limit)
+
+
+@router.get(
+    "/{report_id}/diff",
+    responses={404: {"description": "No such revision."}},
+)
+@inject
+async def diff_revisions(
+    report_id: UuidPath,
+    *,
+    from_revision: Annotated[str | None, Query(alias="from")] = None,
+    to_revision: Annotated[str | None, Query(alias="to")] = None,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Block-level changes between two revisions.
+
+    With no parameters: what the most recent save changed.
+    """
+    return await svc.diff_document(user.id, report_id,
+                                   from_revision, to_revision)
+
+
+@router.post(
+    "/{report_id}/revisions/{revision_id}/restore",
+    responses={404: {"description": "No such revision."}},
+)
+@inject
+async def restore_revision(
+    report_id: UuidPath,
+    revision_id: UuidPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Restore an older revision as a new one on top of the history."""
+    revision = await svc.restore_document_revision(
+        user.id, report_id, revision_id)
+    return {"ok": True, "revision": revision.id}
+
+
 # ── Image Upload ─────────────────────────────────────────────
 
 # Lazily-constructed MinIO client. Singleton because the underlying
