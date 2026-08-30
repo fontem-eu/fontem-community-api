@@ -41,7 +41,7 @@ jobs:
         run: python3 scripts/generate_openapi.py > /tmp/openapi.json && python3 -c "import json;print('paths:',len(json.load(open('/tmp/openapi.json'))['paths']))"
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - name: Validate consumer pacts against the spec
         env:
           PACT_USER: ${{ secrets.PACT_BROKER_USERNAME }}
