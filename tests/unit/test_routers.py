@@ -155,46 +155,6 @@ class TestReportUpdate:
         assert resp.status_code == 404
 
 
-class TestSectionLocking:
-    """POST/DELETE /reports/:id/sections/:sid/lock."""
-
-    def test_acquire_and_release_lock(self, client, services):
-        _seed(services)
-        h = make_headers("user-1")
-        rid = _create_report(client, h)
-        sec = client.post(f"/reports/{rid}/sections", json={"content": "text"}, headers=h).json()
-        sid = sec["id"]
-
-        resp = client.post(f"/reports/{rid}/sections/{sid}/lock", headers=h)
-        assert resp.status_code == 200
-        assert resp.json()["acquired"] is True
-
-        resp = client.delete(f"/reports/{rid}/sections/{sid}/lock", headers=h)
-        assert resp.status_code == 204
-
-
-class TestSectionVersions:
-    """GET /reports/:id/sections/:sid/versions."""
-
-    def test_list_versions(self, client, services):
-        _seed(services)
-        h = make_headers("user-1")
-        rid = _create_report(client, h)
-        sec = client.post(f"/reports/{rid}/sections", json={"content": "v1"}, headers=h).json()
-        sid = sec["id"]
-        # Edit to create a version
-        client.put(f"/reports/{rid}/sections/{sid}", json={"content": "v2"}, headers=h)
-        resp = client.get(f"/reports/{rid}/sections/{sid}/versions", headers=h)
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
-
-
-# ---------------------------------------------------------------------------
-# Sharing router
-# ---------------------------------------------------------------------------
-
-# client removed — the main `client` fixture (conftest.py) now
-# handles dishka injection for all routers including sharing.
 
 
 class TestSharingAccess:

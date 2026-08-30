@@ -26,7 +26,7 @@ from src.services.authz import (
 )
 from src.services.authz.policy import Principal
 from src.services.nuts import normalize_nuts
-from src.services.exceptions import Conflict, InvalidInput, NotFound
+from src.services.exceptions import InvalidInput, NotFound
 from src.services.access_inheritance import AccessInheritance, max_level
 from src.repositories.group_repository import GroupRepository
 from src.repositories.user_repository import UserRepository
@@ -36,7 +36,6 @@ from src.services.sanitize import sanitize_html, sanitize_text
 
 _LANG_RE = re.compile(r"[a-z]{2}")
 
-DEFAULT_LOCK_TTL = 300  # 5 minutes
 
 
 
@@ -210,43 +209,12 @@ class ReportService:  # pylint: disable=too-many-public-methods
         await self._reports.delete(report_id)
         await self._activity.record(user_id, "story", report_id, "deleted", report.title)
 
-    async def add_section(self, user_id: str, report_id: str, content: dict) -> Section:
-        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
-        section = Section(content_json=_sanitize_section(content))
-        return await self._reports.add_section(report_id, section)
-
-    async def edit_section(self, user_id: str, section_id: str, content: dict) -> Section:
-        section = await self._reports.get_section(section_id)
-        if section is None:
-            raise NotFound(f"Section {section_id} not found")
-        await self._load_for(user_id, section.report_id, Action.STORIES_EDIT)
-        # Lock check
-        holder = await self._reports.get_lock_holder(section_id)
-        if holder is not None and holder != user_id:
-            raise Conflict(f"Section {section_id} is locked by {holder}")
-        # Save version before editing
-        await self._reports.save_version(section_id, section.content_json, user_id)
-        section.content_json = _sanitize_section(content)
-        return await self._reports.update_section(section)
-
-    async def delete_section(self, user_id: str, section_id: str) -> None:
-        section = await self._reports.get_section(section_id)
-        if section is None:
-            raise NotFound(f"Section {section_id} not found")
-        await self._load_for(user_id, section.report_id, Action.STORIES_EDIT)
-        await self._reports.delete_section(section_id)
-
-    async def acquire_lock(self, user_id: str, section_id: str) -> bool:
-        section = await self._reports.get_section(section_id)
-        if section is None:
-            raise NotFound(f"Section {section_id} not found")
-        await self._load_for(user_id, section.report_id, Action.STORIES_LOCK_SECTION)
-        return await self._reports.acquire_lock(section_id, user_id, DEFAULT_LOCK_TTL)
-
-    async def release_lock(self, user_id: str, section_id: str) -> None:
-        # No authz check: only the holder can release, enforced at the
-        # repo level by the WHERE-clause on lock_holder.
-        await self._reports.release_lock(section_id, user_id)
+    # add_section / edit_section / delete_section / acquire_lock /
+    # release_lock lived here. An article is one document now: it is
+    # written through save_document and read through get_sections, and
+    # its structure is the headings in the body. Section locking was the
+    # live-collaboration answer to concurrent editing; the draft-branch
+    # model answers it with a baseline check instead.
 
     async def get_sections(self, report_id: str) -> list[Section]:
         return await self._reports.get_sections(report_id)

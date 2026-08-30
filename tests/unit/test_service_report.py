@@ -72,14 +72,13 @@ class TestReportServiceExtended:
             await s["report_svc"].get(_stable_uuid("u1"), "nonexistent")
 
     async def test_get_sections(self, services):
-        """get_sections() returns sections for a report."""
         s = services
         await seed_user(s["user_repo"], "u1")
         r = await s["report_svc"].create(_stable_uuid("u1"), "R")
-        await s["report_svc"].add_section(_stable_uuid("u1"), r.id, {"html": "s1"})
-        await s["report_svc"].add_section(_stable_uuid("u1"), r.id, {"html": "s2"})
+        await s["report_svc"].save_document(_stable_uuid("u1"), r.id, {"text": "body"})
         sections = await s["report_svc"].get_sections(r.id)
-        assert len(sections) == 2
+        assert len(sections) == 1
+        assert sections[0].content_json == {"text": "body"}
 
     async def test_list_public_reports(self, services):
         """list_public() returns public reports only."""
@@ -90,24 +89,3 @@ class TestReportServiceExtended:
         await s["report_svc"].update(_stable_uuid("u1"), r.id, visibility="public_open")
         public = await s["report_svc"].list_public(10, 0)
         assert len(public) == 1
-
-    async def test_edit_section_nonexistent(self, services):
-        """edit_section() on nonexistent section raises NotFound."""
-        s = services
-        await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound):
-            await s["report_svc"].edit_section(_stable_uuid("u1"), "nonexistent", {})
-
-    async def test_delete_section_nonexistent(self, services):
-        """delete_section() on nonexistent section raises NotFound."""
-        s = services
-        await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound):
-            await s["report_svc"].delete_section(_stable_uuid("u1"), "nonexistent")
-
-    async def test_acquire_lock_nonexistent(self, services):
-        """acquire_lock() on nonexistent section raises NotFound."""
-        s = services
-        await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound):
-            await s["report_svc"].acquire_lock(_stable_uuid("u1"), "nonexistent")

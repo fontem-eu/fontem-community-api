@@ -6,7 +6,7 @@
 # pylint: disable=not-callable
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import delete, func, or_, select
@@ -315,55 +315,6 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
             .order_by(SectionModel.sort_order)
         )
         return [self._section_to_domain(r) for r in result.scalars().all()]
-
-    # ── Locking ───────────────────────────────────────────────────
-
-    async def acquire_lock(self, section_id: str, user_id: str, ttl_seconds: int) -> bool:
-        result = await self._session.execute(
-            select(SectionModel)
-            .where(SectionModel.id == section_id)
-            .with_for_update()
-        )
-        row = result.scalar_one_or_none()
-        if row is None:
-            return False
-        now = datetime.now(timezone.utc)
-        if row.lock_holder is not None and row.lock_holder != user_id:
-            if row.lock_expires is not None and row.lock_expires > now:
-                return False
-        row.lock_holder = user_id
-        row.lock_expires = now + timedelta(seconds=ttl_seconds)
-        await self._session.commit()
-        return True
-
-    async def release_lock(self, section_id: str, user_id: str) -> None:
-        result = await self._session.execute(
-            select(SectionModel).where(SectionModel.id == section_id)
-        )
-        row = result.scalar_one_or_none()
-        if row is not None and row.lock_holder == user_id:
-            row.lock_holder = None
-            row.lock_expires = None
-            await self._session.commit()
-
-    async def get_lock_holder(self, section_id: str) -> str | None:
-        result = await self._session.execute(
-            select(SectionModel).where(SectionModel.id == section_id)
-        )
-        row = result.scalar_one_or_none()
-        if row is None:
-            return None
-        now = datetime.now(timezone.utc)
-        if row.lock_holder is not None:
-            if row.lock_expires is not None and row.lock_expires <= now:
-                row.lock_holder = None
-                row.lock_expires = None
-                await self._session.commit()
-                return None
-            return row.lock_holder
-        return None
-
-    # ── Versioning ────────────────────────────────────────────────
 
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None:
         model = SectionVersionModel(
