@@ -79,6 +79,44 @@ class DocBranch:
 
 
 @dataclass
+class MergeRequest:
+    """A proposal to publish one editor's draft.
+
+    ``target_base`` is where main stood when the request was opened. If
+    main has moved since, the request is behind and cannot fast-forward
+    without discarding whatever moved it.
+    """
+
+    id: str | None = None
+    report_id: str = ""
+    author_id: str = ""
+    title: str = ""
+    body: str = ""
+    source_head: str = ""
+    target_base: str = ""
+    state: str = "open"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    merged_at: datetime | None = None
+    merged_by: str | None = None
+    merged_revision_id: str | None = None
+    self_merged: bool = False
+
+
+@dataclass
+class MrComment:
+    """A review comment, anchored to a block of the diff."""
+
+    id: str | None = None
+    mr_id: str = ""
+    author_id: str = ""
+    anchor: str | None = None
+    body: str = ""
+    resolved: bool = False
+    created_at: datetime | None = None
+
+
+@dataclass
 class Section:
     id: str | None = None
     report_id: str = ""

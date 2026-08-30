@@ -19,7 +19,13 @@ import json
 import re
 from datetime import datetime, time, timezone
 
-from src.domain.report import DocRevision, Report, ReportTranslation, Section
+from src.domain.report import (
+    DocRevision,
+    MergeRequest,
+    Report,
+    ReportTranslation,
+    Section,
+)
 from src.services import doc_diff
 from src.repositories.report_repository import ReportRepository
 from src.services.activity_service import ActivityService
@@ -65,6 +71,9 @@ def _day_end(iso: str | None) -> datetime | None:
 #: is deliberately invisible: saying "exists, but not here" is what an
 #: enumeration attack needs.
 _NO_SUCH_REVISION = "No such revision."
+
+#: Same reasoning as above for proposals.
+_NO_SUCH_MERGE_REQUEST = "No such merge request."
 
 
 class ReportService:  # pylint: disable=too-many-public-methods
@@ -292,6 +301,65 @@ class ReportService:  # pylint: disable=too-many-public-methods
             return None
         return await self._reports.get_revision(branch.head_revision_id)
 
+    async def draft_head(self, user_id: str, report_id: str) -> DocRevision | None:
+        """Where this editor's own draft currently points, if they have one."""
+        branch = await self._reports.get_branch(report_id, user_id)
+        if branch is None:
+            return None
+        return await self._reports.get_revision(branch.head_revision_id)
+
+    # Six, and each one is load-bearing: who is writing, which article,
+    # what, on top of what, and whether a human or the assistant wrote it.
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    async def _require_baseline(
+        self, report_id: str, user_id: str, base_revision: str | None,
+    ) -> tuple[str | None, DocRevision | None]:
+        """The revision this editor is writing on top of.
+
+        Refuses a save that names a different one: that save was written
+        against text which is no longer there, and applying it would
+        discard whatever replaced it — the silent overwrite this whole
+        mechanism exists to prevent.
+        """
+        draft = await self._reports.get_branch(report_id, user_id)
+        main_head = await self.document_head(report_id)
+        # A new draft starts where the published text is; an article with
+        # neither has nothing to be written on top of yet.
+        if draft is not None:
+            head_id = draft.head_revision_id
+        elif main_head is not None:
+            head_id = main_head.id
+        else:
+            head_id = None
+
+        if base_revision != head_id:
+            current = (await self._reports.get_revision(head_id)
+                       if head_id else None)
+            raise Conflict(
+                "the document changed since you loaded it",
+                payload={
+                    "current_revision": head_id,
+                    "current_doc": current.content_json if current else None,
+                },
+            )
+        return head_id, main_head
+
+    async def _publish_first_save(
+        self, report_id: str, revision: DocRevision,
+    ) -> None:
+        """An article's first save is also its first published version.
+
+        There is nothing to review it against, and a story nobody can
+        read until it merges is a worse default than one whose first
+        draft is its first version.
+        """
+        await self._reports.set_branch_head(report_id, None, revision.id)
+        await self._write_read_model(report_id, revision.content_json)
+        report = await self._reports.get_by_id(report_id)
+        if report is not None:
+            report.content_version += 1
+            await self._reports.update(report)
+
     # Six, and each one is load-bearing: who is writing, which article,
     # what, on top of what, and whether a human or the assistant wrote it.
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
@@ -299,30 +367,19 @@ class ReportService:  # pylint: disable=too-many-public-methods
         self, user_id: str, report_id: str, content: dict,
         base_revision: str | None = None, *, author_kind: str = "human",
     ) -> DocRevision:
-        """Commit a new document revision and move main to it.
+        """Commit a new revision on this editor's draft branch.
 
-        ``base_revision`` is the revision the caller edited. If main has
-        moved on since — another tab, another editor, an assistant edit
-        applied elsewhere — this raises Conflict rather than overwriting,
-        and hands back the current head so the caller can show the
-        difference instead of silently discarding an hour of someone's
-        work. That is the whole point: a save without a baseline cannot
-        be told apart from a save built on a stale one.
+        Writing goes to the draft, never straight to main: the published
+        text changes when a merge request merges, not when somebody's
+        autosave timer fires. The draft is created off main's head the
+        first time an editor saves.
         """
-        report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT)
-        head = await self.document_head(report_id)
-        head_id = head.id if head else None
-
-        if base_revision != head_id:
-            raise Conflict(
-                "the document changed since you loaded it",
-                payload={
-                    "current_revision": head_id,
-                    "current_doc": head.content_json if head else None,
-                },
-            )
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        head_id, main_head = await self._require_baseline(
+            report_id, user_id, base_revision)
 
         content_hash = self._hash(content)
+        head = (await self._reports.get_revision(head_id)) if head_id else None
         if head is not None and head.content_hash == content_hash:
             # Nothing changed. An autosave that re-sends the same document
             # should not manufacture a revision for the history to carry.
@@ -333,10 +390,23 @@ class ReportService:  # pylint: disable=too-many-public-methods
             content_hash=content_hash, author_id=user_id,
             author_kind=author_kind,
         ))
-        await self._reports.set_branch_head(report_id, None, revision.id)
+        draft = await self._reports.get_branch(report_id, user_id)
+        base_id = draft.base_revision_id if draft else None
+        if base_id is None:
+            base_id = main_head.id if main_head else revision.id
+        await self._reports.set_branch_head(
+            report_id, user_id, revision.id, base_revision_id=base_id)
 
-        # The section row stays the read path for now; phase 3 moves
-        # readers onto the revision directly.
+        if main_head is None:
+            await self._publish_first_save(report_id, revision)
+        return revision
+
+    async def _write_read_model(self, report_id: str, content: dict) -> None:
+        """Keep the section row in step with main's head.
+
+        Readers still come through it; phase 5 moves them onto the
+        revision directly.
+        """
         sections = await self._reports.get_sections(report_id)
         if sections:
             sections[0].content_json = content
@@ -346,12 +416,6 @@ class ReportService:  # pylint: disable=too-many-public-methods
         else:
             await self._reports.add_section(
                 report_id, Section(content_json=content))
-
-        # Every document save is a content change from a translator's
-        # point of view — existing translations become maybe-outdated.
-        report.content_version += 1
-        await self._reports.update(report)
-        return revision
 
     # ── revision history ───────────────────────────────────────
 
@@ -398,8 +462,13 @@ class ReportService:  # pylint: disable=too-many-public-methods
         """
         await self._load_for(user_id, report_id, Action.STORIES_READ)
 
-        target = (await self._reports.get_revision(to_revision)
-                  if to_revision else await self.document_head(report_id))
+        if to_revision:
+            target = await self._reports.get_revision(to_revision)
+        else:
+            # "What changed last" means the caller's own draft when they
+            # have one: that is the work they are looking at.
+            target = (await self.draft_head(user_id, report_id)
+                      or await self.document_head(report_id))
         if target is None or target.report_id != report_id:
             raise NotFound(_NO_SUCH_REVISION)
 
@@ -407,9 +476,11 @@ class ReportService:  # pylint: disable=too-many-public-methods
             base = await self._reports.get_revision(from_revision)
             if base is None or base.report_id != report_id:
                 raise NotFound(_NO_SUCH_REVISION)
+        elif target.parent_id:
+            base = await self._reports.get_revision(target.parent_id)
         else:
-            base = (await self._reports.get_revision(target.parent_id)
-                    if target.parent_id else None)
+            # The first revision: everything in it is an addition.
+            base = None
 
         operations = doc_diff.diff(
             base.content_json if base else None, target.content_json)
@@ -433,10 +504,185 @@ class ReportService:  # pylint: disable=too-many-public-methods
         wanted = await self._reports.get_revision(revision_id)
         if wanted is None or wanted.report_id != report_id:
             raise NotFound(_NO_SUCH_REVISION)
-        head = await self.document_head(report_id)
+        # Restoring is an edit, so it lands where edits land: on the
+        # caller's draft, on top of whatever is already there.
+        head = (await self.draft_head(user_id, report_id)
+                or await self.document_head(report_id))
         return await self.save_document(
             user_id, report_id, wanted.content_json,
             head.id if head else None)
+
+    # ── merge requests ─────────────────────────────────────────
+
+    async def _behind_by(self, report_id: str, base_revision: str) -> int:
+        """How many revisions main has taken since ``base_revision``."""
+        head = await self.document_head(report_id)
+        steps = 0
+        cursor = head
+        while cursor is not None and cursor.id != base_revision and steps < 500:
+            steps += 1
+            cursor = (await self._reports.get_revision(cursor.parent_id)
+                      if cursor.parent_id else None)
+        return steps if cursor is not None else -1
+
+    async def open_merge_request(
+        self, user_id: str, report_id: str, title: str = "", body: str = "",
+    ) -> MergeRequest:
+        """Propose this editor's draft as the article's published text."""
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        draft = await self._reports.get_branch(report_id, user_id)
+        if draft is None:
+            raise InvalidInput("You have no draft to propose.")
+
+        main_head = await self.document_head(report_id)
+        if main_head is not None and draft.head_revision_id == main_head.id:
+            raise InvalidInput("Your draft matches the published text.")
+
+        existing = [m for m in await self._reports.list_merge_requests(
+            report_id, "open") if m.author_id == user_id]
+        if existing:
+            # The draft branch is singular, so a second open request for it
+            # would be the same proposal twice. Move the existing one.
+            mr = existing[0]
+            mr.source_head = draft.head_revision_id
+            mr.title = title or mr.title
+            mr.body = body or mr.body
+            return await self._reports.update_merge_request(mr)
+
+        return await self._reports.add_merge_request(MergeRequest(
+            report_id=report_id, author_id=user_id,
+            title=title or "Proposed revision", body=body,
+            source_head=draft.head_revision_id,
+            target_base=main_head.id if main_head else draft.head_revision_id,
+        ))
+
+    async def list_merge_requests(
+        self, user_id: str, report_id: str, state: str | None = "open",
+    ) -> list[dict]:
+        """Open proposals for this article — for people who may edit it.
+
+        Readers see the published text and nothing else: a proposal
+        nobody has reviewed is not yet a claim the platform is making.
+        """
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        rows = await self._reports.list_merge_requests(report_id, state)
+        return [await self._mr_view(m) for m in rows]
+
+    async def get_merge_request(
+        self, user_id: str, report_id: str, mr_id: str,
+    ) -> dict:
+        """One proposal, with the changes it would make to the article."""
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        mr = await self._reports.get_merge_request(mr_id)
+        if mr is None or mr.report_id != report_id:
+            raise NotFound(_NO_SUCH_MERGE_REQUEST)
+
+        base = await self._reports.get_revision(mr.target_base)
+        source = await self._reports.get_revision(mr.source_head)
+        operations = doc_diff.diff(
+            base.content_json if base else None,
+            source.content_json if source else None)
+        view = await self._mr_view(mr)
+        view["operations"] = operations
+        return view
+
+    async def _mr_view(self, mr: MergeRequest) -> dict:
+        """The row a reviewer reads, including whether it can merge."""
+        base = await self._reports.get_revision(mr.target_base)
+        source = await self._reports.get_revision(mr.source_head)
+        changes = doc_diff.summary(doc_diff.diff(
+            base.content_json if base else None,
+            source.content_json if source else None))
+        behind = 0
+        if mr.state == "open":
+            behind = await self._behind_by(mr.report_id, mr.target_base)
+        return {
+            "id": mr.id,
+            "report_id": mr.report_id,
+            "author_id": mr.author_id,
+            "title": mr.title,
+            "body": mr.body,
+            "state": mr.state,
+            "source_head": mr.source_head,
+            "target_base": mr.target_base,
+            "created_at": mr.created_at.isoformat() if mr.created_at else None,
+            "merged_at": mr.merged_at.isoformat() if mr.merged_at else None,
+            "merged_by": mr.merged_by,
+            "self_merged": mr.self_merged,
+            "changes": changes,
+            # Nothing expires and nothing is auto-rebased: a draft that
+            # has fallen behind is shown as such, and its author decides.
+            "behind": behind,
+            "can_fast_forward": mr.state == "open" and behind == 0,
+        }
+
+    async def merge_merge_request(
+        self, user_id: str, report_id: str, mr_id: str,
+    ) -> dict:
+        """Publish a proposal by moving main to its head.
+
+        Only a fast-forward: if main has moved since the proposal was
+        opened, merging would discard whatever moved it. That case is
+        refused with the difference attached rather than resolved by
+        guesswork.
+
+        An author may merge their own proposal — solo authorship is the
+        normal case here — and the merge records that nobody else read it.
+        """
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        mr = await self._reports.get_merge_request(mr_id)
+        if mr is None or mr.report_id != report_id:
+            raise NotFound(_NO_SUCH_MERGE_REQUEST)
+        if mr.state != "open":
+            raise InvalidInput(f"This proposal is already {mr.state}.")
+
+        behind = await self._behind_by(report_id, mr.target_base)
+        if behind != 0:
+            main_head = await self.document_head(report_id)
+            base = await self._reports.get_revision(mr.target_base)
+            raise Conflict(
+                "the published text moved on since this was proposed",
+                payload={
+                    "behind": behind,
+                    "current_revision": main_head.id if main_head else None,
+                    "operations": doc_diff.diff(
+                        base.content_json if base else None,
+                        main_head.content_json if main_head else None),
+                },
+            )
+
+        source = await self._reports.get_revision(mr.source_head)
+        if source is None:
+            raise NotFound(_NO_SUCH_REVISION)
+
+        await self._reports.set_branch_head(report_id, None, source.id)
+        await self._write_read_model(report_id, source.content_json)
+        report = await self._reports.get_by_id(report_id)
+        if report is not None:
+            report.content_version += 1
+            await self._reports.update(report)
+
+        mr.state = "merged"
+        mr.merged_at = datetime.now(timezone.utc)
+        mr.merged_by = user_id
+        mr.merged_revision_id = source.id
+        mr.self_merged = user_id == mr.author_id
+        merged = await self._reports.update_merge_request(mr)
+        return await self._mr_view(merged)
+
+    async def close_merge_request(
+        self, user_id: str, report_id: str, mr_id: str,
+    ) -> dict:
+        """Withdraw a proposal. The draft and its revisions stay put."""
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        mr = await self._reports.get_merge_request(mr_id)
+        if mr is None or mr.report_id != report_id:
+            raise NotFound(_NO_SUCH_MERGE_REQUEST)
+        if mr.state != "open":
+            raise InvalidInput(f"This proposal is already {mr.state}.")
+        mr.state = "closed"
+        return await self._mr_view(
+            await self._reports.update_merge_request(mr))
 
     # ── translations ───────────────────────────────────────────
     # An article has one original text (report.title/abstract/document,

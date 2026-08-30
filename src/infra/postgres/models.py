@@ -260,6 +260,78 @@ class DocBranchModel(Base):
     )
 
 
+class MergeRequestModel(Base):
+    """A proposal to move an article's published text to a draft's head."""
+
+    __tablename__ = "merge_requests"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    report_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+    author_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    source_head: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=False
+    )
+    target_base: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=False
+    )
+    state: Mapped[str] = mapped_column(Text, nullable=False, default="open")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    merged_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    merged_by: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), nullable=True
+    )
+    merged_revision_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=True
+    )
+    #: Recorded, not forbidden: an author may merge their own proposal,
+    #: and the article's history says that nobody else read it.
+    self_merged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint("state IN ('open', 'merged', 'closed')",
+                        name="ck_merge_requests_state"),
+        Index("ix_merge_requests_report_state", "report_id", "state"),
+        Index("uq_merge_requests_open", "report_id", "author_id",
+              unique=True, postgresql_where=text("state = 'open'")),
+    )
+
+
+class MrCommentModel(Base):
+    """A review comment, anchored to a block rather than a line."""
+
+    __tablename__ = "mr_comments"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    mr_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("merge_requests.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    author_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
+    )
+    anchor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+
+    __table_args__ = (Index("ix_mr_comments_mr", "mr_id"),)
+
+
 class SectionModel(Base):
     __tablename__ = "sections"
 

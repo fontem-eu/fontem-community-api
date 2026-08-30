@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from tests.conftest import make_headers, seed_user
+from tests.conftest import _stable_uuid, make_headers, seed_user
 
 
 @pytest.mark.asyncio
@@ -213,9 +213,11 @@ class TestDocumentConcurrency:
         assert "theirs" in str(body["current_doc"])
         assert body["current_revision"]
 
-        # And the stored document is still theirs, not the stale one.
+        # And the draft still holds theirs, not the stale one. (The
+        # published text is untouched either way — saves land on the
+        # draft, and main moves only when a proposal merges.)
         after = client.get(f"/reports/{rid}", headers=h).json()
-        assert "theirs" in str(after["content_doc"])
+        assert "theirs" in str(after["draft_doc"])
 
     def test_a_save_with_no_baseline_cannot_overwrite(self, client, services):
         """A client that names no baseline is a client that has not read
@@ -365,9 +367,143 @@ class TestRevisionHistory:
         restored = resp.json()["revision"]
         assert restored not in (first, second)
 
-        # The document reads as the old one again...
+        # The draft reads as the old one again...
         doc = client.get(f"/reports/{rid}", headers=h).json()
-        assert "first" in str(doc["content_doc"])
+        assert "first" in str(doc["draft_doc"])
         # ...and the history still has all three, with the restore on top.
         rows = client.get(f"/reports/{rid}/revisions", headers=h).json()
         assert [r["id"] for r in rows] == [restored, second, first]
+
+
+class TestMergeRequests:
+    """Publishing is a decision, and the decision is recorded.
+
+    Three rules the editors chose, pinned here because they are policy
+    rather than mechanism: an author may merge their own proposal and the
+    merge says so; nothing expires; and proposals are for people who may
+    edit the article, not for its readers.
+    """
+
+    async def _seed(self, services):
+        await seed_user(services["user_repo"], "user-1")
+        await seed_user(services["user_repo"], "user-2")
+
+    def _article_with_a_draft(self, client, h):
+        rid = client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+        first = client.put(f"/reports/{rid}/content",
+                           json={"tiptap": _doc("published")},
+                           headers=h).json()["revision"]
+        drafted = client.put(
+            f"/reports/{rid}/content",
+            json={"tiptap": _doc("proposed"), "base_revision": first},
+            headers=h).json()["revision"]
+        return rid, first, drafted
+
+    def test_a_proposal_carries_the_changes_it_would_make(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, first, drafted = self._article_with_a_draft(client, h)
+
+        mr = client.post(f"/reports/{rid}/merge-requests",
+                         json={"title": "Rewrite the lead"}, headers=h).json()
+        assert mr["state"] == "open"
+        assert mr["source_head"] == drafted
+        assert mr["target_base"] == first
+        assert mr["can_fast_forward"] is True
+        assert [o["op"] for o in mr["operations"]] == ["replace"]
+
+    def test_merging_publishes_and_records_that_nobody_else_read_it(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, _, drafted = self._article_with_a_draft(client, h)
+        mr = client.post(f"/reports/{rid}/merge-requests", json={},
+                         headers=h).json()
+
+        merged = client.post(
+            f"/reports/{rid}/merge-requests/{mr['id']}/merge", headers=h).json()
+        assert merged["state"] == "merged"
+        # Allowed — solo authorship is the normal case — but on the record.
+        assert merged["self_merged"] is True
+        assert merged["merged_by"]
+
+        published = client.get(f"/reports/{rid}", headers=h).json()
+        assert "proposed" in str(published["content_doc"])
+        assert published["head_revision"] == drafted
+
+    def test_a_merge_by_someone_else_is_not_marked_self_merged(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h1, h2 = make_headers("user-1"), make_headers("user-2")
+        rid, _, _ = self._article_with_a_draft(client, h1)
+        client.put(f"/reports/{rid}/access",
+                   json={"user_id": _stable_uuid("user-2"), "level": "editor"},
+                   headers=h1)
+        mr = client.post(f"/reports/{rid}/merge-requests", json={},
+                         headers=h1).json()
+
+        merged = client.post(
+            f"/reports/{rid}/merge-requests/{mr['id']}/merge", headers=h2)
+        if merged.status_code == 200:
+            assert merged.json()["self_merged"] is False
+
+    def test_a_proposal_that_fell_behind_is_refused_with_the_difference(
+        self, client, services,
+    ):
+        """No guesswork: merging a proposal whose base has moved would
+        discard whatever moved it."""
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, first, drafted = self._article_with_a_draft(client, h)
+        mr = client.post(f"/reports/{rid}/merge-requests", json={},
+                         headers=h).json()
+
+        # Main moves on underneath the open proposal.
+        moved = client.put(
+            f"/reports/{rid}/content",
+            json={"tiptap": _doc("something else"), "base_revision": drafted},
+            headers=h).json()["revision"]
+        second = client.post(f"/reports/{rid}/merge-requests", json={},
+                             headers=h).json()
+        client.post(f"/reports/{rid}/merge-requests/{second['id']}/merge",
+                    headers=h)
+
+        stale = client.post(
+            f"/reports/{rid}/merge-requests/{mr['id']}/merge", headers=h)
+        assert stale.status_code in (409, 400)
+        if stale.status_code == 409:
+            assert stale.json()["behind"] >= 1
+        assert moved
+
+    def test_closing_leaves_the_draft_and_its_revisions_alone(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, _, drafted = self._article_with_a_draft(client, h)
+        mr = client.post(f"/reports/{rid}/merge-requests", json={},
+                         headers=h).json()
+
+        closed = client.post(
+            f"/reports/{rid}/merge-requests/{mr['id']}/close", headers=h).json()
+        assert closed["state"] == "closed"
+        # Nothing expires and nothing is deleted: the work is still there.
+        after = client.get(f"/reports/{rid}", headers=h).json()
+        assert after["draft_revision"] == drafted
+
+    def test_proposals_are_not_readable_without_edit_access(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h1 = make_headers("user-1")
+        rid, _, _ = self._article_with_a_draft(client, h1)
+        client.post(f"/reports/{rid}/merge-requests", json={}, headers=h1)
+        client.put(f"/reports/{rid}", json={"visibility": "public_open"},
+                   headers=h1)
+
+        # A reader of the published article cannot enumerate its drafts.
+        assert client.get(f"/reports/{rid}/merge-requests").status_code in (401, 403, 404)
+        assert client.get(f"/reports/{rid}/merge-requests",
+                          headers=make_headers("user-2")).status_code in (403, 404)

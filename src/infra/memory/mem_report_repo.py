@@ -7,6 +7,7 @@ from uuid import uuid4
 from src.domain.report import (
     DocBranch,
     DocRevision,
+    MergeRequest,
     Report,
     ReportTranslation,
     Section,
@@ -15,6 +16,10 @@ from src.domain.report import (
 from src.repositories.report_repository import ReportRepository
 
 
+# One dict per entity is what an in-memory fake IS; collapsing them
+# into a nested structure would make it less like the thing it stands
+# in for, not more.
+# pylint: disable-next=too-many-instance-attributes
 class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-public-methods
     # The repo mirrors the report aggregate (report + sections + versions
     # + locks + tags + translations); splitting it would split one
@@ -28,6 +33,7 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         self._revisions: dict[str, DocRevision] = {}
         # Keyed (report_id, owner_id); owner None is main.
         self._branches: dict[tuple[str, str | None], DocBranch] = {}
+        self._merge_requests: dict[str, MergeRequest] = {}
 
     async def create(self, report: Report) -> Report:
         if report.id is None:
@@ -198,6 +204,35 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         existing.updated_at = datetime.now(timezone.utc)
         self._branches[(report_id, owner_id)] = existing
         return deepcopy(existing)
+
+    # ── merge requests ─────────────────────────────────────────
+
+    async def add_merge_request(self, mr: MergeRequest) -> MergeRequest:
+        stored = deepcopy(mr)
+        stored.id = stored.id or str(uuid4())
+        now = datetime.now(timezone.utc)
+        stored.created_at = stored.created_at or now
+        stored.updated_at = now
+        self._merge_requests[stored.id] = stored
+        return deepcopy(stored)
+
+    async def get_merge_request(self, mr_id: str) -> MergeRequest | None:
+        found = self._merge_requests.get(mr_id)
+        return deepcopy(found) if found else None
+
+    async def list_merge_requests(
+        self, report_id: str, state: str | None = None,
+    ) -> list[MergeRequest]:
+        found = [m for m in self._merge_requests.values()
+                 if m.report_id == report_id and (not state or m.state == state)]
+        found.sort(key=lambda m: m.created_at or datetime.min, reverse=True)
+        return [deepcopy(m) for m in found]
+
+    async def update_merge_request(self, mr: MergeRequest) -> MergeRequest:
+        stored = deepcopy(mr)
+        stored.updated_at = datetime.now(timezone.utc)
+        self._merge_requests[stored.id] = stored
+        return deepcopy(stored)
 
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None:
         version = SectionVersion(

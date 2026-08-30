@@ -109,6 +109,13 @@ def test_the_agent_reads_the_latest_saved_document(client, user_id):
             "base_revision": head,
         }, headers=h).json()["revision"]
 
+    # Publish, because "the last saved version" for a reader is the
+    # published one — a draft is the author's, not the article's.
+    mr = client.post(f"/reports/{report['id']}/merge-requests", json={},
+                     headers=h).json()
+    client.post(f"/reports/{report['id']}/merge-requests/{mr['id']}/merge",
+                headers=h)
+
     body = _read(client, user_id, report["id"])["sections"]
     assert "third" in body
     assert "first" not in body and "second" not in body
