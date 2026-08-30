@@ -323,9 +323,14 @@ class ReportService:  # pylint: disable=too-many-public-methods
         """
         draft = await self._reports.get_branch(report_id, user_id)
         main_head = await self.document_head(report_id)
-        # A new draft starts where the published text is.
-        head_id = (draft.head_revision_id if draft
-                   else (main_head.id if main_head else None))
+        # A new draft starts where the published text is; an article with
+        # neither has nothing to be written on top of yet.
+        if draft is not None:
+            head_id = draft.head_revision_id
+        elif main_head is not None:
+            head_id = main_head.id
+        else:
+            head_id = None
 
         if base_revision != head_id:
             current = (await self._reports.get_revision(head_id)
