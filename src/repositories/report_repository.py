@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from src.domain.report import (
     DocBranch,
     DocRevision,
+    MergeRequest,
     Report,
     ReportTranslation,
     Section,
@@ -109,6 +110,22 @@ class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
         self, report_id: str, owner_id: str | None,
         head_revision_id: str, base_revision_id: str | None = None,
     ) -> DocBranch: ...
+
+    # ── merge requests ─────────────────────────────────────────
+
+    @abstractmethod
+    async def add_merge_request(self, mr: MergeRequest) -> MergeRequest: ...
+
+    @abstractmethod
+    async def get_merge_request(self, mr_id: str) -> MergeRequest | None: ...
+
+    @abstractmethod
+    async def list_merge_requests(
+        self, report_id: str, state: str | None = None,
+    ) -> list[MergeRequest]: ...
+
+    @abstractmethod
+    async def update_merge_request(self, mr: MergeRequest) -> MergeRequest: ...
 
     @abstractmethod
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None: ...

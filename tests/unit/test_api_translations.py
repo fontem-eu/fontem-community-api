@@ -40,15 +40,26 @@ class TestTranslationAPI:
 
     @staticmethod
     def _save(client, h, rid, doc):
-        """Save the document on top of whatever main currently holds.
-
-        Every save names the revision it was written against; the server
-        refuses one that does not, which is what stops a stale buffer
-        overwriting newer work.
-        """
-        head = client.get(f"/reports/{rid}", headers=h).json()["head_revision"]
+        """Save onto the caller's draft, naming the revision it was
+        written against — the server refuses a save that does not."""
+        body = client.get(f"/reports/{rid}", headers=h).json()
+        base = body.get("draft_revision") or body["head_revision"]
         return client.put(f"/reports/{rid}/content",
-                          json={**doc, "base_revision": head}, headers=h)
+                          json={**doc, "base_revision": base}, headers=h)
+
+    @classmethod
+    def _publish(cls, client, h, rid, doc):
+        """Save and then merge, which is what changes the PUBLISHED text.
+
+        A translation goes stale when the article readers see changes —
+        not when its author saves a draft. That distinction is the whole
+        point of the draft/merge split, so these tests go through it.
+        """
+        cls._save(client, h, rid, doc)
+        mr = client.post(f"/reports/{rid}/merge-requests",
+                         json={"title": "edit"}, headers=h).json()
+        return client.post(
+            f"/reports/{rid}/merge-requests/{mr['id']}/merge", headers=h)
 
     @staticmethod
     def _edited(text):
@@ -95,7 +106,7 @@ class TestTranslationAPI:
         client.put(f"/reports/{rid}/translations/pt",
                    json={"title": "T", "tiptap": DOC_PT["tiptap"]}, headers=h)
         # edit the ORIGINAL document -> translation becomes outdated
-        self._save(client, h, rid, self._edited("body, revised"))
+        self._publish(client, h, rid, self._edited("body, revised"))
         got = client.get(f"/reports/{rid}/translations/pt", headers=h)
         assert got.json()["outdated"] is True
         # metadata list agrees
@@ -123,7 +134,7 @@ class TestTranslationAPI:
         rid = self._mk_story(client, h)
         client.put(f"/reports/{rid}/translations/pt",
                    json={"title": "T", "tiptap": DOC_PT["tiptap"]}, headers=h)
-        self._save(client, h, rid, self._edited("original moved on"))
+        self._publish(client, h, rid, self._edited("original moved on"))
         assert client.get(f"/reports/{rid}/translations/pt", headers=h).json()["outdated"] is True
 
         resp = client.post(f"/reports/{rid}/translations/pt/resolve", headers=h)
@@ -268,7 +279,7 @@ class TestTranslationAPI:
         rid = self._mk_story(client, h)
         client.put(f"/reports/{rid}/translations/pt",
                    json={"title": "Título", "tiptap": DOC_PT["tiptap"]}, headers=h)
-        self._save(client, h, rid, self._edited("original moved on"))
+        self._publish(client, h, rid, self._edited("original moved on"))
         card = next(c for c in client.get("/reports?scope=mine&lang=pt", headers=h).json()
                     if c["id"] == rid)
         assert card["title"] == "Título"  # still shown, but…

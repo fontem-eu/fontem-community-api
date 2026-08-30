@@ -281,3 +281,25 @@ def test_020_is_idempotent_when_the_chain_is_already_built():
 
     assert count == 3
     assert branches == 1
+
+
+def test_021_creates_the_proposal_tables_with_their_rules():
+    """The policy the editors chose lives in the schema, not in prose:
+    one open proposal per editor per article, and only three states."""
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url = pg.get_connection_url().replace(
+            "postgresql+psycopg2://", "postgresql://")
+        engine = sa.create_engine(url)
+        _alembic(url, "upgrade", "head")
+        inspector = sa.inspect(engine)
+        tables = set(inspector.get_table_names())
+        indexes = {i["name"] for i in inspector.get_indexes("merge_requests")}
+        with engine.begin() as conn:
+            states = conn.execute(sa.text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'ck_merge_requests_state'")).scalar()
+        engine.dispose()
+
+    assert {"merge_requests", "mr_comments"} <= tables
+    assert "uq_merge_requests_open" in indexes
+    assert "open" in states and "merged" in states and "closed" in states

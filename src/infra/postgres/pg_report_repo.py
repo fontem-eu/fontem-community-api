@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.domain.report import (
     DocBranch,
     DocRevision,
+    MergeRequest,
     Report,
     ReportTranslation,
     Section,
@@ -23,6 +24,7 @@ from src.domain.report import (
 from src.infra.postgres.models import (
     DocBranchModel,
     DocRevisionModel,
+    MergeRequestModel,
     ReportAccessModel,
     ReportModel,
     ReportTranslationModel,
@@ -406,6 +408,65 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
         await self._session.commit()
         await self._session.refresh(row)
         return self._branch_to_domain(row)
+
+    # ── merge requests ─────────────────────────────────────────
+
+    @staticmethod
+    def _mr_to_domain(row: MergeRequestModel) -> MergeRequest:
+        return MergeRequest(
+            id=row.id, report_id=row.report_id, author_id=row.author_id,
+            title=row.title, body=row.body, source_head=row.source_head,
+            target_base=row.target_base, state=row.state,
+            created_at=row.created_at, updated_at=row.updated_at,
+            merged_at=row.merged_at, merged_by=row.merged_by,
+            merged_revision_id=row.merged_revision_id,
+            self_merged=row.self_merged,
+        )
+
+    async def add_merge_request(self, mr: MergeRequest) -> MergeRequest:
+        model = MergeRequestModel(
+            report_id=mr.report_id, author_id=mr.author_id, title=mr.title,
+            body=mr.body, source_head=mr.source_head,
+            target_base=mr.target_base, state=mr.state,
+        )
+        self._session.add(model)
+        await self._session.commit()
+        await self._session.refresh(model)
+        return self._mr_to_domain(model)
+
+    async def get_merge_request(self, mr_id: str) -> MergeRequest | None:
+        row = (await self._session.execute(
+            select(MergeRequestModel).where(MergeRequestModel.id == mr_id)
+        )).scalar_one_or_none()
+        return self._mr_to_domain(row) if row else None
+
+    async def list_merge_requests(
+        self, report_id: str, state: str | None = None,
+    ) -> list[MergeRequest]:
+        stmt = select(MergeRequestModel).where(
+            MergeRequestModel.report_id == report_id)
+        if state:
+            stmt = stmt.where(MergeRequestModel.state == state)
+        result = await self._session.execute(
+            stmt.order_by(MergeRequestModel.created_at.desc()))
+        return [self._mr_to_domain(r) for r in result.scalars().all()]
+
+    async def update_merge_request(self, mr: MergeRequest) -> MergeRequest:
+        row = (await self._session.execute(
+            select(MergeRequestModel).where(MergeRequestModel.id == mr.id)
+        )).scalar_one()
+        row.title = mr.title
+        row.body = mr.body
+        row.source_head = mr.source_head
+        row.target_base = mr.target_base
+        row.state = mr.state
+        row.merged_at = mr.merged_at
+        row.merged_by = mr.merged_by
+        row.merged_revision_id = mr.merged_revision_id
+        row.self_merged = mr.self_merged
+        await self._session.commit()
+        await self._session.refresh(row)
+        return self._mr_to_domain(row)
 
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None:
         model = SectionVersionModel(

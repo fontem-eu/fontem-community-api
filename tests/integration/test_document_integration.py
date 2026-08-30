@@ -49,7 +49,9 @@ class TestDocument:
                    json={"tiptap": _doc("second"),
                          "base_revision": first["revision"]}, headers=h)
 
-        body = str(client.get(f"/reports/{rid}", headers=h).json()["content_doc"])
+        # The draft is what a later save replaces; the published text
+        # moves only when a proposal merges.
+        body = str(client.get(f"/reports/{rid}", headers=h).json()["draft_doc"])
         assert "second" in body
         assert "first" not in body
 
@@ -105,7 +107,7 @@ class TestConcurrentSaves:
         assert a.status_code == 200
         assert b.status_code == 409
         stored = client.get(f"/reports/{rid}", headers=h).json()
-        assert "editor A" in str(stored["content_doc"])
+        assert "editor A" in str(stored["draft_doc"])
 
     def test_the_chain_survives_a_round_trip(self, client, user_id):
         """Parent links, hashes and the branch pointer are what the
@@ -120,5 +122,9 @@ class TestConcurrentSaves:
                                   "base_revision": first["revision"]},
                             headers=h).json()
 
-        head = client.get(f"/reports/{rid}", headers=h).json()["head_revision"]
-        assert head == second["revision"] != first["revision"]
+        body = client.get(f"/reports/{rid}", headers=h).json()
+        assert body["draft_revision"] == second["revision"]
+        assert second["revision"] != first["revision"]
+        # The first save published (nothing to review it against); the
+        # second is a draft on top of it.
+        assert body["head_revision"] == first["revision"]

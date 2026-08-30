@@ -54,9 +54,39 @@ class TestReports:
 
         revisions = await s["report_repo"].list_revisions(report.id, 10)
         assert [r.content_json["v"] for r in revisions] == [3, 2, 1]
-        # And main points at the newest of them.
-        branch = await s["report_repo"].get_branch(report.id, None)
-        assert branch.head_revision_id == revisions[0].id == head
+        # The author's DRAFT points at the newest. Main does not move
+        # until a proposal merges — that is what makes publishing a
+        # decision rather than a side effect of an autosave timer.
+        draft = await s["report_repo"].get_branch(report.id, _stable_uuid("user-1"))
+        assert draft.head_revision_id == revisions[0].id == head
+
+    async def test_the_first_save_publishes_because_there_is_nothing_to_review(
+        self, services,
+    ):
+        """An article nobody can read until it is merged is a worse
+        default than one whose first draft is its first version."""
+        s = services
+        await seed_user(s["user_repo"], "user-1")
+        report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
+
+        first = await s["report_svc"].save_document(
+            _stable_uuid("user-1"), report.id, {"text": "hello"}, None)
+
+        published = await s["report_svc"].document_head(report.id)
+        assert published.id == first.id
+
+    async def test_later_saves_do_not_move_the_published_text(self, services):
+        s = services
+        await seed_user(s["user_repo"], "user-1")
+        report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
+
+        first = await s["report_svc"].save_document(
+            _stable_uuid("user-1"), report.id, {"text": "published"}, None)
+        await s["report_svc"].save_document(
+            _stable_uuid("user-1"), report.id, {"text": "still drafting"}, first.id)
+
+        published = await s["report_svc"].document_head(report.id)
+        assert published.content_json == {"text": "published"}
 
     async def test_an_identical_save_adds_no_revision(self, services):
         """Autosave re-sends the same document constantly; the history
@@ -74,7 +104,7 @@ class TestReports:
         assert len(await s["report_repo"].list_revisions(report.id, 10)) == 1
 
     async def test_a_stale_save_is_refused_with_the_current_state(self, services):
-        """The lost-widgets bug, as a test. Two writers, one baseline: the
+        """The lost-widgets bug, as a test. Two writers on one branch: the
         second must be told, not silently win."""
         s = services
         await seed_user(s["user_repo"], "user-1")
@@ -94,8 +124,8 @@ class TestReports:
         # can show the difference rather than just failing.
         assert caught.value.payload["current_doc"] == {
             "text": "someone else's work"}
-        head = await s["report_svc"].document_head(report.id)
-        assert head.content_json == {"text": "someone else's work"}
+        draft = await s["report_svc"].draft_head(_stable_uuid("user-1"), report.id)
+        assert draft.content_json == {"text": "someone else's work"}
 
     async def test_list_includes_owned(self, services):
         s = services

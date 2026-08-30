@@ -267,6 +267,14 @@ async def get_report(
     # and that is what makes a stale overwrite detectable.
     head = await svc.document_head(report_id)
     result["head_revision"] = head.id if head else None
+    # An editor edits their own draft, not the published text. Readers
+    # never see this key, and an editor without a draft yet gets null —
+    # their first save starts one off the published head.
+    if uid:
+        draft = await svc.draft_head(uid, report_id)
+        if draft is not None and draft.id != result["head_revision"]:
+            result["draft_revision"] = draft.id
+            result["draft_doc"] = draft.content_json
     # Include child reports for dossier tree navigation
     children = await svc.list_children(report_id)
     result["children"] = [{"id": c.id, "title": c.title} for c in children]
@@ -485,6 +493,95 @@ async def restore_revision(
     revision = await svc.restore_document_revision(
         user.id, report_id, revision_id)
     return {"ok": True, "revision": revision.id}
+
+
+# ── Merge requests ───────────────────────────────────────────
+#
+# Editors only, by design: an unreviewed proposal is not yet a claim the
+# platform is making, so readers see the published text and nothing else.
+
+
+class OpenMergeRequest(BaseModel):
+    """Propose the caller's draft as the article's published text."""
+    title: str = Field(default="", max_length=200)
+    body: str = Field(default="", max_length=4000)
+
+
+@router.post("/{report_id}/merge-requests", status_code=201)
+@inject
+async def open_merge_request(
+    report_id: UuidPath,
+    body: OpenMergeRequest,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    mr = await svc.open_merge_request(user.id, report_id, body.title, body.body)
+    return await svc.get_merge_request(user.id, report_id, mr.id)
+
+
+@router.get("/{report_id}/merge-requests")
+@inject
+async def list_merge_requests(
+    report_id: UuidPath,
+    *,
+    state: Annotated[str | None, Query()] = "open",
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    return await svc.list_merge_requests(user.id, report_id, state)
+
+
+@router.get(
+    "/{report_id}/merge-requests/{mr_id}",
+    responses={404: {"description": "No such merge request."}},
+)
+@inject
+async def get_merge_request(
+    report_id: UuidPath,
+    mr_id: UuidPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """The proposal and the changes it would make to the article."""
+    return await svc.get_merge_request(user.id, report_id, mr_id)
+
+
+@router.post(
+    "/{report_id}/merge-requests/{mr_id}/merge",
+    responses={
+        404: {"description": "No such merge request."},
+        409: {"description": "The published text moved on since this "
+                             "was proposed."},
+    },
+)
+@inject
+async def merge_merge_request(
+    report_id: UuidPath,
+    mr_id: UuidPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Publish the proposal. Fast-forward only."""
+    return await svc.merge_merge_request(user.id, report_id, mr_id)
+
+
+@router.post(
+    "/{report_id}/merge-requests/{mr_id}/close",
+    responses={404: {"description": "No such merge request."}},
+)
+@inject
+async def close_merge_request(
+    report_id: UuidPath,
+    mr_id: UuidPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Withdraw it. The draft and its revisions stay exactly where they are."""
+    return await svc.close_merge_request(user.id, report_id, mr_id)
 
 
 # ── Image Upload ─────────────────────────────────────────────
