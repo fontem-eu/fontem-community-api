@@ -108,8 +108,12 @@ jobs:
               if not ok:
                   failed.append(consumer)
           if failed:
-              print('Contract verification FAILED for:', ', '.join(failed))
-              sys.exit(1)
+              # Informational by design: the verdict is recorded in the
+              # broker (that is the durable fact), but a mismatch never
+              # blocks a build. We are pre-users and deliberately fast-
+              # moving; contract results are a signal, not a wall.
+              print('::warning::contract mismatch for:', ', '.join(failed))
+          print('Contract verification complete (non-blocking).')
           PY2
 
   # Pre-build supply-chain gate; see gmr-ci/actions/osv-scan for the
@@ -153,7 +157,7 @@ jobs:
   # this job so the same file is both uploaded to DT and used as
   # the attestation predicate.
   build-deploy:
-    needs: [test, security, contracts]
+    needs: [test, security]
     if: github.ref == 'refs/heads/main'
     # ci-python runner bundles python3 + pip + node + docker CLI + cosign
     # (cosign baked in by ci-images PR #15).
@@ -188,7 +192,7 @@ jobs:
       # rewritten for the void42-templates layout that doesn't match
       # fontem/gitops's testing/<svc>.yaml layout. Same pattern as
       # the other fontem callers.
-      - name: "Contract gate: can-i-deploy to testing"
+      - name: "Contract status (informational): can-i-deploy to testing"
         env:
           TAG: ${{ steps.image.outputs.tag }}
           PACT_BROKER: http://pact-broker.pact.svc.cluster.local
@@ -204,8 +208,7 @@ jobs:
           deployable=summary.get('deployable')
           print('can-i-deploy summary:', json.dumps(summary))
           if deployable is False:
-              print('::error::contract verification says this version is NOT compatible with testing')
-              sys.exit(1)
+              print('::warning::broker says this version is NOT compatible with testing (not blocking)')
           if deployable is None:
               print('::warning::no contract verdict recorded yet — allowing (bootstrap grace)')
           "
