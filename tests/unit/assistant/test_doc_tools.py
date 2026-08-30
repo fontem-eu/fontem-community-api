@@ -115,15 +115,27 @@ def test_an_empty_required_field_is_refused():
 
 # ── insert_widget validation ──────────────────────────────────
 
-def _client_resolving(name_or_none):
-    """A fake httpx client whose profile endpoints answer with `name`."""
+def _client_resolving(name_or_none, *, label="Company"):
+    """A fake httpx client answering the way fontem-api really does.
+
+    The field is `company_name` / `authority_name` — never a bare `name`.
+    The old fake said `name`, so a validator reading `profile["name"]`
+    passed here and returned null in production for every widget the
+    model proposed. A fake that answers in a shape the server never sends
+    is a test that cannot fail on the bug it is there to catch.
+    """
+    field = "company_name" if label == "Company" else "authority_name"
     client = MagicMock()
 
-    async def get(_url, **_):
+    async def get(url, **_):
+        wanted = "companies" if label == "Company" else "authorities"
         resp = MagicMock()
         resp.status_code = 200
-        resp.json = MagicMock(return_value={"name": name_or_none,
-                                            "gmr_id": "e-1"})
+        body = {"gmr_id": "e-1"}
+        # Both endpoints answer 200 with a skeleton; only the right one
+        # carries a name. That IS the skeleton-200 trap, reproduced.
+        body[field] = name_or_none if wanted in str(url) else None
+        resp.json = MagicMock(return_value=body)
         return resp
 
     client.get = get
@@ -138,6 +150,16 @@ def test_a_widget_for_a_real_entity_is_proposed_with_its_name():
     body = json.loads(out)
     assert body["proposed"] is True
     assert body["entity_name"] == "Siemens AG"
+
+
+def test_an_authority_widget_is_proposed_with_its_name():
+    out, _ = _dispatch(
+        _runtime(), "mcp__gmr__insert_widget",
+        {"widget_type": "entity_profile", "entityId": "e-1"},
+        client=_client_resolving("Metro Mondego", label="Authority"))
+    body = json.loads(out)
+    assert body["proposed"] is True
+    assert body["entity_name"] == "Metro Mondego"
 
 
 def test_an_unknown_widget_type_is_refused_with_the_menu():
