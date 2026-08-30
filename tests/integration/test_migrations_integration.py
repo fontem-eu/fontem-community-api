@@ -187,3 +187,97 @@ def test_019_is_idempotent_when_the_columns_are_already_there():
         engine.dispose()
         # Must not raise: _alembic asserts a zero exit code.
         _alembic(url, "upgrade", "head")
+
+
+def _db_at_019_with_an_edited_article(pg):
+    """A database as production had it: one article, one section, and the
+    save history that section accumulated."""
+    url = pg.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
+    engine = sa.create_engine(url)
+    _alembic(url, "upgrade", "019")
+    with engine.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO users (id, email, name, failed_login_attempts) "
+            "VALUES ('11111111-1111-1111-1111-111111111111', "
+            "        'a@example.com', 'A', 0)"
+        ))
+        conn.execute(sa.text(
+            "INSERT INTO reports "
+            "  (id, title, created_by, visibility, language, nuts_region, "
+            "   content_version) "
+            "VALUES ('22222222-2222-2222-2222-222222222222', 'Story', "
+            "        '11111111-1111-1111-1111-111111111111', 'private', "
+            "        'en', '', 1)"
+        ))
+        conn.execute(sa.text(
+            "INSERT INTO sections (id, report_id, sort_order, content_json) "
+            "VALUES ('33333333-3333-3333-3333-333333333333', "
+            "        '22222222-2222-2222-2222-222222222222', 0, "
+            "        '{\"tiptap\": {\"t\": \"current\"}, \"version\": 2}')"
+        ))
+        for n, when in ((1, "2026-08-01"), (2, "2026-08-02")):
+            conn.execute(sa.text(
+                "INSERT INTO section_versions "
+                "  (section_id, content_json, saved_by, saved_at) "
+                "VALUES ('33333333-3333-3333-3333-333333333333', "
+                f"       '{{\"tiptap\": {{\"t\": \"v{n}\"}}, \"version\": 2}}', "
+                "        '11111111-1111-1111-1111-111111111111', "
+                f"       '{when}')"
+            ))
+    return url, engine
+
+
+def test_020_carries_the_existing_history_into_the_revision_chain():
+    """The article's past is data, not scaffolding.
+
+    Every section_versions row becomes a revision, oldest first and
+    parent-linked, with the section's current content as the newest and
+    main pointing at it. Dropping that history while building a feature
+    whose point is keeping history would be perverse — and it is the
+    history that made the lost-widgets incident reconstructable at all.
+    """
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url, engine = _db_at_019_with_an_edited_article(pg)
+        _alembic(url, "upgrade", "head")
+        with engine.begin() as conn:
+            revisions = conn.execute(sa.text(
+                "SELECT id, parent_id, content_json->'tiptap'->>'t' "
+                "FROM doc_revisions ORDER BY created_at"
+            )).fetchall()
+            branch = conn.execute(sa.text(
+                "SELECT owner_id, head_revision_id FROM doc_branches"
+            )).fetchall()
+        engine.dispose()
+
+    ids = [r[0] for r in revisions]
+    parents = [r[1] for r in revisions]
+    texts = [r[2] for r in revisions]
+
+    assert texts == ["v1", "v2", "current"]
+    # Parent-linked in save order: the chain, not a pile.
+    assert parents[0] is None
+    assert parents[1] == ids[0]
+    assert parents[2] == ids[1]
+    # Exactly one branch, it is main, and it points at the newest revision.
+    assert len(branch) == 1
+    assert branch[0][0] is None
+    assert branch[0][1] == ids[2]
+
+
+def test_020_is_idempotent_when_the_chain_is_already_built():
+    """Same reason as 019: the hook runs before every rollout, and a
+    second run must not duplicate an article's entire history."""
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url, engine = _db_at_019_with_an_edited_article(pg)
+        _alembic(url, "upgrade", "head")
+        _alembic(url, "stamp", "019")
+        _alembic(url, "upgrade", "head")
+        with engine.begin() as conn:
+            count = conn.execute(sa.text(
+                "SELECT count(*) FROM doc_revisions")).scalar()
+            branches = conn.execute(sa.text(
+                "SELECT count(*) FROM doc_branches")).scalar()
+        engine.dispose()
+
+    assert count == 3
+    assert branches == 1

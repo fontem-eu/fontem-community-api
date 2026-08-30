@@ -14,8 +14,17 @@ class NotFound(Exception):
 
 
 class Conflict(Exception):
-    def __init__(self, message: str = "Conflict") -> None:
+    """A write that cannot be applied to the current state.
+
+    ``payload`` rides along to the 409 body. A conflict the caller can
+    only be told about is a dead end; one that arrives with the current
+    state attached can be shown as a difference and resolved in place.
+    """
+
+    def __init__(self, message: str = "Conflict",
+                 payload: dict | None = None) -> None:
         self.message = message
+        self.payload = payload or {}
         super().__init__(message)
 
 

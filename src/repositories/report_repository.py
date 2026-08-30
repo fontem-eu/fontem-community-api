@@ -4,7 +4,14 @@ from datetime import datetime
 
 from abc import ABC, abstractmethod
 
-from src.domain.report import Report, ReportTranslation, Section, SectionVersion
+from src.domain.report import (
+    DocBranch,
+    DocRevision,
+    Report,
+    ReportTranslation,
+    Section,
+    SectionVersion,
+)
 
 
 class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
@@ -76,9 +83,32 @@ class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
     @abstractmethod
     async def get_sections(self, report_id: str) -> list[Section]: ...
 
-    @abstractmethod
+    # ── document revisions ─────────────────────────────────────
+    #
+    # The revision chain and the branch pointers into it. A branch with
+    # ``owner_id`` None is main — the published text.
 
     @abstractmethod
+    async def add_revision(self, revision: DocRevision) -> DocRevision: ...
+
+    @abstractmethod
+    async def get_revision(self, revision_id: str) -> DocRevision | None: ...
+
+    @abstractmethod
+    async def list_revisions(
+        self, report_id: str, limit: int,
+    ) -> list[DocRevision]: ...
+
+    @abstractmethod
+    async def get_branch(
+        self, report_id: str, owner_id: str | None,
+    ) -> DocBranch | None: ...
+
+    @abstractmethod
+    async def set_branch_head(
+        self, report_id: str, owner_id: str | None,
+        head_revision_id: str, base_revision_id: str | None = None,
+    ) -> DocBranch: ...
 
     @abstractmethod
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None: ...

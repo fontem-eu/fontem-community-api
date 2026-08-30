@@ -151,6 +151,86 @@ class TestReportAPI:
 
 
 @pytest.mark.asyncio
+class TestDocumentConcurrency:
+    """The save carries the revision it was written against.
+
+    Without that, the server cannot tell a fresh save from one built on
+    an hour-old buffer — which is exactly how a published story lost the
+    widgets an assistant had put in it (2026-08-30).
+    """
+
+    async def _seed(self, services):
+        await seed_user(services["user_repo"], "user-1")
+
+    def _story(self, client, h):
+        return client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+
+    def test_the_read_names_the_revision_it_returned(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = self._story(client, h)
+        client.put(f"/reports/{rid}/content",
+                   json={"tiptap": _doc("one")}, headers=h)
+
+        body = client.get(f"/reports/{rid}", headers=h).json()
+        assert body["head_revision"]
+
+    def test_a_save_on_the_current_head_succeeds(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = self._story(client, h)
+        first = client.put(f"/reports/{rid}/content",
+                           json={"tiptap": _doc("one")}, headers=h).json()
+        resp = client.put(
+            f"/reports/{rid}/content",
+            json={"tiptap": _doc("two"), "base_revision": first["revision"]},
+            headers=h,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["revision"] != first["revision"]
+
+    def test_a_save_on_a_stale_baseline_is_refused(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = self._story(client, h)
+        base = client.put(f"/reports/{rid}/content",
+                          json={"tiptap": _doc("base")}, headers=h).json()
+        # Somebody else's save lands first.
+        client.put(f"/reports/{rid}/content",
+                   json={"tiptap": _doc("theirs"),
+                         "base_revision": base["revision"]}, headers=h)
+
+        stale = client.put(
+            f"/reports/{rid}/content",
+            json={"tiptap": _doc("mine, written on the old text"),
+                  "base_revision": base["revision"]},
+            headers=h,
+        )
+        assert stale.status_code == 409
+        body = stale.json()
+        # The refusal hands back what it protected, so the editor can show
+        # the difference instead of just saying no.
+        assert "theirs" in str(body["current_doc"])
+        assert body["current_revision"]
+
+        # And the stored document is still theirs, not the stale one.
+        after = client.get(f"/reports/{rid}", headers=h).json()
+        assert "theirs" in str(after["content_doc"])
+
+    def test_a_save_with_no_baseline_cannot_overwrite(self, client, services):
+        """A client that names no baseline is a client that has not read
+        the document — it may create the first revision and nothing else."""
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = self._story(client, h)
+        client.put(f"/reports/{rid}/content",
+                   json={"tiptap": _doc("existing")}, headers=h)
+
+        resp = client.put(f"/reports/{rid}/content",
+                          json={"tiptap": _doc("blind")}, headers=h)
+        assert resp.status_code == 409
+
+
 class TestReportPresignedUrls:
     """SEC-2026-06-11 #4 — bucket is private; reads come through
     presigned URLs minted by the router on every response.

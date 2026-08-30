@@ -13,10 +13,13 @@ that the policy can decide on without touching the database.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+
 import re
 from datetime import datetime, time, timezone
 
-from src.domain.report import Report, ReportTranslation, Section
+from src.domain.report import DocRevision, Report, ReportTranslation, Section
 from src.repositories.report_repository import ReportRepository
 from src.services.activity_service import ActivityService
 from src.services.authz import (
@@ -26,7 +29,7 @@ from src.services.authz import (
 )
 from src.services.authz.policy import Principal
 from src.services.nuts import normalize_nuts
-from src.services.exceptions import InvalidInput, NotFound
+from src.services.exceptions import Conflict, InvalidInput, NotFound
 from src.services.access_inheritance import AccessInheritance, max_level
 from src.repositories.group_repository import GroupRepository
 from src.repositories.user_repository import UserRepository
@@ -263,30 +266,81 @@ class ReportService:  # pylint: disable=too-many-public-methods
         """List child reports (dossier sub-pages)."""
         return await self._reports.list_children(parent_id)
 
-    async def save_document(self, user_id: str, report_id: str, content: dict) -> None:
-        """Save the entire report as a single v2 TipTap JSON document.
+    @staticmethod
+    def _hash(content: dict) -> str:
+        """Content address for a document.
 
-        Replaces all existing sections with one section containing the
-        full document. Previous content is saved as a version snapshot.
+        Canonical JSON — sorted keys, no incidental whitespace — so that
+        two saves of the same document hash the same however the client
+        happened to serialise it.
+        """
+        canonical = json.dumps(content, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    async def document_head(self, report_id: str) -> DocRevision | None:
+        """The revision a reader of this article is looking at."""
+        branch = await self._reports.get_branch(report_id, None)
+        if branch is None:
+            return None
+        return await self._reports.get_revision(branch.head_revision_id)
+
+    async def save_document(
+        self, user_id: str, report_id: str, content: dict,
+        base_revision: str | None = None, *, author_kind: str = "human",
+    ) -> DocRevision:
+        """Commit a new document revision and move main to it.
+
+        ``base_revision`` is the revision the caller edited. If main has
+        moved on since — another tab, another editor, an assistant edit
+        applied elsewhere — this raises Conflict rather than overwriting,
+        and hands back the current head so the caller can show the
+        difference instead of silently discarding an hour of someone's
+        work. That is the whole point: a save without a baseline cannot
+        be told apart from a save built on a stale one.
         """
         report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        head = await self.document_head(report_id)
+        head_id = head.id if head else None
+
+        if base_revision != head_id:
+            raise Conflict(
+                "the document changed since you loaded it",
+                payload={
+                    "current_revision": head_id,
+                    "current_doc": head.content_json if head else None,
+                },
+            )
+
+        content_hash = self._hash(content)
+        if head is not None and head.content_hash == content_hash:
+            # Nothing changed. An autosave that re-sends the same document
+            # should not manufacture a revision for the history to carry.
+            return head
+
+        revision = await self._reports.add_revision(DocRevision(
+            report_id=report_id, parent_id=head_id, content_json=content,
+            content_hash=content_hash, author_id=user_id,
+            author_kind=author_kind,
+        ))
+        await self._reports.set_branch_head(report_id, None, revision.id)
+
+        # The section row stays the read path for now; phase 3 moves
+        # readers onto the revision directly.
         sections = await self._reports.get_sections(report_id)
         if sections:
-            # Save a version of the first section before overwriting
-            await self._reports.save_version(sections[0].id, sections[0].content_json, user_id)
-            # Update first section, delete the rest
             sections[0].content_json = content
             await self._reports.update_section(sections[0])
             for s in sections[1:]:
                 await self._reports.delete_section(s.id)
         else:
-            # No sections yet — create one
-            section = Section(content_json=content)
-            await self._reports.add_section(report_id, section)
+            await self._reports.add_section(
+                report_id, Section(content_json=content))
+
         # Every document save is a content change from a translator's
         # point of view — existing translations become maybe-outdated.
         report.content_version += 1
         await self._reports.update(report)
+        return revision
 
     # ── translations ───────────────────────────────────────────
     # An article has one original text (report.title/abstract/document,

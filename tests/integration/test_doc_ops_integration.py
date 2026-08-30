@@ -100,12 +100,14 @@ def test_the_agent_reads_the_latest_saved_document(client, user_id):
     h = make_headers(user_id)
     report = client.post("/reports", json={"title": "Ordered"},
                          headers=h).json()
+    head = None
     for word in ("first", "second", "third"):
-        client.put(f"/reports/{report['id']}/content", json={
+        head = client.put(f"/reports/{report['id']}/content", json={
             "tiptap": {"type": "doc", "content": [
                 {"type": "paragraph", "content": [
                     {"type": "text", "text": word}]}]},
-        }, headers=h)
+            "base_revision": head,
+        }, headers=h).json()["revision"]
 
     body = _read(client, user_id, report["id"])["sections"]
     assert "third" in body

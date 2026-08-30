@@ -41,6 +41,44 @@ class ReportTranslation:
 
 
 @dataclass
+class DocRevision:
+    """One immutable state of an article's document.
+
+    Content-addressed: two saves that produce the same document produce
+    the same hash, so an autosave that changed nothing costs no revision.
+    ``parent_id`` is the revision this one was written on top of, which
+    is what makes the history a chain rather than a pile.
+    """
+
+    id: str | None = None
+    report_id: str = ""
+    parent_id: str | None = None
+    content_json: dict = field(default_factory=dict)
+    content_hash: str = ""
+    author_id: str | None = None
+    #: "human" or "assistant" — an assistant edit is a commit you can see
+    #: and drop, not an invisible mutation of your document.
+    author_kind: str = "human"
+    created_at: datetime | None = None
+
+
+@dataclass
+class DocBranch:
+    """A moving pointer into an article's revisions.
+
+    ``owner_id`` NULL is main — the published text. Any other owner is
+    that editor's draft, and there is at most one per editor per article.
+    """
+
+    id: str | None = None
+    report_id: str = ""
+    owner_id: str | None = None
+    head_revision_id: str = ""
+    base_revision_id: str | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass
 class Section:
     id: str | None = None
     report_id: str = ""

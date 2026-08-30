@@ -189,6 +189,77 @@ class ReportTranslationModel(Base):
     )
 
 
+class DocRevisionModel(Base):
+    """An immutable snapshot of an article's document.
+
+    Snapshots rather than stored deltas, deliberately: reading the current
+    text is then one row instead of a fold over history, and a single bad
+    delta cannot poison everything after it. Git works the same way — its
+    object store holds whole snapshots and computes diffs on demand; delta
+    compression only appears later, inside packfiles. At ~4 kB a revision,
+    the space this trades away is a rounding error.
+    """
+
+    __tablename__ = "doc_revisions"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    report_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+    parent_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("doc_revisions.id", ondelete="SET NULL"), nullable=True
+    )
+    content_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    # Nullable because backfilled history predates knowing who wrote it.
+    author_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), nullable=True
+    )
+    author_kind: Mapped[str] = mapped_column(Text, nullable=False, default="human")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_doc_revisions_report_created", "report_id", "created_at"),
+    )
+
+
+class DocBranchModel(Base):
+    """Where a branch currently points.
+
+    ``owner_id`` NULL is main. Postgres will not put a NULL in a primary
+    key, so the one-main-per-article and one-draft-per-editor rules are
+    enforced by two partial unique indexes instead of a composite key.
+    """
+
+    __tablename__ = "doc_branches"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    report_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
+    )
+    owner_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    head_revision_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=False
+    )
+    base_revision_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        Index("uq_doc_branches_main", "report_id",
+              unique=True, postgresql_where=text("owner_id IS NULL")),
+        Index("uq_doc_branches_draft", "report_id", "owner_id",
+              unique=True, postgresql_where=text("owner_id IS NOT NULL")),
+    )
+
+
 class SectionModel(Base):
     __tablename__ = "sections"
 
