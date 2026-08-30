@@ -60,6 +60,13 @@ def _day_end(iso: str | None) -> datetime | None:
     return datetime.combine(d, time.max, tzinfo=timezone.utc)
 
 
+#: One wording for "that revision is not part of this article", whether
+#: the id is unknown or belongs to somebody else's story. The distinction
+#: is deliberately invisible: saying "exists, but not here" is what an
+#: enumeration attack needs.
+_NO_SUCH_REVISION = "No such revision."
+
+
 class ReportService:  # pylint: disable=too-many-public-methods
     # One service per aggregate: report + sections + versions + locks +
     # tags + translations share authz + activity plumbing here.
@@ -394,12 +401,12 @@ class ReportService:  # pylint: disable=too-many-public-methods
         target = (await self._reports.get_revision(to_revision)
                   if to_revision else await self.document_head(report_id))
         if target is None or target.report_id != report_id:
-            raise NotFound("No such revision.")
+            raise NotFound(_NO_SUCH_REVISION)
 
         if from_revision:
             base = await self._reports.get_revision(from_revision)
             if base is None or base.report_id != report_id:
-                raise NotFound("No such revision.")
+                raise NotFound(_NO_SUCH_REVISION)
         else:
             base = (await self._reports.get_revision(target.parent_id)
                     if target.parent_id else None)
@@ -425,7 +432,7 @@ class ReportService:  # pylint: disable=too-many-public-methods
         await self._load_for(user_id, report_id, Action.STORIES_EDIT)
         wanted = await self._reports.get_revision(revision_id)
         if wanted is None or wanted.report_id != report_id:
-            raise NotFound("No such revision.")
+            raise NotFound(_NO_SUCH_REVISION)
         head = await self.document_head(report_id)
         return await self.save_document(
             user_id, report_id, wanted.content_json,
