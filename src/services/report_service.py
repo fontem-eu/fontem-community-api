@@ -311,32 +311,21 @@ class ReportService:  # pylint: disable=too-many-public-methods
     # Six, and each one is load-bearing: who is writing, which article,
     # what, on top of what, and whether a human or the assistant wrote it.
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
-    async def save_document(
-        self, user_id: str, report_id: str, content: dict,
-        base_revision: str | None = None, *, author_kind: str = "human",
-    ) -> DocRevision:
-        """Commit a new revision on this editor's draft branch.
+    async def _require_baseline(
+        self, report_id: str, user_id: str, base_revision: str | None,
+    ) -> tuple[str | None, DocRevision | None]:
+        """The revision this editor is writing on top of.
 
-        Writing goes to the draft, never straight to main: the published
-        text changes when a merge request merges, not when somebody's
-        autosave timer fires. The draft is created off main's head the
-        first time an editor saves.
-
-        ``base_revision`` is the revision the caller edited. If the branch
-        has moved on since — another tab, an assistant edit applied
-        elsewhere — this raises Conflict and hands back the current head,
-        so the caller can show the difference instead of silently
-        discarding an hour of someone's work.
+        Refuses a save that names a different one: that save was written
+        against text which is no longer there, and applying it would
+        discard whatever replaced it — the silent overwrite this whole
+        mechanism exists to prevent.
         """
-        report, _ = await self._load_for(user_id, report_id, Action.STORIES_EDIT)
-
         draft = await self._reports.get_branch(report_id, user_id)
         main_head = await self.document_head(report_id)
-        if draft is None:
-            # A new draft starts where the published text is.
-            head_id = main_head.id if main_head else None
-        else:
-            head_id = draft.head_revision_id
+        # A new draft starts where the published text is.
+        head_id = (draft.head_revision_id if draft
+                   else (main_head.id if main_head else None))
 
         if base_revision != head_id:
             current = (await self._reports.get_revision(head_id)
@@ -348,6 +337,41 @@ class ReportService:  # pylint: disable=too-many-public-methods
                     "current_doc": current.content_json if current else None,
                 },
             )
+        return head_id, main_head
+
+    async def _publish_first_save(
+        self, report_id: str, revision: DocRevision,
+    ) -> None:
+        """An article's first save is also its first published version.
+
+        There is nothing to review it against, and a story nobody can
+        read until it merges is a worse default than one whose first
+        draft is its first version.
+        """
+        await self._reports.set_branch_head(report_id, None, revision.id)
+        await self._write_read_model(report_id, revision.content_json)
+        report = await self._reports.get_by_id(report_id)
+        if report is not None:
+            report.content_version += 1
+            await self._reports.update(report)
+
+    # Six, and each one is load-bearing: who is writing, which article,
+    # what, on top of what, and whether a human or the assistant wrote it.
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    async def save_document(
+        self, user_id: str, report_id: str, content: dict,
+        base_revision: str | None = None, *, author_kind: str = "human",
+    ) -> DocRevision:
+        """Commit a new revision on this editor's draft branch.
+
+        Writing goes to the draft, never straight to main: the published
+        text changes when a merge request merges, not when somebody's
+        autosave timer fires. The draft is created off main's head the
+        first time an editor saves.
+        """
+        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
+        head_id, main_head = await self._require_baseline(
+            report_id, user_id, base_revision)
 
         content_hash = self._hash(content)
         head = (await self._reports.get_revision(head_id)) if head_id else None
@@ -361,22 +385,15 @@ class ReportService:  # pylint: disable=too-many-public-methods
             content_hash=content_hash, author_id=user_id,
             author_kind=author_kind,
         ))
+        draft = await self._reports.get_branch(report_id, user_id)
+        base_id = draft.base_revision_id if draft else None
+        if base_id is None:
+            base_id = main_head.id if main_head else revision.id
         await self._reports.set_branch_head(
-            report_id, user_id, revision.id,
-            base_revision_id=(draft.base_revision_id if draft
-                              else (main_head.id if main_head else revision.id)),
-        )
+            report_id, user_id, revision.id, base_revision_id=base_id)
 
-        # An article with no published text yet publishes its first save
-        # directly: there is nothing to review it against, and an article
-        # that cannot be read until it is merged is a worse default than
-        # one whose first draft is its first version.
         if main_head is None:
-            await self._reports.set_branch_head(report_id, None, revision.id)
-            await self._write_read_model(report_id, content)
-            report.content_version += 1
-            await self._reports.update(report)
-
+            await self._publish_first_save(report_id, revision)
         return revision
 
     async def _write_read_model(self, report_id: str, content: dict) -> None:
@@ -454,9 +471,11 @@ class ReportService:  # pylint: disable=too-many-public-methods
             base = await self._reports.get_revision(from_revision)
             if base is None or base.report_id != report_id:
                 raise NotFound(_NO_SUCH_REVISION)
+        elif target.parent_id:
+            base = await self._reports.get_revision(target.parent_id)
         else:
-            base = (await self._reports.get_revision(target.parent_id)
-                    if target.parent_id else None)
+            # The first revision: everything in it is an addition.
+            base = None
 
         operations = doc_diff.diff(
             base.content_json if base else None, target.content_json)
@@ -569,8 +588,9 @@ class ReportService:  # pylint: disable=too-many-public-methods
         changes = doc_diff.summary(doc_diff.diff(
             base.content_json if base else None,
             source.content_json if source else None))
-        behind = (await self._behind_by(mr.report_id, mr.target_base)
-                  if mr.state == "open" else 0)
+        behind = 0
+        if mr.state == "open":
+            behind = await self._behind_by(mr.report_id, mr.target_base)
         return {
             "id": mr.id,
             "report_id": mr.report_id,
