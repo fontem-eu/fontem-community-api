@@ -679,6 +679,33 @@ class ToolRuntime:
             })
             _record_call(traced, call_id, name, args, out, started, 0)
             return out, 0
+        # Degenerate-loop guard. A byte-identical call learns nothing new —
+        # these tools are deterministic within a turn — yet a small model
+        # that gets an error back retries the same call verbatim: a 1.7B
+        # looped calculate(len('…')) twelve times at ~15s of inference each
+        # and timed out the staging gate (attest 28604). Two identical
+        # calls pass (one honest retry); the third answers from here with a
+        # redirect instead of dispatching. This caps nothing else — new
+        # arguments always run, however many of them an investigation takes.
+        if traced is not None:
+            sig = json.dumps(args, sort_keys=True, default=str)
+            repeats = sum(
+                1 for t in traced
+                if t.get("tool") == name
+                and json.dumps(t.get("args"), sort_keys=True,
+                               default=str) == sig
+            )
+            if repeats >= 2:
+                out = json.dumps({
+                    "error": f"{name} was already called with exactly these "
+                             f"arguments {repeats} times this turn, with "
+                             "the same outcome each time",
+                    "hint": "the result will not change — use what you "
+                            "already have, change the arguments, or answer "
+                            "now",
+                })
+                _record_call(traced, call_id, name, args, out, started, 0)
+                return out, 0
         # Anything the tool writes from here is attributable to this call,
         # not merely to the turn. Scoped, so the id comes off again when the
         # call ends — a later write belongs to the turn, not to whichever

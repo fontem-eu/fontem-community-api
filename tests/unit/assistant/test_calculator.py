@@ -192,3 +192,59 @@ def test_memory_bombs_are_refused():
 def test_range_is_bounded():
     assert _calc("sum(range(1, 5))")["result"] == 10
     assert "bounded" in _calc("len(range(100000))")["error"]
+
+
+# ── the degenerate-loop guard ─────────────────────────────────
+
+def _dispatch_n(rt, loop, traced, expression, times):
+    outs = []
+    for _ in range(times):
+        out, _len = loop.run_until_complete(rt.dispatch(
+            MagicMock(), calc_tools.CALC_TOOL_NAME,
+            {"expression": expression},
+            studio=None, nav_routes=[], pending_nav=[],
+            budget=[14_000], name_cache={}, traced=traced,
+        ))
+        outs.append(json.loads(out))
+    return outs
+
+
+def test_the_third_identical_call_is_refused_with_a_redirect():
+    # A 1.7B looped calculate(len('…')) twelve times at ~15s of inference
+    # each and timed out the staging gate (attest 28604). Identical
+    # arguments cannot learn anything new; the third call answers from the
+    # runtime with instructions instead of burning another round.
+    rt = ToolRuntime(gmr_api_url="http://fontem-api")
+    loop = asyncio.new_event_loop()
+    traced = []
+    try:
+        outs = _dispatch_n(rt, loop, traced, "1 + 1", 4)
+    finally:
+        loop.close()
+    assert outs[0]["result"] == 2
+    assert outs[1]["result"] == 2
+    assert "already called" in outs[2]["error"]
+    assert "answer" in outs[2]["hint"]
+    assert "already called" in outs[3]["error"]
+
+
+def test_new_arguments_always_run_however_many_there_are():
+    # The guard is cycle detection, not an investigation cap.
+    rt = ToolRuntime(gmr_api_url="http://fontem-api")
+    loop = asyncio.new_event_loop()
+    traced = []
+    try:
+        outs = [
+            _dispatch_n(rt, loop, traced, f"{i} + 1", 1)[0]
+            for i in range(12)
+        ]
+    finally:
+        loop.close()
+    assert [o["result"] for o in outs] == [i + 1 for i in range(12)]
+
+
+def test_the_string_rejection_says_what_to_do_instead():
+    # "only numbers are allowed" alone is what the 1.7B retried against.
+    out = _calc("len('Apple Inc. (AAPL)') * 100")
+    assert "only numbers are allowed" in out["error"]
+    assert "do not retry" in out["error"]
