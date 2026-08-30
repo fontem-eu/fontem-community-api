@@ -60,12 +60,12 @@ async def test_article_content_edit_needs_contributor(services):
     art = await rsvc.create(o, "A")
     await isvc.add_story(o, inv.id, art.id)
     # contributor edits content via inheritance (editor level)
-    await rsvc.save_document(c, art.id, {"version": 2, "tiptap": {}})
+    await rsvc.save_document(c, art.id, {"version": 2, "tiptap": {}}, None)
     # viewer cannot edit content
     with pytest.raises(PermissionDenied):
-        await rsvc.save_document(v, art.id, {"version": 2, "tiptap": {}})
+        await rsvc.save_document(v, art.id, {"version": 2, "tiptap": {}}, None)
     with pytest.raises(PermissionDenied):
-        await rsvc.save_document(x, art.id, {"version": 2, "tiptap": {}})
+        await rsvc.save_document(x, art.id, {"version": 2, "tiptap": {}}, None)
 
 
 @pytest.mark.asyncio
@@ -107,7 +107,7 @@ async def test_direct_grant_composes_without_membership(services):
     await isvc.add_story(o, inv.id, art.id)
     # X is NOT a member — but a direct editor grant lets X edit (override composes)
     await perms.grant_access(art.id, x, "editor")
-    await rsvc.save_document(x, art.id, {"version": 2, "tiptap": {}})
+    await rsvc.save_document(x, art.id, {"version": 2, "tiptap": {}}, None)
 
 
 # ── DOSSIER inheritance ──

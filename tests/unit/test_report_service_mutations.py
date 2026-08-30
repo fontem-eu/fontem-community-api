@@ -48,7 +48,7 @@ class TestReportPermissions:
         editor = await seed_user(s["user_repo"], "editor")
         r = await s["report_svc"].create(owner.id, "Report")
         await s["perm_svc"].grant_access(r.id, editor.id, "editor")
-        await s["report_svc"].save_document(editor.id, r.id, {"text": "hi"})
+        await s["report_svc"].save_document(editor.id, r.id, {"text": "hi"}, None)
         sections = await s["report_svc"].get_sections(r.id)
         assert sections[0].content_json == {"text": "hi"}
 
@@ -59,7 +59,7 @@ class TestReportPermissions:
         r = await s["report_svc"].create(owner.id, "Report")
         await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
         with pytest.raises(PermissionDenied):
-            await s["report_svc"].save_document(viewer.id, r.id, {"text": "hi"})
+            await s["report_svc"].save_document(viewer.id, r.id, {"text": "hi"}, None)
 
     async def test_owner_can_update_report(self, services):
         s = services

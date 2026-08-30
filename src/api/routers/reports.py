@@ -78,9 +78,17 @@ class UpdateReportRequest(BaseModel):
 
 
 class SaveDocumentRequest(BaseModel):
-    """Save the full TipTap JSON document (v2 format)."""
+    """Save the full TipTap JSON document (v2 format).
+
+    ``base_revision`` is the revision the editor loaded. It is what lets
+    the server tell a fresh save from one built on a stale buffer; a save
+    that does not name its baseline is refused rather than guessed at.
+    ``version`` is the document FORMAT, which is a different thing
+    entirely and has been mistaken for a concurrency token before.
+    """
     tiptap: dict
     version: int = 2
+    base_revision: str | None = None
 
 
 class SaveTranslationRequest(BaseModel):
@@ -255,6 +263,10 @@ async def get_report(
             {**asdict(s), "content": s.content_json.get("html", "")}
             for s in sections
         ]
+    # The revision this payload is: the editor sends it back on save,
+    # and that is what makes a stale overwrite detectable.
+    head = await svc.document_head(report_id)
+    result["head_revision"] = head.id if head else None
     # Include child reports for dossier tree navigation
     children = await svc.list_children(report_id)
     result["children"] = [{"id": c.id, "title": c.title} for c in children]
@@ -406,12 +418,18 @@ async def save_document(
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    """Save the full report document as TipTap JSON (v2 format)."""
-    await svc.save_document(user.id, report_id, {
-        "tiptap": body.tiptap,
-        "version": body.version,
-    })
-    return {"ok": True}
+    """Save the full report document as TipTap JSON (v2 format).
+
+    409 when ``base_revision`` is not the current head — the body then
+    carries ``current_revision`` and ``current_doc`` so the editor can
+    show what it would have overwritten.
+    """
+    revision = await svc.save_document(
+        user.id, report_id,
+        {"tiptap": body.tiptap, "version": body.version},
+        body.base_revision,
+    )
+    return {"ok": True, "revision": revision.id}
 
 
 # ── Image Upload ─────────────────────────────────────────────

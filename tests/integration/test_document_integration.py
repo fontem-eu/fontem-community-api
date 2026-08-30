@@ -43,10 +43,11 @@ class TestDocument:
     def test_saving_again_replaces_the_body(self, client, user_id):
         """DOC-I02: the document is written whole, not appended to."""
         rid, h = self._create_report(client, user_id)
+        first = client.put(f"/reports/{rid}/content",
+                           json={"tiptap": _doc("first")}, headers=h).json()
         client.put(f"/reports/{rid}/content",
-                   json={"tiptap": _doc("first")}, headers=h)
-        client.put(f"/reports/{rid}/content",
-                   json={"tiptap": _doc("second")}, headers=h)
+                   json={"tiptap": _doc("second"),
+                         "base_revision": first["revision"]}, headers=h)
 
         body = str(client.get(f"/reports/{rid}", headers=h).json()["content_doc"])
         assert "second" in body
@@ -59,10 +60,11 @@ class TestDocument:
         that forgets its predecessor cannot be reviewed or reverted.
         """
         rid, h = self._create_report(client, user_id)
+        first = client.put(f"/reports/{rid}/content",
+                           json={"tiptap": _doc("original")}, headers=h).json()
         client.put(f"/reports/{rid}/content",
-                   json={"tiptap": _doc("original")}, headers=h)
-        client.put(f"/reports/{rid}/content",
-                   json={"tiptap": _doc("revised")}, headers=h)
+                   json={"tiptap": _doc("revised"),
+                         "base_revision": first["revision"]}, headers=h)
 
         report = client.get(f"/reports/{rid}", headers=h).json()
         # content_version counts document saves, so a reader can tell that
@@ -77,3 +79,46 @@ class TestDocument:
                           json={"tiptap": _doc("not mine")},
                           headers=make_headers(user2_id))
         assert resp.status_code in (403, 404)
+
+
+class TestConcurrentSaves:
+    """Two writers, real Postgres. The in-memory repo enforces nothing —
+    a concurrency rule only means something at the database."""
+
+    def test_the_second_writer_is_refused_not_silently_dropped(
+        self, client, user_id,
+    ):
+        h = make_headers(user_id)
+        rid = client.post("/reports", json={"title": "Race"},
+                          headers=h).json()["id"]
+        base = client.put(f"/reports/{rid}/content",
+                          json={"tiptap": _doc("base")}, headers=h).json()
+
+        # Both editors loaded the same revision.
+        a = client.put(f"/reports/{rid}/content",
+                       json={"tiptap": _doc("editor A"),
+                             "base_revision": base["revision"]}, headers=h)
+        b = client.put(f"/reports/{rid}/content",
+                       json={"tiptap": _doc("editor B"),
+                             "base_revision": base["revision"]}, headers=h)
+
+        assert a.status_code == 200
+        assert b.status_code == 409
+        stored = client.get(f"/reports/{rid}", headers=h).json()
+        assert "editor A" in str(stored["content_doc"])
+
+    def test_the_chain_survives_a_round_trip(self, client, user_id):
+        """Parent links, hashes and the branch pointer are what the
+        history and every future diff are read from."""
+        h = make_headers(user_id)
+        rid = client.post("/reports", json={"title": "Chain"},
+                          headers=h).json()["id"]
+        first = client.put(f"/reports/{rid}/content",
+                           json={"tiptap": _doc("one")}, headers=h).json()
+        second = client.put(f"/reports/{rid}/content",
+                            json={"tiptap": _doc("two"),
+                                  "base_revision": first["revision"]},
+                            headers=h).json()
+
+        head = client.get(f"/reports/{rid}", headers=h).json()["head_revision"]
+        assert head == second["revision"] != first["revision"]

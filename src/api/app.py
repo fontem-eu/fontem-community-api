@@ -261,7 +261,14 @@ def build_app(database_url: str | None = None) -> FastAPI:
 
     @application.exception_handler(Conflict)
     async def conflict_handler(request: Request, exc: Conflict) -> JSONResponse:
-        return JSONResponse(status_code=409, content={"detail": exc.message})
+        # The payload carries whatever the caller needs to resolve the
+        # conflict — for a document save, the current revision and its
+        # content, so the editor can show the difference without a
+        # second round trip.
+        return JSONResponse(
+            status_code=409,
+            content={"detail": exc.message, **getattr(exc, "payload", {})},
+        )
 
     @application.exception_handler(InvalidInput)
     async def invalid_input_handler(request: Request, exc: InvalidInput) -> JSONResponse:

@@ -12,8 +12,17 @@ from uuid import uuid4
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.domain.report import Report, ReportTranslation, Section, SectionVersion
+from src.domain.report import (
+    DocBranch,
+    DocRevision,
+    Report,
+    ReportTranslation,
+    Section,
+    SectionVersion,
+)
 from src.infra.postgres.models import (
+    DocBranchModel,
+    DocRevisionModel,
     ReportAccessModel,
     ReportModel,
     ReportTranslationModel,
@@ -315,6 +324,88 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
             .order_by(SectionModel.sort_order)
         )
         return [self._section_to_domain(r) for r in result.scalars().all()]
+
+    # ── document revisions ─────────────────────────────────────
+
+    @staticmethod
+    def _revision_to_domain(row: DocRevisionModel) -> DocRevision:
+        return DocRevision(
+            id=row.id, report_id=row.report_id, parent_id=row.parent_id,
+            content_json=row.content_json, content_hash=row.content_hash,
+            author_id=row.author_id, author_kind=row.author_kind,
+            created_at=row.created_at,
+        )
+
+    @staticmethod
+    def _branch_to_domain(row: DocBranchModel) -> DocBranch:
+        return DocBranch(
+            id=row.id, report_id=row.report_id, owner_id=row.owner_id,
+            head_revision_id=row.head_revision_id,
+            base_revision_id=row.base_revision_id, updated_at=row.updated_at,
+        )
+
+    async def add_revision(self, revision: DocRevision) -> DocRevision:
+        model = DocRevisionModel(
+            report_id=revision.report_id,
+            parent_id=revision.parent_id,
+            content_json=revision.content_json,
+            content_hash=revision.content_hash,
+            author_id=revision.author_id,
+            author_kind=revision.author_kind,
+        )
+        self._session.add(model)
+        await self._session.commit()
+        await self._session.refresh(model)
+        return self._revision_to_domain(model)
+
+    async def get_revision(self, revision_id: str) -> DocRevision | None:
+        row = (await self._session.execute(
+            select(DocRevisionModel).where(DocRevisionModel.id == revision_id)
+        )).scalar_one_or_none()
+        return self._revision_to_domain(row) if row else None
+
+    async def list_revisions(self, report_id: str, limit: int) -> list[DocRevision]:
+        result = await self._session.execute(
+            select(DocRevisionModel)
+            .where(DocRevisionModel.report_id == report_id)
+            .order_by(DocRevisionModel.created_at.desc())
+            .limit(limit)
+        )
+        return [self._revision_to_domain(r) for r in result.scalars().all()]
+
+    async def get_branch(
+        self, report_id: str, owner_id: str | None,
+    ) -> DocBranch | None:
+        stmt = select(DocBranchModel).where(DocBranchModel.report_id == report_id)
+        # `== None` rather than `is None`: this is a SQL predicate, and
+        # main is the row whose owner IS NULL.
+        stmt = stmt.where(DocBranchModel.owner_id.is_(None) if owner_id is None
+                          else DocBranchModel.owner_id == owner_id)
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        return self._branch_to_domain(row) if row else None
+
+    async def set_branch_head(
+        self, report_id: str, owner_id: str | None,
+        head_revision_id: str, base_revision_id: str | None = None,
+    ) -> DocBranch:
+        stmt = select(DocBranchModel).where(DocBranchModel.report_id == report_id)
+        stmt = stmt.where(DocBranchModel.owner_id.is_(None) if owner_id is None
+                          else DocBranchModel.owner_id == owner_id)
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            row = DocBranchModel(
+                report_id=report_id, owner_id=owner_id,
+                head_revision_id=head_revision_id,
+                base_revision_id=base_revision_id or head_revision_id,
+            )
+            self._session.add(row)
+        else:
+            row.head_revision_id = head_revision_id
+            if base_revision_id is not None:
+                row.base_revision_id = base_revision_id
+        await self._session.commit()
+        await self._session.refresh(row)
+        return self._branch_to_domain(row)
 
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None:
         model = SectionVersionModel(

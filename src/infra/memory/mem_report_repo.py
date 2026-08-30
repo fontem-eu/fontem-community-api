@@ -4,7 +4,14 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from src.domain.report import Report, ReportTranslation, Section, SectionVersion
+from src.domain.report import (
+    DocBranch,
+    DocRevision,
+    Report,
+    ReportTranslation,
+    Section,
+    SectionVersion,
+)
 from src.repositories.report_repository import ReportRepository
 
 
@@ -18,6 +25,9 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         self._versions: dict[str, list[SectionVersion]] = {}
         self._tags: dict[str, list[str]] = {}
         self._translations: dict[tuple[str, str], ReportTranslation] = {}
+        self._revisions: dict[str, DocRevision] = {}
+        # Keyed (report_id, owner_id); owner None is main.
+        self._branches: dict[tuple[str, str | None], DocBranch] = {}
 
     async def create(self, report: Report) -> Report:
         if report.id is None:
@@ -145,6 +155,49 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         results = [deepcopy(s) for s in self._sections.values() if s.report_id == report_id]
         results.sort(key=lambda s: s.sort_order)
         return results
+
+    # ── document revisions ─────────────────────────────────────
+
+    async def add_revision(self, revision: DocRevision) -> DocRevision:
+        stored = deepcopy(revision)
+        stored.id = stored.id or str(uuid4())
+        stored.created_at = stored.created_at or datetime.now(timezone.utc)
+        self._revisions[stored.id] = stored
+        return deepcopy(stored)
+
+    async def get_revision(self, revision_id: str) -> DocRevision | None:
+        found = self._revisions.get(revision_id)
+        return deepcopy(found) if found else None
+
+    async def list_revisions(self, report_id: str, limit: int) -> list[DocRevision]:
+        found = [r for r in self._revisions.values() if r.report_id == report_id]
+        found.sort(key=lambda r: r.created_at or datetime.min, reverse=True)
+        return [deepcopy(r) for r in found[:limit]]
+
+    async def get_branch(
+        self, report_id: str, owner_id: str | None,
+    ) -> DocBranch | None:
+        found = self._branches.get((report_id, owner_id))
+        return deepcopy(found) if found else None
+
+    async def set_branch_head(
+        self, report_id: str, owner_id: str | None,
+        head_revision_id: str, base_revision_id: str | None = None,
+    ) -> DocBranch:
+        existing = self._branches.get((report_id, owner_id))
+        if existing is None:
+            existing = DocBranch(
+                id=str(uuid4()), report_id=report_id, owner_id=owner_id,
+                head_revision_id=head_revision_id,
+                base_revision_id=base_revision_id or head_revision_id,
+            )
+        else:
+            existing.head_revision_id = head_revision_id
+            if base_revision_id is not None:
+                existing.base_revision_id = base_revision_id
+        existing.updated_at = datetime.now(timezone.utc)
+        self._branches[(report_id, owner_id)] = existing
+        return deepcopy(existing)
 
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None:
         version = SectionVersion(

@@ -35,8 +35,28 @@ class TestTranslationAPI:
         create = client.post("/reports", json={"title": "Original title"}, headers=h)
         rid = create.json()["id"]
         client.put(f"/reports/{rid}", json={"visibility": visibility}, headers=h)
-        client.put(f"/reports/{rid}/content", json=DOC, headers=h)
+        self._save(client, h, rid, DOC)
         return rid
+
+    @staticmethod
+    def _save(client, h, rid, doc):
+        """Save the document on top of whatever main currently holds.
+
+        Every save names the revision it was written against; the server
+        refuses one that does not, which is what stops a stale buffer
+        overwriting newer work.
+        """
+        head = client.get(f"/reports/{rid}", headers=h).json()["head_revision"]
+        return client.put(f"/reports/{rid}/content",
+                          json={**doc, "base_revision": head}, headers=h)
+
+    @staticmethod
+    def _edited(text):
+        """A document that differs — an identical save is now a no-op, so
+        a test that means "the author edited the article" has to edit it."""
+        return {"tiptap": {"type": "doc", "content": [
+            {"type": "paragraph",
+             "content": [{"type": "text", "text": text}]}]}}
 
     def test_upsert_and_get_translation(self, client, services):
         asyncio.get_event_loop().run_until_complete(self._setup_users(services))
@@ -75,7 +95,7 @@ class TestTranslationAPI:
         client.put(f"/reports/{rid}/translations/pt",
                    json={"title": "T", "tiptap": DOC_PT["tiptap"]}, headers=h)
         # edit the ORIGINAL document -> translation becomes outdated
-        client.put(f"/reports/{rid}/content", json=DOC, headers=h)
+        self._save(client, h, rid, self._edited("body, revised"))
         got = client.get(f"/reports/{rid}/translations/pt", headers=h)
         assert got.json()["outdated"] is True
         # metadata list agrees
@@ -103,7 +123,7 @@ class TestTranslationAPI:
         rid = self._mk_story(client, h)
         client.put(f"/reports/{rid}/translations/pt",
                    json={"title": "T", "tiptap": DOC_PT["tiptap"]}, headers=h)
-        client.put(f"/reports/{rid}/content", json=DOC, headers=h)
+        self._save(client, h, rid, self._edited("original moved on"))
         assert client.get(f"/reports/{rid}/translations/pt", headers=h).json()["outdated"] is True
 
         resp = client.post(f"/reports/{rid}/translations/pt/resolve", headers=h)
@@ -248,7 +268,7 @@ class TestTranslationAPI:
         rid = self._mk_story(client, h)
         client.put(f"/reports/{rid}/translations/pt",
                    json={"title": "Título", "tiptap": DOC_PT["tiptap"]}, headers=h)
-        client.put(f"/reports/{rid}/content", json=DOC, headers=h)  # original moved on
+        self._save(client, h, rid, self._edited("original moved on"))
         card = next(c for c in client.get("/reports?scope=mine&lang=pt", headers=h).json()
                     if c["id"] == rid)
         assert card["title"] == "Título"  # still shown, but…
