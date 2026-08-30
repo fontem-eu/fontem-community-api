@@ -287,3 +287,87 @@ class TestReportPresignedUrls:
         assert f"https://test-presigned/{key}?sig=stub" in doc, doc
         assert "/uploads/" not in doc, doc
 
+
+
+class TestRevisionHistory:
+    """History, comparison and restore over the API.
+
+    The point of keeping revisions is being able to see and undo what
+    happened — a chain nobody can read is just storage.
+    """
+
+    async def _seed(self, services):
+        await seed_user(services["user_repo"], "user-1")
+
+    def _story_with_history(self, client, h):
+        rid = client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+        rev = client.put(f"/reports/{rid}/content",
+                         json={"tiptap": _doc("first")}, headers=h).json()["revision"]
+        rev2 = client.put(
+            f"/reports/{rid}/content",
+            json={"tiptap": _doc("second"), "base_revision": rev},
+            headers=h).json()["revision"]
+        return rid, rev, rev2
+
+    def test_the_history_lists_what_each_save_changed(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, first, second = self._story_with_history(client, h)
+
+        rows = client.get(f"/reports/{rid}/revisions", headers=h).json()
+        assert [r["id"] for r in rows] == [second, first]
+        # Newest first, and each row says what it did to its parent.
+        assert rows[0]["parent_id"] == first
+        assert rows[0]["changes"]["changed"] == 1
+        assert rows[0]["author_kind"] == "human"
+
+    def test_the_default_diff_is_what_the_last_save_changed(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, first, second = self._story_with_history(client, h)
+
+        body = client.get(f"/reports/{rid}/diff", headers=h).json()
+        assert body["from"] == first
+        assert body["to"] == second
+        ops = [o["op"] for o in body["operations"]]
+        assert ops == ["replace"]
+
+    def test_any_two_revisions_can_be_compared(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, first, second = self._story_with_history(client, h)
+
+        body = client.get(f"/reports/{rid}/diff",
+                          params={"from": second, "to": first},
+                          headers=h).json()
+        # Reversed: the same edit read the other way round.
+        assert body["from"] == second and body["to"] == first
+        assert [o["after"]["text"] for o in body["operations"]] == ["first"]
+
+    def test_a_revision_from_another_article_is_not_found(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, _, _ = self._story_with_history(client, h)
+        other, _, other_rev = self._story_with_history(client, h)
+        assert other != rid
+
+        resp = client.get(f"/reports/{rid}/diff",
+                          params={"to": other_rev}, headers=h)
+        assert resp.status_code == 404
+
+    def test_restoring_adds_a_revision_and_rewrites_nothing(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, first, second = self._story_with_history(client, h)
+
+        resp = client.post(f"/reports/{rid}/revisions/{first}/restore", headers=h)
+        assert resp.status_code == 200
+        restored = resp.json()["revision"]
+        assert restored not in (first, second)
+
+        # The document reads as the old one again...
+        doc = client.get(f"/reports/{rid}", headers=h).json()
+        assert "first" in str(doc["content_doc"])
+        # ...and the history still has all three, with the restore on top.
+        rows = client.get(f"/reports/{rid}/revisions", headers=h).json()
+        assert [r["id"] for r in rows] == [restored, second, first]
