@@ -39,7 +39,7 @@ jobs:
         run: pip install --no-cache-dir -r requirements.txt
       - name: Generate OpenAPI spec from code
         run: python3 scripts/generate_openapi.py > /tmp/openapi.json && python3 -c "import json;print('paths:',len(json.load(open('/tmp/openapi.json'))['paths']))"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Validate consumer pacts against the spec
