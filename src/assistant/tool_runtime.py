@@ -916,8 +916,11 @@ class ToolRuntime:
             "action": PROPOSAL_TOOL_ACTIONS["mcp__gmr__insert_widget"],
             # The resolved name rides back so the model can narrate the
             # card ("added a graph view of Siemens AG") without a second
-            # lookup.
-            "entity_name": profile.get("name"),
+            # lookup. Read through `entity_name`, not `profile["name"]`:
+            # fontem-api calls it `company_name` / `authority_name`, so
+            # the raw get always returned null and every widget the model
+            # proposed was narrated as nameless.
+            "entity_name": entity_name(profile) or None,
         })
 
     #: The labels an id may resolve to, and the endpoint that serves each.
