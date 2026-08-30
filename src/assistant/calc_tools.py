@@ -193,7 +193,14 @@ def _guard_size(result):
 
 def _eval_constant(node: ast.Constant, _frame: _Frame):
     if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
-        raise ValueError("only numbers are allowed")
+        # Small models put string literals in expressions (len('some text'))
+        # and then RETRY the same expression when told only "not allowed" —
+        # a 1.7B looped on exactly that for 3 minutes and timed out the
+        # staging gate. Say what to do instead, plainly.
+        raise ValueError(
+            "only numbers are allowed — the calculator has no strings and "
+            "no len(). Pass the numbers themselves, and do not retry this "
+            "expression")
     return node.value
 
 
