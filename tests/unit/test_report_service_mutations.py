@@ -42,63 +42,24 @@ class TestReportPermissions:
         with pytest.raises(PermissionDenied):
             await s["report_svc"].delete(viewer.id, r.id)
 
-    async def test_editor_can_add_section(self, services):
+    async def test_editor_can_save_the_document(self, services):
         s = services
         owner = await seed_user(s["user_repo"], "owner")
         editor = await seed_user(s["user_repo"], "editor")
         r = await s["report_svc"].create(owner.id, "Report")
         await s["perm_svc"].grant_access(r.id, editor.id, "editor")
-        sec = await s["report_svc"].add_section(editor.id, r.id, {"text": "hi"})
-        assert sec.content_json == {"text": "hi"}
+        await s["report_svc"].save_document(editor.id, r.id, {"text": "hi"})
+        sections = await s["report_svc"].get_sections(r.id)
+        assert sections[0].content_json == {"text": "hi"}
 
-    async def test_viewer_cannot_add_section(self, services):
+    async def test_viewer_cannot_save_the_document(self, services):
         s = services
         owner = await seed_user(s["user_repo"], "owner")
         viewer = await seed_user(s["user_repo"], "viewer")
         r = await s["report_svc"].create(owner.id, "Report")
         await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
         with pytest.raises(PermissionDenied):
-            await s["report_svc"].add_section(viewer.id, r.id, {"text": "hi"})
-
-    async def test_editor_can_edit_section(self, services):
-        s = services
-        owner = await seed_user(s["user_repo"], "owner")
-        editor = await seed_user(s["user_repo"], "editor")
-        r = await s["report_svc"].create(owner.id, "Report")
-        await s["perm_svc"].grant_access(r.id, editor.id, "editor")
-        sec = await s["report_svc"].add_section(owner.id, r.id, {"v": 1})
-        updated = await s["report_svc"].edit_section(editor.id, sec.id, {"v": 2})
-        assert updated.content_json == {"v": 2}
-
-    async def test_viewer_cannot_edit_section(self, services):
-        s = services
-        owner = await seed_user(s["user_repo"], "owner")
-        viewer = await seed_user(s["user_repo"], "viewer")
-        r = await s["report_svc"].create(owner.id, "Report")
-        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
-        sec = await s["report_svc"].add_section(owner.id, r.id, {"v": 1})
-        with pytest.raises(PermissionDenied):
-            await s["report_svc"].edit_section(viewer.id, sec.id, {"v": 2})
-
-    async def test_viewer_cannot_delete_section(self, services):
-        s = services
-        owner = await seed_user(s["user_repo"], "owner")
-        viewer = await seed_user(s["user_repo"], "viewer")
-        r = await s["report_svc"].create(owner.id, "Report")
-        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
-        sec = await s["report_svc"].add_section(owner.id, r.id, {"v": 1})
-        with pytest.raises(PermissionDenied):
-            await s["report_svc"].delete_section(viewer.id, sec.id)
-
-    async def test_viewer_cannot_acquire_lock(self, services):
-        s = services
-        owner = await seed_user(s["user_repo"], "owner")
-        viewer = await seed_user(s["user_repo"], "viewer")
-        r = await s["report_svc"].create(owner.id, "Report")
-        await s["perm_svc"].grant_access(r.id, viewer.id, "viewer")
-        sec = await s["report_svc"].add_section(owner.id, r.id, {"v": 1})
-        with pytest.raises(PermissionDenied):
-            await s["report_svc"].acquire_lock(viewer.id, sec.id)
+            await s["report_svc"].save_document(viewer.id, r.id, {"text": "hi"})
 
     async def test_owner_can_update_report(self, services):
         s = services
@@ -120,46 +81,3 @@ class TestReportPermissions:
 @pytest.mark.asyncio
 class TestReportNotFound:
     """Verify that operations on nonexistent entities raise NotFound."""
-
-    async def test_edit_nonexistent_section(self, services):
-        s = services
-        await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound):
-            await s["report_svc"].edit_section("u1", "no-such-section", {})
-
-    async def test_delete_nonexistent_section(self, services):
-        s = services
-        await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound):
-            await s["report_svc"].delete_section("u1", "no-such-section")
-
-    async def test_acquire_lock_nonexistent_section(self, services):
-        s = services
-        await seed_user(s["user_repo"], "u1")
-        with pytest.raises(NotFound):
-            await s["report_svc"].acquire_lock("u1", "no-such-section")
-
-
-@pytest.mark.asyncio
-class TestSectionLocking:
-    """Verify that section locking prevents concurrent edits."""
-
-    async def test_locked_section_rejects_other_editor(self, services):
-        s = services
-        u1 = await seed_user(s["user_repo"], "u1")
-        u2 = await seed_user(s["user_repo"], "u2")
-        r = await s["report_svc"].create(u1.id, "Report")
-        await s["perm_svc"].grant_access(r.id, u2.id, "editor")
-        sec = await s["report_svc"].add_section(u1.id, r.id, {"v": 1})
-        await s["report_svc"].acquire_lock(u1.id, sec.id)
-        with pytest.raises(Conflict):
-            await s["report_svc"].edit_section(u2.id, sec.id, {"v": 2})
-
-    async def test_lock_holder_can_still_edit(self, services):
-        s = services
-        u1 = await seed_user(s["user_repo"], "u1")
-        r = await s["report_svc"].create(u1.id, "Report")
-        sec = await s["report_svc"].add_section(u1.id, r.id, {"v": 1})
-        await s["report_svc"].acquire_lock(u1.id, sec.id)
-        updated = await s["report_svc"].edit_section(u1.id, sec.id, {"v": 2})
-        assert updated.content_json == {"v": 2}

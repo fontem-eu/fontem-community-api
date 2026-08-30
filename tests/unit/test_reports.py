@@ -24,116 +24,35 @@ class TestReports:
         assert await s["perm_svc"].check(_stable_uuid("user-1"), report.id, "owner")
 
     # RPT-02: Adding section increments sort order
-    async def test_add_section_increments_order(self, services):
+    async def test_saving_keeps_the_previous_document(self, services):
+        """The substrate the revision history is built on: a save that
+        forgets its predecessor cannot be reviewed or reverted."""
         s = services
         await seed_user(s["user_repo"], "user-1")
 
         report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
-        s1 = await s["report_svc"].add_section(_stable_uuid("user-1"), report.id, {"type": "doc"})
-        s2 = await s["report_svc"].add_section(_stable_uuid("user-1"), report.id, {"type": "doc"})
-        assert s2.sort_order > s1.sort_order
+        await s["report_svc"].save_document(_stable_uuid("user-1"), report.id, {"text": "original"})
+        await s["report_svc"].save_document(_stable_uuid("user-1"), report.id, {"text": "updated"})
 
-    # RPT-03: Editing section saves previous content as version
-    async def test_edit_saves_version(self, services):
-        s = services
-        await seed_user(s["user_repo"], "user-1")
-
-        report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
-        section = await s["report_svc"].add_section(
-            _stable_uuid("user-1"), report.id, {"text": "original"},
-        )
-        await s["report_svc"].acquire_lock(_stable_uuid("user-1"), section.id)
-        await s["report_svc"].edit_section(
-            _stable_uuid("user-1"), section.id, {"text": "updated"},
-        )
-
-        versions = await s["report_repo"].get_versions(section.id, 10)
+        sections = await s["report_svc"].get_sections(report.id)
+        versions = await s["report_repo"].get_versions(sections[0].id, 10)
         assert len(versions) >= 1
         assert versions[0].content_json == {"text": "original"}
 
-    # RPT-04: Deleting section does not affect others
-    async def test_delete_section_keeps_others(self, services):
-        s = services
-        await seed_user(s["user_repo"], "user-1")
-
-        report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
-        s1 = await s["report_svc"].add_section(_stable_uuid("user-1"), report.id, {"a": 1})
-        s2 = await s["report_svc"].add_section(_stable_uuid("user-1"), report.id, {"b": 2})
-        await s["report_svc"].delete_section(_stable_uuid("user-1"), s1.id)
-
-        remaining = await s["report_repo"].get_sections(report.id)
-        assert len(remaining) == 1
-        assert remaining[0].id == s2.id
-
-    # RPT-05: Section lock prevents concurrent edit
-    async def test_lock_prevents_concurrent_edit(self, services):
-        s = services
-        await seed_user(s["user_repo"], "user-1")
-        await seed_user(s["user_repo"], "user-2")
-
-        report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
-        await s["permission_repo"].set_user_access(report.id, _stable_uuid("user-2"), "editor")
-        section = await s["report_svc"].add_section(
-            _stable_uuid("user-1"), report.id, {"text": "content"},
-        )
-
-        assert await s["report_svc"].acquire_lock(_stable_uuid("user-1"), section.id)
-        assert not await s["report_svc"].acquire_lock(_stable_uuid("user-2"), section.id)
-
-    # RPT-06: Section lock expires after TTL
-    async def test_lock_expires(self, services):
-        s = services
-        await seed_user(s["user_repo"], "user-1")
-        await seed_user(s["user_repo"], "user-2")
-
-        report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
-        await s["permission_repo"].set_user_access(report.id, _stable_uuid("user-2"), "editor")
-        section = await s["report_svc"].add_section(
-            _stable_uuid("user-1"), report.id, {"text": "content"},
-        )
-
-        # Acquire with 0-second TTL (expires immediately)
-        await s["report_repo"].acquire_lock(section.id, _stable_uuid("user-1"), 0)
-
-        # Should succeed because lock expired
-        time.sleep(0.01)
-        assert await s["report_repo"].acquire_lock(section.id, _stable_uuid("user-2"), 300)
-
-    # RPT-07: Lock holder can save and release
-    async def test_lock_holder_can_save(self, services):
-        s = services
-        await seed_user(s["user_repo"], "user-1")
-
-        report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
-        section = await s["report_svc"].add_section(
-            _stable_uuid("user-1"), report.id, {"text": "v1"},
-        )
-        await s["report_svc"].acquire_lock(_stable_uuid("user-1"), section.id)
-        await s["report_svc"].edit_section(_stable_uuid("user-1"), section.id, {"text": "v2"})
-        await s["report_svc"].release_lock(_stable_uuid("user-1"), section.id)
-
-        holder = await s["report_repo"].get_lock_holder(section.id)
-        assert holder is None
-
-    # RPT-08: Version history returns most recent first
     async def test_version_history_order(self, services):
         s = services
         await seed_user(s["user_repo"], "user-1")
 
         report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
-        section = await s["report_svc"].add_section(
-            _stable_uuid("user-1"), report.id, {"v": 1},
-        )
-        await s["report_svc"].acquire_lock(_stable_uuid("user-1"), section.id)
-        await s["report_svc"].edit_section(_stable_uuid("user-1"), section.id, {"v": 2})
-        await s["report_svc"].edit_section(_stable_uuid("user-1"), section.id, {"v": 3})
+        for v in (1, 2, 3):
+            await s["report_svc"].save_document(_stable_uuid("user-1"), report.id, {"v": v})
 
-        versions = await s["report_repo"].get_versions(section.id, 10)
+        sections = await s["report_svc"].get_sections(report.id)
+        versions = await s["report_repo"].get_versions(sections[0].id, 10)
         assert len(versions) >= 2
         # Most recent version first
         assert versions[0].saved_at >= versions[-1].saved_at
 
-    # RPT-09: Listing reports for user includes owned
     async def test_list_includes_owned(self, services):
         s = services
         await seed_user(s["user_repo"], "user-1")
@@ -150,7 +69,7 @@ class TestReports:
         await seed_user(s["user_repo"], "user-1")
 
         report = await s["report_svc"].create(_stable_uuid("user-1"), "Report")
-        await s["report_svc"].add_section(_stable_uuid("user-1"), report.id, {"x": 1})
+        await s["report_svc"].save_document(_stable_uuid("user-1"), report.id, {"x": 1})
         await s["report_svc"].delete(_stable_uuid("user-1"), report.id)
 
         assert await s["report_repo"].get_by_id(report.id) is None

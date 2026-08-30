@@ -77,14 +77,6 @@ class UpdateReportRequest(BaseModel):
     language: str | None = Field(default=None, pattern="^[a-z]{2}$")
 
 
-class CreateSectionRequest(BaseModel):
-    content: str = ""
-
-
-class UpdateSectionRequest(BaseModel):
-    content: str = ""
-
-
 class SaveDocumentRequest(BaseModel):
     """Save the full TipTap JSON document (v2 format)."""
     tiptap: dict
@@ -308,99 +300,13 @@ async def delete_report(
     await svc.delete(user.id, report_id)
 
 
-@router.post("/{report_id}/sections", status_code=201)
-@inject
-async def add_section(
-    report_id: UuidPath,
-    body: CreateSectionRequest,
-    *,
-    svc: FromDishka[ReportService],
-    storage: FromDishka[MinioStorage],
-    user: Annotated[User, Depends(get_current_user)],
-) -> dict:
-    section = await svc.add_section(user.id, report_id, {"html": body.content})
-    result = asdict(section)
-    result["content"] = result.get("content_json", {}).get("html", "")
-    return presign_uploads(result, storage.presigned_get_url)
-
-
-# ``report_id`` on the sub-section routes is part of the URL hierarchy
-# (it scopes the route under the report) but the service-layer call
-# only needs ``section_id`` — the perms gate is keyed on the section's
-# report. The path parameter still has to be named ``report_id`` so
-# FastAPI binds the placeholder; pylint just can't see that.
-# pylint: disable-next=too-many-arguments,too-many-positional-arguments
-@router.put("/{report_id}/sections/{section_id}")
-@inject
-async def update_section(
-    report_id: UuidPath,  # pylint: disable=unused-argument
-    section_id: UuidPath,
-    body: UpdateSectionRequest,
-    *,
-    svc: FromDishka[ReportService],
-    storage: FromDishka[MinioStorage],
-    user: Annotated[User, Depends(get_current_user)],
-) -> dict:
-    section = await svc.edit_section(user.id, section_id, {"html": body.content})
-    result = asdict(section)
-    result["content"] = result.get("content_json", {}).get("html", "")
-    return presign_uploads(result, storage.presigned_get_url)
-
-
-@router.delete("/{report_id}/sections/{section_id}", status_code=204)
-@inject
-async def delete_section(
-    report_id: UuidPath,  # pylint: disable=unused-argument
-    section_id: UuidPath,
-    *,
-    svc: FromDishka[ReportService],
-    user: Annotated[User, Depends(get_current_user)],
-) -> None:
-    await svc.delete_section(user.id, section_id)
-
-
-@router.post("/{report_id}/sections/{section_id}/lock")
-@inject
-async def acquire_lock(
-    report_id: UuidPath,  # pylint: disable=unused-argument
-    section_id: UuidPath,
-    *,
-    svc: FromDishka[ReportService],
-    user: Annotated[User, Depends(get_current_user)],
-) -> dict:
-    acquired = await svc.acquire_lock(user.id, section_id)
-    return {"acquired": acquired}
-
-
-@router.delete("/{report_id}/sections/{section_id}/lock", status_code=204)
-@inject
-async def release_lock(
-    report_id: UuidPath,  # pylint: disable=unused-argument
-    section_id: UuidPath,
-    *,
-    svc: FromDishka[ReportService],
-    user: Annotated[User, Depends(get_current_user)],
-) -> None:
-    await svc.release_lock(user.id, section_id)
-
-
-# pylint: disable-next=too-many-arguments,too-many-positional-arguments
-@router.get("/{report_id}/sections/{section_id}/versions")
-@inject
-async def list_versions(
-    report_id: UuidPath,  # pylint: disable=unused-argument
-    section_id: UuidPath,
-    *,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    svc: FromDishka[ReportService],
-    storage: FromDishka[MinioStorage],
-    _user: Annotated[User, Depends(get_current_user)],
-) -> list[dict]:
-    # Version-list is a thin pass-through: there's no service-layer
-    # business logic on top, just the repo query. Reaching through to
-    # the canonical repo handle is the cleanest seam.
-    versions = await svc._reports.get_versions(section_id, limit)  # pylint: disable=protected-access
-    return presign_uploads([asdict(v) for v in versions], storage.presigned_get_url)
+# Sections are gone. An article is title + abstract + body, and its
+# structure is the headings inside the body — there is no second place
+# for structure to live. The CRUD, lock and per-section version routes
+# that assumed many sections went with them: nothing in the product
+# called them (every article in production had exactly one section), and
+# section locking was a live-collaboration answer to a problem the
+# draft-and-merge model solves differently.
 
 
 # ── v2 Document API ──────────────────────────────────────────

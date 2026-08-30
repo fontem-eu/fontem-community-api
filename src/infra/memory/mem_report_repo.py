@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from src.domain.report import Report, ReportTranslation, Section, SectionVersion
@@ -145,37 +145,6 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         results = [deepcopy(s) for s in self._sections.values() if s.report_id == report_id]
         results.sort(key=lambda s: s.sort_order)
         return results
-
-    async def acquire_lock(self, section_id: str, user_id: str, ttl_seconds: int) -> bool:
-        section = self._sections.get(section_id)
-        if section is None:
-            return False
-        now = datetime.now(timezone.utc)
-        if section.lock_holder is not None and section.lock_holder != user_id:
-            if section.lock_expires is not None and section.lock_expires > now:
-                return False
-        section.lock_holder = user_id
-        section.lock_expires = now + timedelta(seconds=ttl_seconds)
-        return True
-
-    async def release_lock(self, section_id: str, user_id: str) -> None:
-        section = self._sections.get(section_id)
-        if section is not None and section.lock_holder == user_id:
-            section.lock_holder = None
-            section.lock_expires = None
-
-    async def get_lock_holder(self, section_id: str) -> str | None:
-        section = self._sections.get(section_id)
-        if section is None:
-            return None
-        now = datetime.now(timezone.utc)
-        if section.lock_holder is not None:
-            if section.lock_expires is not None and section.lock_expires <= now:
-                section.lock_holder = None
-                section.lock_expires = None
-                return None
-            return section.lock_holder
-        return None
 
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None:
         version = SectionVersion(

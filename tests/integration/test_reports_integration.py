@@ -34,18 +34,21 @@ class TestReportCRUD:
         assert "R1" in titles
         assert "R2" in titles
 
-    def test_get_report_with_sections(self, client, user_id):
-        """RPT-I03: Get report by ID includes sections array."""
+    def test_get_report_with_its_document(self, client, user_id):
+        """RPT-I03: Get report by ID includes the document."""
         h = make_headers(user_id)
-        report = client.post("/reports", json={"title": "WithSections"}, headers=h).json()
+        report = client.post("/reports", json={"title": "WithDocument"}, headers=h).json()
         rid = report["id"]
-        client.post(f"/reports/{rid}/sections", json={"content": "<p>Hello</p>"}, headers=h)
+        client.put(f"/reports/{rid}/content", json={
+            "tiptap": {"type": "doc", "content": [
+                {"type": "paragraph",
+                 "content": [{"type": "text", "text": "Hello"}]}]},
+        }, headers=h)
         resp = client.get(f"/reports/{rid}", headers=h)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["title"] == "WithSections"
-        assert len(data["sections"]) == 1
-        assert data["sections"][0]["content"] == "<p>Hello</p>"
+        assert data["title"] == "WithDocument"
+        assert "Hello" in str(data["content_doc"])
 
     def test_update_report(self, client, user_id):
         """RPT-I04: Update title, abstract, visibility."""

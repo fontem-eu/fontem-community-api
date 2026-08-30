@@ -57,8 +57,11 @@ def test_read_document_returns_what_postgres_holds(client, user_id):
         "title": "RU spending draft",
         "abstract": "Before and after sanctions.",
     }, headers=h).json()
-    client.post(f"/reports/{report['id']}/sections", json={
-        "content": "<p>EUR 12,874,355.33</p>",
+    client.put(f"/reports/{report['id']}/content", json={
+        "tiptap": {"type": "doc", "content": [
+            {"type": "paragraph",
+             "content": [{"type": "text", "text": "EUR 12,874,355.33"}]},
+        ]},
     }, headers=h)
 
     body = _read(client, user_id, report["id"])
@@ -90,14 +93,20 @@ def test_a_deleted_report_reads_as_an_error(client, user_id):
     assert "error" in body
 
 
-def test_sections_arrive_in_stored_order(client, user_id):
+def test_the_agent_reads_the_latest_saved_document(client, user_id):
+    """Not an earlier one. The document is written whole, so the only
+    correct answer is the most recent save — an agent revising against a
+    stale body silently undoes whatever came after it."""
     h = make_headers(user_id)
     report = client.post("/reports", json={"title": "Ordered"},
                          headers=h).json()
     for word in ("first", "second", "third"):
-        client.post(f"/reports/{report['id']}/sections", json={
-            "content": f"<p>{word}</p>",
+        client.put(f"/reports/{report['id']}/content", json={
+            "tiptap": {"type": "doc", "content": [
+                {"type": "paragraph", "content": [
+                    {"type": "text", "text": word}]}]},
         }, headers=h)
 
-    sections = _read(client, user_id, report["id"])["sections"]
-    assert sections.index("first") < sections.index("second") < sections.index("third")
+    body = _read(client, user_id, report["id"])["sections"]
+    assert "third" in body
+    assert "first" not in body and "second" not in body

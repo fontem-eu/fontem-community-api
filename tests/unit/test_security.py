@@ -157,29 +157,3 @@ class TestDataSecurity:
             # But must not cause server error
             assert "title" in body
 
-    # DATA-SEC-04: Section lock validates ownership
-    @pytest.mark.asyncio
-    async def test_lock_ownership_validated(self, client, services):
-        s = services
-        await seed_user(s["user_repo"], "owner-1")
-        await seed_user(s["user_repo"], "user-2")
-
-        report = await s["report_svc"].create(_stable_uuid("owner-1"), "Report")
-        await s["permission_repo"].set_user_access(report.id, _stable_uuid("user-2"), "editor")
-        section = await s["report_svc"].add_section(
-            _stable_uuid("owner-1"), report.id, {"text": "content"},
-        )
-
-        # owner-1 acquires lock
-        client.post(
-            f"/reports/{report.id}/sections/{section.id}/lock",
-            headers=make_headers("owner-1"),
-        )
-
-        # user-2 tries to edit -- should fail due to lock
-        r = client.put(
-            f"/reports/{report.id}/sections/{section.id}",
-            json={"content": "<p>hacked</p>"},
-            headers=make_headers("user-2"),
-        )
-        assert r.status_code in (409, 403)
