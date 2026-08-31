@@ -160,6 +160,61 @@ def test_comprehensions_and_logic():
     assert out["result"] == 50.0
 
 
+def test_and_and_or_keep_their_own_meanings():
+    """`and` and `or` are not interchangeable, and nothing else noticed.
+
+    The handler branches on which operator it is; collapsing that branch
+    turns every `and` into an `or`, so a range check like
+    "x > 10 and x < 100" starts answering True for values outside it. The
+    old "logic" test covered comparisons, comprehensions and if/for but
+    never a boolean operator, so the whole branch was unexercised.
+
+    Both operators return the deciding operand, as Python's do — the model
+    writes this syntax fluently precisely because it behaves the way it
+    reads.
+    """
+    assert _calc("1 and 0")["result"] == 0
+    assert _calc("2 and 3")["result"] == 3
+    assert _calc("0 or 5")["result"] == 5
+    assert _calc("7 or 9")["result"] == 7
+    # The shape this actually gets used in: a bounds check where `or` would
+    # answer the opposite.
+    assert _calc("sum(v) > 10 and sum(v) < 100", {"v": [20, 30]})["result"] is True
+    assert _calc("sum(v) > 1000 and sum(v) < 2000", {"v": [20, 30]})["result"] is False
+
+
+def test_and_short_circuits_before_evaluating_the_rest():
+    """Short-circuiting is what makes a guarded division safe to write:
+    `d and n / d` must not evaluate the division when d is 0."""
+    assert _calc("0 and 1 / 0")["result"] == 0
+
+
+def test_the_step_budget_fires_on_its_own_account(monkeypatch):
+    """The mirror of the wall-clock test.
+
+    `test_runaway_loops_hit_the_step_budget_not_the_server` accepts either
+    error, so the step counter could stop counting — or count backwards —
+    and that test would still pass on the two-second clock alone. Pinning
+    the clock without pinning the steps just moves the blind spot.
+    """
+    monkeypatch.setattr(calc_tools, "_MAX_SECONDS", 3600.0)
+    out = _calc("t = 0\n"
+                "for i in range(1000):\n"
+                "    for j in range(1000):\n"
+                "        t += 1\n"
+                "t")
+    assert "steps" in out["error"], out
+
+
+def test_the_list_bound_admits_exactly_its_stated_limit():
+    """"bounded at 10,000 items" has to mean 10,000 is allowed, or the
+    message is off by one against the behaviour and the model burns a
+    round rediscovering the real limit."""
+    limit = calc_tools._MAX_LIST_ITEMS
+    assert _calc(f"len(range({limit}))")["result"] == limit
+    assert "bounded" in _calc(f"len(range({limit + 1}))")["error"]
+
+
 def test_scripts_are_capped_at_six_lines():
     assert "6 lines" in _calc("\n".join(f"x{i} = {i}" for i in range(7))
                               + "\nx0")["error"]
