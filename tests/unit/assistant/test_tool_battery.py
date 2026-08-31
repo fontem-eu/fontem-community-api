@@ -282,32 +282,26 @@ def test_a_session_like_resource_is_never_entered_concurrently():
 
 
 
-# ── the degenerate loop cannot burn the turn ────────────────────────────
-#
-# A 1.7B model handed an error retried the same call verbatim: it looped
-# calculate(len('…')) twelve times at ~15s of inference each and timed out
-# the staging gate (attest 28604). The guard answers the third identical
-# call from the dispatcher instead of running the tool again.
-#
-# Both directions matter and they pull against each other. Too loose and
-# the loop above burns the turn; too tight and an honest retry — the model
-# reading an error and trying once more — is refused, which is a working
-# call the user never gets. So these pin the boundary itself, not just
-# "looping is stopped".
 
-def _turn(rt, traced):
-    """Dispatch into one turn's history, on this test's own loop."""
-    def call(name, args):
-        return _run(lambda: _dispatch(rt, name, args, traced=traced))
-    return call
-
+# ── what the repeat signature is keyed on ───────────────────────────────
+#
+# The degenerate-loop guard — a third byte-identical call is answered by
+# the dispatcher instead of running the tool again, after a 1.7B looped
+# calculate(len('…')) twelve times and timed out the staging gate (attest
+# 28604) — is covered for the calculator in test_calculator.py.
+#
+# What is not covered there is what makes two calls "identical", and every
+# one of these is a way for the guard to misfire on a turn that is not
+# looping at all. A guard that refuses honest work is worse than no guard:
+# it costs the user a call that would have worked, and says nothing a
+# reader could act on.
 
 def _unknown_tools_runtime():
     """A runtime whose unknown names resolve locally to "Unknown tool".
 
-    These two tests are about the repeat signature, not about tool
-    resolution, and the generated-tool spec fetch would need a live
-    fontem-api to say "I have never heard of that".
+    These are about the repeat signature, not tool resolution, and the
+    generated-tool spec fetch would otherwise need a live fontem-api to
+    say "I have never heard of that".
     """
     rt = ToolRuntime()
 
@@ -318,89 +312,20 @@ def _unknown_tools_runtime():
     return rt
 
 
-def _counting_calc(monkeypatch):
-    """Count how many times the calculator really runs."""
-    calls: list[dict] = []
-    real = calc_tools.execute
-
-    def spy(args):
-        calls.append(args)
-        return real(args)
-
-    monkeypatch.setattr(calc_tools, "execute", spy)
-    return calls
-
-
-def test_an_honest_retry_of_an_identical_call_still_runs(monkeypatch):
-    """Twice is a retry, not a loop. The second call must reach the tool.
-
-    This is the half a stricter guard would break silently: the model gets
-    an error, tries the same thing once more, and that attempt has to be
-    real — otherwise the user is told "you already asked" about a call that
-    never produced an answer.
-    """
-    calls = _counting_calc(monkeypatch)
-    call = _turn(ToolRuntime(), [])
-    args = {"expression": "2 + 2"}
-
-    first, _ = call(calc_tools.CALC_TOOL_NAME, args)
-    second, _ = call(calc_tools.CALC_TOOL_NAME, args)
-
-    assert len(calls) == 2, "the second identical call must really dispatch"
-    for out in (first, second):
-        assert "already called" not in out, out
-
-
-def test_the_third_identical_call_is_answered_without_running_the_tool(
-        monkeypatch):
-    """Third time is the loop. It is refused here, and the tool stays cold."""
-    calls = _counting_calc(monkeypatch)
-    call = _turn(ToolRuntime(), [])
-    args = {"expression": "2 + 2"}
-
-    call(calc_tools.CALC_TOOL_NAME, args)
-    call(calc_tools.CALC_TOOL_NAME, args)
-    third, raw_len = call(calc_tools.CALC_TOOL_NAME, args)
-
-    assert len(calls) == 2, "the third call must not reach the tool"
-    body = json.loads(third)
-    assert "already called with exactly these arguments" in body["error"]
-    assert raw_len == 0
-
-
-def test_the_refusal_names_a_way_out(monkeypatch):
-    """A bare "no" is what the model was already ignoring. The refusal has
-    to name the way out, or the loop just moves to the next tool."""
-    _counting_calc(monkeypatch)
-    call = _turn(ToolRuntime(), [])
-    args = {"expression": "1 + 1"}
-
-    out = None
-    for _ in range(3):
-        out, _ = call(calc_tools.CALC_TOOL_NAME, args)
-
-    hint = json.loads(out)["hint"]
-    assert "will not change" in hint
-    assert "change the arguments" in hint
-
-
-def test_new_arguments_always_run_however_many_a_turn_takes(monkeypatch):
-    """The cap is on repetition, not on investigation. A long chain of
-    DIFFERENT calls is what a real investigation looks like, and must never
-    be throttled by this guard."""
-    calls = _counting_calc(monkeypatch)
-    call = _turn(ToolRuntime(), [])
-
-    for i in range(12):
-        out, _ = call(calc_tools.CALC_TOOL_NAME, {"expression": f"{i} + 1"})
-        assert "already called" not in out, out
-
-    assert len(calls) == 12
+def _turn(rt, traced):
+    """Dispatch into one turn's history, on this test's own loop."""
+    def call(name, args):
+        return _run(lambda: _dispatch(rt, name, args, traced=traced))
+    return call
 
 
 def test_the_same_arguments_to_a_different_tool_are_not_a_repeat():
-    """The signature is (tool, args). Two tools asked the same question are
-    two different questions — counting args alone would refuse the second."""
+    """The signature is (tool, args), not args alone.
+
+    Two tools asked the same question are two different questions —
+    resolving an id and then investigating it carry the same argument dict,
+    and keying on args alone would refuse the second.
+    """
     call = _turn(_unknown_tools_runtime(), [])
     args = {"query": "Metro Mondego"}
 
@@ -412,8 +337,11 @@ def test_the_same_arguments_to_a_different_tool_are_not_a_repeat():
 
 
 def test_argument_order_does_not_disguise_a_repeat():
-    """The signature is sorted, so a model re-emitting the same call with
-    its keys in a different order is still looping."""
+    """Sorted, so the loop cannot be walked around by accident.
+
+    Nothing makes a model emit its keys in a stable order, so an unsorted
+    signature would let the exact loop this guard exists for run free.
+    """
     call = _turn(_unknown_tools_runtime(), [])
 
     call("mcp__gmr__unknown_a", {"from_id": "a", "to_id": "b"})
