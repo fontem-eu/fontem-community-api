@@ -7,11 +7,16 @@ of that loop and of nothing that remains. What is here is the part both
 executors still depend on, which is why it outlived the thing it was
 written against.
 """
+# pylint: disable=protected-access
 from __future__ import annotations
 
+import httpx
 import pytest
 
-from src.assistant.tool_runtime import _system_prompt_with_today, _tool_detail
+from src.assistant.tool_runtime import (
+    _FRESHNESS_FETCH_TIMEOUT, _FRESHNESS_TTL_SECONDS, ToolRuntime,
+    _system_prompt_with_today, _tool_detail,
+)
 
 
 @pytest.mark.asyncio
@@ -136,3 +141,136 @@ def test_status_detail_falls_back_to_the_id_when_no_name_is_known():
         "mcp__gmr__investigate_entity", {"entity_id": "unknown-id"}, {},
     )
     assert detail, "the panel still needs something to show"
+
+
+# ── the freshness cache ─────────────────────────────────────────────────
+#
+# The source-freshness block is fetched once and held for five minutes.
+# Both halves of that are load bearing and neither was exercised: without
+# the cache the assistant hits /data-quality/freshness on EVERY chat turn,
+# and the fetch sits on the user's critical path before the first model
+# request; without expiry a loader run that lands mid-session is invisible
+# until the pod restarts.
+#
+# Only the formatter above was tested. The cache around it had five
+# surviving mutants, including reading the tuple's summary slot as its
+# timestamp — which would compare a string to a float and take the whole
+# block down rather than serve a stale line.
+
+class _FreshnessClient:
+    """Counts fetches and can be told to fail."""
+
+    def __init__(self, payload=None, fail=None):
+        self.calls = 0
+        self.urls: list = []
+        self.timeouts: list = []
+        self._payload = payload if payload is not None else {"sources": []}
+        self._fail = fail
+
+    async def get(self, url, timeout=None):
+        self.urls.append(url)
+        self.calls += 1
+        self.timeouts.append(timeout)
+        if self._fail is not None:
+            raise self._fail
+        return _FreshnessResponse(self._payload)
+
+
+class _FreshnessResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def _one_source():
+    return {"sources": [{
+        "id": "ted", "rows": 10, "coverage_start": "2020-01-01",
+        "coverage_end": "2026-08-01", "loaded_at": "2026-08-30T00:00:00Z",
+    }]}
+
+
+@pytest.mark.asyncio
+async def test_a_warm_cache_serves_the_second_turn_without_refetching():
+    """The reason the cache exists: one fetch per five minutes, not one per
+    chat turn, on a call that blocks the first model request."""
+    rt = ToolRuntime(gmr_api_url="http://fontem-api")
+    client = _FreshnessClient(_one_source())
+
+    first = await rt._get_freshness_summary(client)
+    second = await rt._get_freshness_summary(client)
+
+    assert client.calls == 1, "a warm cache must not refetch"
+    assert second == first
+    assert first, "the fixture has a source, so the block is not empty"
+
+
+@pytest.mark.asyncio
+async def test_the_cache_expires_so_a_loader_run_is_picked_up_in_session():
+    """The other half. A five-minute hold that never lets go means a load
+    that lands mid-session stays invisible until the pod restarts."""
+    rt = ToolRuntime(gmr_api_url="http://fontem-api")
+    client = _FreshnessClient(_one_source())
+
+    await rt._get_freshness_summary(client)
+    # Age the entry past the TTL by rewriting its timestamp, rather than
+    # sleeping five minutes or monkeypatching the clock.
+    cached_at, summary = rt._freshness_cache
+    rt._freshness_cache = (cached_at - _FRESHNESS_TTL_SECONDS - 1, summary)
+    await rt._get_freshness_summary(client)
+
+    assert client.calls == 2, "an expired entry must be refetched"
+
+
+@pytest.mark.asyncio
+async def test_the_entry_is_stored_as_timestamp_then_summary():
+    """Order matters: reading the summary slot as the timestamp compares a
+    str to a float and takes the block down instead of serving a stale
+    line — a crash where the whole design point was degrading quietly."""
+    rt = ToolRuntime(gmr_api_url="http://fontem-api")
+    await rt._get_freshness_summary(_FreshnessClient(_one_source()))
+
+    cached_at, summary = rt._freshness_cache
+    assert isinstance(cached_at, float)
+    assert isinstance(summary, str)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_fetch_costs_a_sentence_not_the_turn():
+    """Best-effort is the contract: monitoring metadata being unavailable
+    must not fail a turn that would otherwise have answered."""
+    rt = ToolRuntime(gmr_api_url="http://fontem-api")
+    client = _FreshnessClient(fail=httpx.ConnectError("boom"))
+
+    assert await rt._get_freshness_summary(client) == ""
+
+
+@pytest.mark.asyncio
+async def test_a_failure_is_cached_too_so_a_dead_endpoint_is_not_retried_every_turn():
+    """A down data-quality API would otherwise be re-dialled on every turn,
+    each time on the critical path ahead of the first model request."""
+    rt = ToolRuntime(gmr_api_url="http://fontem-api")
+    client = _FreshnessClient(fail=httpx.ConnectError("boom"))
+
+    await rt._get_freshness_summary(client)
+    await rt._get_freshness_summary(client)
+
+    assert client.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_the_fetch_is_bounded_because_it_blocks_the_first_response():
+    """This call happens before the model is asked anything. An unbounded
+    one leaves the user watching a spinner because monitoring is slow."""
+    rt = ToolRuntime(gmr_api_url="http://fontem-api")
+    client = _FreshnessClient(_one_source())
+
+    await rt._get_freshness_summary(client)
+
+    assert client.urls == ["http://fontem-api/data-quality/freshness"]
+    assert client.timeouts == [_FRESHNESS_FETCH_TIMEOUT]
+    assert _FRESHNESS_FETCH_TIMEOUT <= 10, "a critical-path fetch must stay short"
