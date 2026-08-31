@@ -84,6 +84,20 @@ _NO_SUCH_REVISION = "No such revision."
 _NO_SUCH_REVIEW = "No such review."
 
 
+def _review_stub(review) -> dict | None:
+    """Just enough of a review to name it and link to it from a history
+    row. The review itself is one request away."""
+    if review is None:
+        return None
+    return {
+        "id": review.id,
+        "kind": review.kind,
+        "title": review.title,
+        "state": review.state,
+        "self_merged": review.self_merged,
+    }
+
+
 class ReportService:  # pylint: disable=too-many-public-methods
     # One service per aggregate: report + sections + versions + locks +
     # tags + translations share authz + activity plumbing here.
@@ -440,6 +454,17 @@ class ReportService:  # pylint: disable=too-many-public-methods
         revisions = await self._reports.list_revisions(report_id, limit)
         by_id = {r.id: r for r in revisions}
 
+        # The reviews this article has, indexed by the revision they
+        # touch. A change in the history is only half the story — the
+        # other half is whether anybody reviewed it, and where that
+        # conversation is.
+        reviews = await self._reports.list_reviews(report_id)
+        published_by = {r.merged_revision_id: r for r in reviews
+                        if r.merged_revision_id}
+        proposed_in: dict[str, list] = {}
+        for review in reviews:
+            proposed_in.setdefault(review.source_head, []).append(review)
+
         rows = []
         for revision in revisions:
             parent = by_id.get(revision.parent_id)
@@ -455,6 +480,9 @@ class ReportService:  # pylint: disable=too-many-public-methods
                 "changes": doc_diff.summary(doc_diff.diff(
                     parent.content_json if parent else None,
                     revision.content_json)),
+                "published_by": _review_stub(published_by.get(revision.id)),
+                "reviews": [_review_stub(r)
+                            for r in proposed_in.get(revision.id, [])],
             })
         return rows
 

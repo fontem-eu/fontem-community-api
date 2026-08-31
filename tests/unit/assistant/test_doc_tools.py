@@ -256,32 +256,66 @@ def test_the_pydantic_engine_threads_doc_into_dispatch():
 
 # ── writing blind ─────────────────────────────────────────────
 
-def test_a_rewrite_without_reading_the_document_is_refused():
+class _UnreadableDoc:
+    """A document that cannot be read — the prod case exactly."""
+
+    async def read(self):
+        return json.dumps({"error": "cannot read this document: not found"})
+
+
+class _ReadableDoc:
+    async def read(self):
+        return json.dumps({"title": "T", "sections": "[]"})
+
+
+def test_a_rewrite_of_an_unreadable_document_is_refused():
     """The failure this exists for (prod, 2026-08-30): read_document
     returned "not found", and the model proposed a full replace_body
     anyway. A rewrite destroys everything it does not reproduce, so it is
     the one edit that must not be written from memory."""
     out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
-                       {"content": "<p>invented</p>"}, traced=[])
+                       {"content": "<p>invented</p>"}, traced=[],
+                       doc=_UnreadableDoc())
     body = json.loads(out)
-    assert "needs the current document" in body["error"]
+    assert "could not be read" in body["error"]
     assert "read_document" in body["hint"]
 
 
-def test_a_failed_read_does_not_count_as_having_read_it():
+def test_a_failed_read_in_the_trace_does_not_count_as_having_read_it():
     traced = [{"tool": "mcp__gmr__read_document",
                "result": '{"error": "cannot read this document: not found"}'}]
     out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
-                       {"content": "<p>invented</p>"}, traced=traced)
-    assert "needs the current document" in json.loads(out)["error"]
+                       {"content": "<p>invented</p>"}, traced=traced,
+                       doc=_UnreadableDoc())
+    assert "could not be read" in json.loads(out)["error"]
+
+
+def test_a_rewrite_with_no_document_at_all_is_refused():
+    out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
+                       {"content": "<p>invented</p>"}, traced=[], doc=None)
+    assert "could not be read" in json.loads(out)["error"]
+
+
+def test_a_read_and_a_rewrite_in_one_parallel_batch_are_allowed():
+    """A model may issue both in a single batch, and the rewrite can then
+    reach the guard before the read is recorded. Refusing that would
+    punish the correct behaviour — which is exactly what it did on
+    testing (promote 30275), where the read had succeeded a moment
+    earlier and the rewrite was refused anyway."""
+    out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
+                       {"content": "<p>grounded</p>"}, traced=[],
+                       doc=_ReadableDoc())
+    assert json.loads(out)["proposed"] is True
 
 
 def test_a_rewrite_after_a_real_read_goes_through():
+    """The fast path: a successful read already in the turn's trace, so
+    no second lookup is needed."""
     traced = [{"tool": "mcp__gmr__read_document",
                "result": '{"title": "T", "sections": "[]"}'}]
     out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
                        {"content": "<p>grounded in what it read</p>"},
-                       traced=traced)
+                       traced=traced, doc=_UnreadableDoc())
     assert json.loads(out)["proposed"] is True
 
 
