@@ -44,13 +44,26 @@ class DocOps:
         """
         try:
             report = await self._svc.get(self._user, self._report)
-            sections = await self._svc.get_sections(self._report)
+            # The user's own draft, not the published text: that is the
+            # document they have open and the one an edit lands on. An
+            # assistant revising the published version while its user
+            # edits a draft proposes changes against text neither of them
+            # is looking at.
+            head = (await self._svc.draft_head(self._user, self._report)
+                    or await self._svc.document_head(self._report))
         except Exception as exc:  # pylint: disable=broad-except
             # Whatever the service refused (missing, not yours, deleted),
             # the model gets a reason it can act on rather than a stack.
             return json.dumps({"error": f"cannot read this document: {exc}"})
 
-        body = json.dumps([s.content_json for s in sections])
+        if head is None:
+            return json.dumps({
+                "error": "this document has no saved version yet",
+                "hint": "ask the user to save something first, and do not "
+                        "invent a baseline",
+            })
+
+        body = json.dumps(head.content_json)
         if len(body) > MAX_DOC_CHARS:
             dropped = len(body) - MAX_DOC_CHARS
             body = body[:MAX_DOC_CHARS] + TRUNCATED_MARKER.format(
@@ -60,12 +73,13 @@ class DocOps:
             "report_id": self._report,
             "title": report.title,
             "abstract": getattr(report, "abstract", None),
-            # TipTap document JSON, one entry per section. Text lives in
-            # the `text` fields; propose replacements as HTML, which the
-            # Apply path sanitises and converts.
+            # TipTap document JSON. Text lives in the `text` fields;
+            # propose replacements as HTML, which the Apply path
+            # sanitises and converts.
             "sections": body,
+            "revision": head.id,
             "note": (
-                "This is the last SAVED version. The user's editor buffer "
+                "This is the user's last SAVED draft. Their editor buffer "
                 "may contain newer unsaved text."
             ),
         })

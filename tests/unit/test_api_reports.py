@@ -691,3 +691,54 @@ class TestReviewConversation:
                            params={"state": "completed"}, headers=h).json()
         assert done["state"] == "completed"
         assert client.get(f"/reports/{rid}", headers=h).status_code == 200
+
+
+class TestAssistantCommits:
+    """The assistant's edits are commits you can see, and drop.
+
+    The whole thread that produced this design started with an assistant
+    edit that landed somewhere the author was not looking. An edit that
+    appears in the history under its own name is one you can find,
+    review, and undo.
+    """
+
+    async def _seed(self, services):
+        await seed_user(services["user_repo"], "user-1")
+
+    def test_an_assistant_edit_is_recorded_as_one(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+        first = client.put(f"/reports/{rid}/content",
+                           json={"tiptap": _doc("mine")}, headers=h).json()
+
+        client.put(f"/reports/{rid}/content",
+                   json={"tiptap": _doc("the assistant's rewrite"),
+                         "base_revision": first["revision"],
+                         "author_kind": "assistant"},
+                   headers=h)
+
+        rows = client.get(f"/reports/{rid}/revisions", headers=h).json()
+        assert rows[0]["author_kind"] == "assistant"
+        # And the one before it is still the author's own.
+        assert rows[1]["author_kind"] == "human"
+
+    def test_an_unknown_author_kind_is_refused(self, client, services):
+        """The field is a record, not a free-text label: a value nothing
+        renders is a value that quietly means nothing."""
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+        resp = client.put(f"/reports/{rid}/content",
+                          json={"tiptap": _doc("x"), "author_kind": "wizard"},
+                          headers=h)
+        assert resp.status_code == 422
+
+    def test_a_save_defaults_to_human(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+        client.put(f"/reports/{rid}/content", json={"tiptap": _doc("x")},
+                   headers=h)
+        rows = client.get(f"/reports/{rid}/revisions", headers=h).json()
+        assert rows[0]["author_kind"] == "human"

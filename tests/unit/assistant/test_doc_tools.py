@@ -33,25 +33,45 @@ def _runtime():
     return ToolRuntime(gmr_api_url="http://fontem-api")
 
 
-def _dispatch(rt, name, args, doc=None, client=None):
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+def _dispatch(rt, name, args, doc=None, client=None, traced=None):
+    """``traced`` is the turn's history: some guards read it to find out
+    what the model has already done this turn."""
     return _run(rt.dispatch(
         client or MagicMock(), name, args,
         studio=None, nav_routes=[], pending_nav=[],
-        budget=[14_000], name_cache={}, traced=[], doc=doc,
+        budget=[14_000], name_cache={},
+        traced=[] if traced is None else traced, doc=doc,
     ))
+
+
+#: A turn in which the model has actually read the document. replace_body
+#: requires one — see "writing blind" at the foot of this file.
+def _read_ok():
+    return [{"tool": "mcp__gmr__read_document",
+             "result": '{"title": "T", "sections": "[]"}'}]
 
 
 # ── read_document ─────────────────────────────────────────────
 
 class _FakeReports:
-    def __init__(self):
+    """A report service as far as DocOps needs one.
+
+    It answers with the caller's DRAFT, because that is the document they
+    have open: an assistant revising the published version while its user
+    edits a draft proposes changes against text neither is looking at.
+    """
+
+    def __init__(self, text="hello", draft=True):
         self.get = AsyncMock(return_value=MagicMock(
             title="Draft", abstract="About things"))
-        section = MagicMock()
-        section.content_json = {"type": "doc", "content": [
+        revision = MagicMock()
+        revision.id = "rev-1"
+        revision.content_json = {"type": "doc", "content": [
             {"type": "paragraph", "content": [{"type": "text",
-                                               "text": "hello"}]}]}
-        self.get_sections = AsyncMock(return_value=[section])
+                                               "text": text}]}]}
+        self.draft_head = AsyncMock(return_value=revision if draft else None)
+        self.document_head = AsyncMock(return_value=revision)
 
 
 def test_read_document_returns_the_saved_document():
@@ -86,8 +106,9 @@ def test_a_refused_read_reaches_the_model_as_a_reason():
 def test_an_oversize_document_is_truncated_with_a_marker():
     reports = _FakeReports()
     fat = MagicMock()
+    fat.id = "rev-fat"
     fat.content_json = {"type": "doc", "text": "x" * 20_000}
-    reports.get_sections = AsyncMock(return_value=[fat])
+    reports.draft_head = AsyncMock(return_value=fat)
     doc = DocOps(reports, "u-1", "r-1")
     out = _run(doc.read())
     assert "document truncated" in out
@@ -102,14 +123,15 @@ def test_each_verb_proposes_with_its_required_field():
         ("mcp__gmr__set_abstract", "abstract", "New abstract", "set_abstract"),
         ("mcp__gmr__replace_body", "content", "<p>x</p>", "replace_body"),
     ):
-        out, _ = _dispatch(rt, name, {field: value})
+        out, _ = _dispatch(rt, name, {field: value}, traced=_read_ok())
         body = json.loads(out)
         assert body == {"proposed": True, "action": action}
 
 
 def test_an_empty_required_field_is_refused():
     rt = _runtime()
-    out, _ = _dispatch(rt, "mcp__gmr__replace_body", {"content": "   "})
+    out, _ = _dispatch(rt, "mcp__gmr__replace_body", {"content": "   "},
+                       traced=_read_ok())
     assert "required" in json.loads(out)["error"]
 
 
@@ -230,3 +252,66 @@ def test_the_pydantic_engine_threads_doc_into_dispatch():
     _run(tools[0].function())
     assert seen.get("doc") is marker, \
         "read_document is dead on this engine if doc does not arrive"
+
+
+# ── writing blind ─────────────────────────────────────────────
+
+def test_a_rewrite_without_reading_the_document_is_refused():
+    """The failure this exists for (prod, 2026-08-30): read_document
+    returned "not found", and the model proposed a full replace_body
+    anyway. A rewrite destroys everything it does not reproduce, so it is
+    the one edit that must not be written from memory."""
+    out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
+                       {"content": "<p>invented</p>"}, traced=[])
+    body = json.loads(out)
+    assert "needs the current document" in body["error"]
+    assert "read_document" in body["hint"]
+
+
+def test_a_failed_read_does_not_count_as_having_read_it():
+    traced = [{"tool": "mcp__gmr__read_document",
+               "result": '{"error": "cannot read this document: not found"}'}]
+    out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
+                       {"content": "<p>invented</p>"}, traced=traced)
+    assert "needs the current document" in json.loads(out)["error"]
+
+
+def test_a_rewrite_after_a_real_read_goes_through():
+    traced = [{"tool": "mcp__gmr__read_document",
+               "result": '{"title": "T", "sections": "[]"}'}]
+    out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
+                       {"content": "<p>grounded in what it read</p>"},
+                       traced=traced)
+    assert json.loads(out)["proposed"] is True
+
+
+def test_the_agent_reads_the_draft_not_the_published_text():
+    """The document the user has open is the draft. Revising the
+    published version while they edit a draft proposes changes against
+    text neither of them is looking at."""
+    reports = _FakeReports(text="my unpublished draft")
+    published = MagicMock()
+    published.id = "rev-published"
+    published.content_json = {"type": "doc", "content": [
+        {"type": "paragraph",
+         "content": [{"type": "text", "text": "the published text"}]}]}
+    reports.document_head = AsyncMock(return_value=published)
+
+    body = json.loads(_run(DocOps(reports, "u-1", "r-1").read()))
+    assert "my unpublished draft" in body["sections"]
+    assert "the published text" not in body["sections"]
+    assert body["revision"] == "rev-1"
+
+
+def test_without_a_draft_it_reads_what_is_published():
+    reports = _FakeReports(text="the published text", draft=False)
+    body = json.loads(_run(DocOps(reports, "u-1", "r-1").read()))
+    assert "the published text" in body["sections"]
+
+
+def test_an_article_with_nothing_saved_says_so_rather_than_inventing():
+    reports = _FakeReports(draft=False)
+    reports.document_head = AsyncMock(return_value=None)
+    body = json.loads(_run(DocOps(reports, "u-1", "r-1").read()))
+    assert "no saved version" in body["error"]
+    assert "do not invent" in body["hint"]

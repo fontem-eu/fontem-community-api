@@ -89,6 +89,13 @@ class SaveDocumentRequest(BaseModel):
     tiptap: dict
     version: int = 2
     base_revision: str | None = None
+    #: Who wrote what is being saved. The client asserts it — the apply
+    #: happens in the browser, so there is nowhere else it could come
+    #: from — which makes it a record of provenance, not a security
+    #: claim. It is worth having anyway: an assistant edit you can see in
+    #: the history is one you can drop, and an invisible one is how a
+    #: published story lost its widgets.
+    author_kind: Literal["human", "assistant"] = "human"
 
 
 class SaveTranslationRequest(BaseModel):
@@ -449,6 +456,7 @@ async def save_document(
         user.id, report_id,
         {"tiptap": body.tiptap, "version": body.version},
         body.base_revision,
+        author_kind=body.author_kind,
     )
     return {"ok": True, "revision": revision.id}
 
