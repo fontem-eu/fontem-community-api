@@ -557,6 +557,22 @@ def _record_call(traced: list | None, call_id: str, name: str, args: dict,
     ))
 
 
+async def _document_is_readable(doc) -> bool:
+    """Whether the conversation's document can be read at all.
+
+    The order-independent half of the blind-rewrite guard: parallel tool
+    calls make "did it read first?" unreliable, but "is there a document
+    to rewrite?" is a fact that does not depend on which call won a race.
+    """
+    if doc is None:
+        return False
+    try:
+        body = json.loads(await doc.read())
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return isinstance(body, dict) and not body.get("error")
+
+
 def _has_read_document(traced: list | None) -> bool:
     """Whether this turn has actually seen the document.
 
@@ -706,13 +722,23 @@ class ToolRuntime:
         # everything it does not reproduce, so it is the one that must
         # not be written blind.
         if name == "mcp__gmr__replace_body" and not _has_read_document(traced):
-            out = json.dumps({
-                "error": "replace_body needs the current document first",
-                "hint": "call read_document and base the rewrite on what it "
-                        "returns — do not write one from memory",
-            })
-            _record_call(traced, call_id, name, args, out, started, 0)
-            return out, 0
+            # Not in this turn's trace — but a model may issue the read and
+            # the rewrite in ONE parallel batch, and then the rewrite can
+            # reach here before the read has been recorded. Refusing on
+            # that would punish the correct behaviour, so fall back to the
+            # thing actually being protected: a document that cannot be
+            # read cannot be rewritten. That is the prod failure verbatim —
+            # read_document answered "not found" and the model proposed a
+            # full replacement anyway.
+            if not await _document_is_readable(doc):
+                out = json.dumps({
+                    "error": "replace_body needs the current document first, "
+                             "and this one could not be read",
+                    "hint": "call read_document — if it fails, say so "
+                            "instead of writing a replacement from memory",
+                })
+                _record_call(traced, call_id, name, args, out, started, 0)
+                return out, 0
         # Degenerate-loop guard. A byte-identical call learns nothing new —
         # these tools are deterministic within a turn — yet a small model
         # that gets an error back retries the same call verbatim: a 1.7B
