@@ -557,6 +557,24 @@ def _record_call(traced: list | None, call_id: str, name: str, args: dict,
     ))
 
 
+def _has_read_document(traced: list | None) -> bool:
+    """Whether this turn has actually seen the document.
+
+    A failed read does not count: the point is that the model has the
+    text in front of it, not that it went through the motions.
+    """
+    for entry in traced or []:
+        if entry.get("tool") != "mcp__gmr__read_document":
+            continue
+        try:
+            body = json.loads(entry.get("result") or "{}")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(body, dict) and not body.get("error"):
+            return True
+    return False
+
+
 class ToolRuntime:
     """Executes the assistant's tools. Owns no loop and talks to no model.
 
@@ -676,6 +694,22 @@ class ToolRuntime:
             out = json.dumps({
                 "error": f"{name} is not available to signed-out visitors",
                 "hint": "sign in to use this tool",
+            })
+            _record_call(traced, call_id, name, args, out, started, 0)
+            return out, 0
+        # A whole-document rewrite requires having read the document.
+        #
+        # The model has proposed one against a document it was told it
+        # could not read (prod, 2026-08-30): the read failed, and it
+        # invented a replacement anyway, which the user then applied over
+        # their own work. A rewrite is the one edit that destroys
+        # everything it does not reproduce, so it is the one that must
+        # not be written blind.
+        if name == "mcp__gmr__replace_body" and not _has_read_document(traced):
+            out = json.dumps({
+                "error": "replace_body needs the current document first",
+                "hint": "call read_document and base the rewrite on what it "
+                        "returns — do not write one from memory",
             })
             _record_call(traced, call_id, name, args, out, started, 0)
             return out, 0
