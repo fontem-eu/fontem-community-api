@@ -190,6 +190,19 @@ async def list_reports(
 
 # Declared before /{report_id} so the literal "search" segment routes here
 # rather than being parsed as a (non-UUID) report id.
+# Declared before /{report_id}: a literal segment that comes after a path
+# parameter is unreachable, and this repo has shipped that bug before.
+@router.get("/my-reviews")
+@inject
+async def my_reviews(
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> list[dict]:
+    """Everything this person started or was asked to read."""
+    return await svc.my_reviews(user.id)
+
+
 @router.get("/search", openapi_extra={"security": []}, response_model=list[ReportSearchItem])
 @inject
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
@@ -495,93 +508,169 @@ async def restore_revision(
     return {"ok": True, "revision": revision.id}
 
 
-# ── Merge requests ───────────────────────────────────────────
+# ── Reviews ──────────────────────────────────────────────────
 #
-# Editors only, by design: an unreviewed proposal is not yet a claim the
-# platform is making, so readers see the published text and nothing else.
+# Two kinds of the same thing. A *change review* proposes a draft as the
+# article's published text and is read as a diff. A *full article review*
+# is one version read end to end, with inline comments and nothing to
+# merge. Both carry reviewers and a conversation.
 
 
-class OpenMergeRequest(BaseModel):
-    """Propose the caller's draft as the article's published text."""
+class OpenReviewRequest(BaseModel):
+    """Start a review of this article."""
+    kind: str = Field(default="change", pattern="^(change|article)$")
     title: str = Field(default="", max_length=200)
     body: str = Field(default="", max_length=4000)
 
 
-@router.post("/{report_id}/merge-requests", status_code=201)
+class InviteReviewerRequest(BaseModel):
+    user_id: str
+
+
+class ReviewCommentRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+    #: Which block this is about. A block key rather than a line number,
+    #: so the comment survives edits elsewhere in the document.
+    anchor: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/{report_id}/reviews", status_code=201)
 @inject
-async def open_merge_request(
+async def open_review(
     report_id: UuidPath,
-    body: OpenMergeRequest,
+    body: OpenReviewRequest,
     *,
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    mr = await svc.open_merge_request(user.id, report_id, body.title, body.body)
-    return await svc.get_merge_request(user.id, report_id, mr.id)
+    if body.kind == "article":
+        review = await svc.open_article_review(
+            user.id, report_id, body.title, body.body)
+    else:
+        review = await svc.open_change_review(
+            user.id, report_id, body.title, body.body)
+    return await svc.get_review(user.id, report_id, review.id)
 
 
-@router.get("/{report_id}/merge-requests")
+@router.get("/{report_id}/reviews")
 @inject
-async def list_merge_requests(
+async def list_reviews(
     report_id: UuidPath,
     *,
     state: Annotated[str | None, Query()] = "open",
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> list[dict]:
-    return await svc.list_merge_requests(user.id, report_id, state)
+    return await svc.list_reviews(user.id, report_id, state)
 
 
 @router.get(
-    "/{report_id}/merge-requests/{mr_id}",
-    responses={404: {"description": "No such merge request."}},
+    "/{report_id}/reviews/{review_id}",
+    responses={404: {"description": "No such review."}},
 )
 @inject
-async def get_merge_request(
+async def get_review(
     report_id: UuidPath,
-    mr_id: UuidPath,
+    review_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    """The proposal and the changes it would make to the article."""
-    return await svc.get_merge_request(user.id, report_id, mr_id)
+    """The review, its changes or its document, and the conversation."""
+    return await svc.get_review(user.id, report_id, review_id)
+
+
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+@router.post(
+    "/{report_id}/reviews/{review_id}/reviewers",
+    responses={404: {"description": "No such review."}},
+)
+@inject
+async def invite_reviewer(
+    report_id: UuidPath,
+    review_id: UuidPath,
+    body: InviteReviewerRequest,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Ask somebody to read this. They can then open it and comment."""
+    return await svc.invite_reviewer(
+        user.id, report_id, review_id, body.user_id)
+
+
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+@router.post(
+    "/{report_id}/reviews/{review_id}/comments",
+    status_code=201,
+    responses={404: {"description": "No such review."}},
+)
+@inject
+async def comment_on_review(
+    report_id: UuidPath,
+    review_id: UuidPath,
+    body: ReviewCommentRequest,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    return await svc.comment_on_review(
+        user.id, report_id, review_id, body.body, body.anchor)
+
+
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
+@router.post(
+    "/{report_id}/reviews/{review_id}/comments/{comment_id}/resolve",
+    responses={404: {"description": "No such review or comment."}},
+)
+@inject
+async def resolve_review_comment(
+    report_id: UuidPath,
+    review_id: UuidPath,
+    comment_id: UuidPath,
+    *,
+    svc: FromDishka[ReportService],
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    return await svc.resolve_review_comment(
+        user.id, report_id, review_id, comment_id)
 
 
 @router.post(
-    "/{report_id}/merge-requests/{mr_id}/merge",
+    "/{report_id}/reviews/{review_id}/publish",
     responses={
-        404: {"description": "No such merge request."},
+        404: {"description": "No such review."},
         409: {"description": "The published text moved on since this "
                              "was proposed."},
     },
 )
 @inject
-async def merge_merge_request(
+async def publish_review(
     report_id: UuidPath,
-    mr_id: UuidPath,
+    review_id: UuidPath,
     *,
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    """Publish the proposal. Fast-forward only."""
-    return await svc.merge_merge_request(user.id, report_id, mr_id)
+    """Publish a change review. Fast-forward only."""
+    return await svc.publish_change_review(user.id, report_id, review_id)
 
 
 @router.post(
-    "/{report_id}/merge-requests/{mr_id}/close",
-    responses={404: {"description": "No such merge request."}},
+    "/{report_id}/reviews/{review_id}/close",
+    responses={404: {"description": "No such review."}},
 )
 @inject
-async def close_merge_request(
+async def close_review(
     report_id: UuidPath,
-    mr_id: UuidPath,
+    review_id: UuidPath,
     *,
+    state: Annotated[str, Query(pattern="^(closed|completed)$")] = "closed",
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
-    """Withdraw it. The draft and its revisions stay exactly where they are."""
-    return await svc.close_merge_request(user.id, report_id, mr_id)
+    """Withdraw a proposal, or mark a read as done."""
+    return await svc.close_review(user.id, report_id, review_id, state)
 
 
 # ── Image Upload ─────────────────────────────────────────────

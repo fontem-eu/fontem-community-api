@@ -7,7 +7,9 @@ from abc import ABC, abstractmethod
 from src.domain.report import (
     DocBranch,
     DocRevision,
-    MergeRequest,
+    Review,
+    ReviewComment,
+    ReviewReviewer,
     Report,
     ReportTranslation,
     Section,
@@ -111,21 +113,44 @@ class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
         head_revision_id: str, base_revision_id: str | None = None,
     ) -> DocBranch: ...
 
-    # ── merge requests ─────────────────────────────────────────
+    # ── reviews ────────────────────────────────────────────────
 
     @abstractmethod
-    async def add_merge_request(self, mr: MergeRequest) -> MergeRequest: ...
+    async def add_review(self, review: Review) -> Review: ...
 
     @abstractmethod
-    async def get_merge_request(self, mr_id: str) -> MergeRequest | None: ...
+    async def get_review(self, review_id: str) -> Review | None: ...
 
     @abstractmethod
-    async def list_merge_requests(
+    async def list_reviews(
         self, report_id: str, state: str | None = None,
-    ) -> list[MergeRequest]: ...
+        kind: str | None = None,
+    ) -> list[Review]: ...
 
     @abstractmethod
-    async def update_merge_request(self, mr: MergeRequest) -> MergeRequest: ...
+    async def update_review(self, review: Review) -> Review: ...
+
+    @abstractmethod
+    async def reviews_for_user(self, user_id: str) -> list[Review]:
+        """Everything this person authored or was invited to read."""
+
+    @abstractmethod
+    async def add_reviewer(self, reviewer: ReviewReviewer) -> ReviewReviewer: ...
+
+    @abstractmethod
+    async def list_reviewers(self, review_id: str) -> list[ReviewReviewer]: ...
+
+    @abstractmethod
+    async def add_review_comment(self, comment: ReviewComment) -> ReviewComment: ...
+
+    @abstractmethod
+    async def list_review_comments(self, review_id: str) -> list[ReviewComment]: ...
+
+    @abstractmethod
+    async def get_review_comment(self, comment_id: str) -> ReviewComment | None: ...
+
+    @abstractmethod
+    async def update_review_comment(self, comment: ReviewComment) -> ReviewComment: ...
 
     @abstractmethod
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None: ...

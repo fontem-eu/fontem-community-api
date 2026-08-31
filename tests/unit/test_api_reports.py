@@ -375,7 +375,7 @@ class TestRevisionHistory:
         assert [r["id"] for r in rows] == [restored, second, first]
 
 
-class TestMergeRequests:
+class TestChangeReviews:
     """Publishing is a decision, and the decision is recorded.
 
     Three rules the editors chose, pinned here because they are policy
@@ -404,12 +404,12 @@ class TestMergeRequests:
         h = make_headers("user-1")
         rid, first, drafted = self._article_with_a_draft(client, h)
 
-        mr = client.post(f"/reports/{rid}/merge-requests",
+        mr = client.post(f"/reports/{rid}/reviews",
                          json={"title": "Rewrite the lead"}, headers=h).json()
         assert mr["state"] == "open"
         assert mr["source_head"] == drafted
         assert mr["target_base"] == first
-        assert mr["can_fast_forward"] is True
+        assert mr["can_publish"] is True
         assert [o["op"] for o in mr["operations"]] == ["replace"]
 
     def test_merging_publishes_and_records_that_nobody_else_read_it(
@@ -418,11 +418,11 @@ class TestMergeRequests:
         asyncio.get_event_loop().run_until_complete(self._seed(services))
         h = make_headers("user-1")
         rid, _, drafted = self._article_with_a_draft(client, h)
-        mr = client.post(f"/reports/{rid}/merge-requests", json={},
+        mr = client.post(f"/reports/{rid}/reviews", json={},
                          headers=h).json()
 
         merged = client.post(
-            f"/reports/{rid}/merge-requests/{mr['id']}/merge", headers=h).json()
+            f"/reports/{rid}/reviews/{mr['id']}/publish", headers=h).json()
         assert merged["state"] == "merged"
         # Allowed — solo authorship is the normal case — but on the record.
         assert merged["self_merged"] is True
@@ -441,11 +441,11 @@ class TestMergeRequests:
         client.put(f"/reports/{rid}/access",
                    json={"user_id": _stable_uuid("user-2"), "level": "editor"},
                    headers=h1)
-        mr = client.post(f"/reports/{rid}/merge-requests", json={},
+        mr = client.post(f"/reports/{rid}/reviews", json={},
                          headers=h1).json()
 
         merged = client.post(
-            f"/reports/{rid}/merge-requests/{mr['id']}/merge", headers=h2)
+            f"/reports/{rid}/reviews/{mr['id']}/publish", headers=h2)
         if merged.status_code == 200:
             assert merged.json()["self_merged"] is False
 
@@ -457,7 +457,7 @@ class TestMergeRequests:
         asyncio.get_event_loop().run_until_complete(self._seed(services))
         h = make_headers("user-1")
         rid, first, drafted = self._article_with_a_draft(client, h)
-        mr = client.post(f"/reports/{rid}/merge-requests", json={},
+        mr = client.post(f"/reports/{rid}/reviews", json={},
                          headers=h).json()
 
         # Main moves on underneath the open proposal.
@@ -465,13 +465,13 @@ class TestMergeRequests:
             f"/reports/{rid}/content",
             json={"tiptap": _doc("something else"), "base_revision": drafted},
             headers=h).json()["revision"]
-        second = client.post(f"/reports/{rid}/merge-requests", json={},
+        second = client.post(f"/reports/{rid}/reviews", json={},
                              headers=h).json()
-        client.post(f"/reports/{rid}/merge-requests/{second['id']}/merge",
+        client.post(f"/reports/{rid}/reviews/{second['id']}/publish",
                     headers=h)
 
         stale = client.post(
-            f"/reports/{rid}/merge-requests/{mr['id']}/merge", headers=h)
+            f"/reports/{rid}/reviews/{mr['id']}/publish", headers=h)
         assert stale.status_code in (409, 400)
         if stale.status_code == 409:
             assert stale.json()["behind"] >= 1
@@ -483,27 +483,211 @@ class TestMergeRequests:
         asyncio.get_event_loop().run_until_complete(self._seed(services))
         h = make_headers("user-1")
         rid, _, drafted = self._article_with_a_draft(client, h)
-        mr = client.post(f"/reports/{rid}/merge-requests", json={},
+        mr = client.post(f"/reports/{rid}/reviews", json={},
                          headers=h).json()
 
         closed = client.post(
-            f"/reports/{rid}/merge-requests/{mr['id']}/close", headers=h).json()
+            f"/reports/{rid}/reviews/{mr['id']}/close", headers=h).json()
         assert closed["state"] == "closed"
         # Nothing expires and nothing is deleted: the work is still there.
         after = client.get(f"/reports/{rid}", headers=h).json()
         assert after["draft_revision"] == drafted
 
-    def test_proposals_are_not_readable_without_edit_access(
+    def test_a_reader_of_the_article_sees_none_of_its_proposals(
+        self, client, services,
+    ):
+        """An unreviewed proposal is not yet a claim the platform is
+        making, so it does not appear to the article's readers."""
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h1 = make_headers("user-1")
+        rid, _, _ = self._article_with_a_draft(client, h1)
+        client.post(f"/reports/{rid}/reviews", json={}, headers=h1)
+        client.put(f"/reports/{rid}", json={"visibility": "public_open"},
+                   headers=h1)
+
+        resp = client.get(f"/reports/{rid}/reviews",
+                          headers=make_headers("user-2"))
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_a_stranger_cannot_probe_a_private_article_for_reviews(
         self, client, services,
     ):
         asyncio.get_event_loop().run_until_complete(self._seed(services))
         h1 = make_headers("user-1")
         rid, _, _ = self._article_with_a_draft(client, h1)
-        client.post(f"/reports/{rid}/merge-requests", json={}, headers=h1)
-        client.put(f"/reports/{rid}", json={"visibility": "public_open"},
-                   headers=h1)
+        client.post(f"/reports/{rid}/reviews", json={}, headers=h1)
 
-        # A reader of the published article cannot enumerate its drafts.
-        assert client.get(f"/reports/{rid}/merge-requests").status_code in (401, 403, 404)
-        assert client.get(f"/reports/{rid}/merge-requests",
+        # Private article: existence itself must not be confirmable.
+        assert client.get(f"/reports/{rid}/reviews",
                           headers=make_headers("user-2")).status_code in (403, 404)
+
+
+class TestArticleReviews:
+    """The other kind: one version read end to end, with nothing to merge.
+
+    A self-review before publishing, or somebody else's read. The whole
+    output is the conversation.
+    """
+
+    async def _seed(self, services):
+        for u in ("user-1", "user-2"):
+            await seed_user(services["user_repo"], u)
+
+    def _article(self, client, h):
+        rid = client.post("/reports", json={"title": "R"},
+                          headers=h).json()["id"]
+        client.put(f"/reports/{rid}/content",
+                   json={"tiptap": _doc("The lead paragraph.")}, headers=h)
+        return rid
+
+    def test_a_self_review_returns_the_article_in_blocks_to_comment_on(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = self._article(client, h)
+
+        review = client.post(f"/reports/{rid}/reviews",
+                             json={"kind": "article", "title": "Read-through"},
+                             headers=h).json()
+        assert review["kind"] == "article"
+        # No diff — there is nothing to compare it against.
+        assert "operations" not in review
+        assert [b["text"] for b in review["blocks"]] == ["The lead paragraph."]
+        # And nothing to publish: an article review does not move the text.
+        assert review["can_publish"] is False
+
+    def test_publishing_an_article_review_is_refused(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = self._article(client, h)
+        review = client.post(f"/reports/{rid}/reviews",
+                             json={"kind": "article"}, headers=h).json()
+
+        resp = client.post(f"/reports/{rid}/reviews/{review['id']}/publish",
+                           headers=h)
+        assert resp.status_code == 400
+
+    def test_several_article_reviews_can_be_open_at_once(self, client, services):
+        """A piece can be read by more than one person, and each read is
+        its own conversation — unlike a change, where the draft branch is
+        singular."""
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = self._article(client, h)
+
+        first = client.post(f"/reports/{rid}/reviews", json={"kind": "article"},
+                            headers=h).json()
+        second = client.post(f"/reports/{rid}/reviews", json={"kind": "article"},
+                             headers=h).json()
+        assert first["id"] != second["id"]
+        assert len(client.get(f"/reports/{rid}/reviews", headers=h).json()) == 2
+
+
+class TestReviewConversation:
+    """Invitations and inline comments — the reason a review exists."""
+
+    async def _seed(self, services):
+        for u in ("user-1", "user-2"):
+            await seed_user(services["user_repo"], u)
+
+    def _review(self, client, h, kind="article"):
+        rid = client.post("/reports", json={"title": "R"},
+                          headers=h).json()["id"]
+        client.put(f"/reports/{rid}/content",
+                   json={"tiptap": _doc("Under review.")}, headers=h)
+        review = client.post(f"/reports/{rid}/reviews", json={"kind": kind},
+                             headers=h).json()
+        return rid, review["id"]
+
+    def test_a_comment_anchors_to_a_block_and_comes_back_with_the_review(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, review_id = self._review(client, h)
+
+        posted = client.post(
+            f"/reports/{rid}/reviews/{review_id}/comments",
+            json={"body": "This lead buries the number.",
+                  "anchor": "paragraph\\x00Under review."},
+            headers=h)
+        assert posted.status_code == 201
+
+        review = client.get(f"/reports/{rid}/reviews/{review_id}",
+                            headers=h).json()
+        assert len(review["comments"]) == 1
+        assert review["comments"][0]["body"] == "This lead buries the number."
+        assert review["comments"][0]["resolved"] is False
+
+    def test_an_empty_comment_is_refused(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, review_id = self._review(client, h)
+        resp = client.post(f"/reports/{rid}/reviews/{review_id}/comments",
+                           json={"body": "   "}, headers=h)
+        assert resp.status_code in (400, 422)
+
+    def test_a_comment_can_be_resolved(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, review_id = self._review(client, h)
+        comment = client.post(f"/reports/{rid}/reviews/{review_id}/comments",
+                              json={"body": "typo"}, headers=h).json()
+
+        resolved = client.post(
+            f"/reports/{rid}/reviews/{review_id}/comments/{comment['id']}/resolve",
+            headers=h).json()
+        assert resolved["resolved"] is True
+
+    def test_an_invited_reviewer_can_open_it_and_comment(self, client, services):
+        """Inviting somebody to read an article is useless if they cannot
+        then open the thing they were asked to read."""
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h1, h2 = make_headers("user-1"), make_headers("user-2")
+        rid, review_id = self._review(client, h1)
+
+        # Before the invitation: not theirs to see.
+        assert client.get(f"/reports/{rid}/reviews/{review_id}",
+                          headers=h2).status_code == 404
+
+        invited = client.post(
+            f"/reports/{rid}/reviews/{review_id}/reviewers",
+            json={"user_id": _stable_uuid("user-2")}, headers=h1).json()
+        assert _stable_uuid("user-2") in invited["reviewers"]
+
+        got = client.get(f"/reports/{rid}/reviews/{review_id}", headers=h2)
+        assert got.status_code == 200
+        posted = client.post(f"/reports/{rid}/reviews/{review_id}/comments",
+                             json={"body": "Reads well."}, headers=h2)
+        assert posted.status_code == 201
+
+    def test_my_reviews_covers_both_what_i_started_and_what_i_was_asked_to_read(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h1, h2 = make_headers("user-1"), make_headers("user-2")
+        rid, review_id = self._review(client, h1)
+        client.post(f"/reports/{rid}/reviews/{review_id}/reviewers",
+                    json={"user_id": _stable_uuid("user-2")}, headers=h1)
+
+        mine = client.get("/reports/my-reviews", headers=h1).json()
+        assert [r["id"] for r in mine] == [review_id]
+        assert mine[0]["mine"] is True
+        assert mine[0]["report_title"] == "R"
+
+        theirs = client.get("/reports/my-reviews", headers=h2).json()
+        assert [r["id"] for r in theirs] == [review_id]
+        # Not theirs, but waiting on them.
+        assert theirs[0]["mine"] is False
+
+    def test_marking_a_read_done_leaves_the_article_alone(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid, review_id = self._review(client, h)
+
+        done = client.post(f"/reports/{rid}/reviews/{review_id}/close",
+                           params={"state": "completed"}, headers=h).json()
+        assert done["state"] == "completed"
+        assert client.get(f"/reports/{rid}", headers=h).status_code == 200

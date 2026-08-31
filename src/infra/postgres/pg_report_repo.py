@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.domain.report import (
     DocBranch,
     DocRevision,
-    MergeRequest,
+    Review,
+    ReviewComment,
+    ReviewReviewer,
     Report,
     ReportTranslation,
     Section,
@@ -24,7 +26,9 @@ from src.domain.report import (
 from src.infra.postgres.models import (
     DocBranchModel,
     DocRevisionModel,
-    MergeRequestModel,
+    ReviewCommentModel,
+    ReviewModel,
+    ReviewReviewerModel,
     ReportAccessModel,
     ReportModel,
     ReportTranslationModel,
@@ -409,64 +413,144 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
         await self._session.refresh(row)
         return self._branch_to_domain(row)
 
-    # ── merge requests ─────────────────────────────────────────
+    # ── reviews ────────────────────────────────────────────────
 
     @staticmethod
-    def _mr_to_domain(row: MergeRequestModel) -> MergeRequest:
-        return MergeRequest(
-            id=row.id, report_id=row.report_id, author_id=row.author_id,
-            title=row.title, body=row.body, source_head=row.source_head,
-            target_base=row.target_base, state=row.state,
-            created_at=row.created_at, updated_at=row.updated_at,
-            merged_at=row.merged_at, merged_by=row.merged_by,
+    def _review_to_domain(row: ReviewModel) -> Review:
+        return Review(
+            id=row.id, report_id=row.report_id, kind=row.kind,
+            author_id=row.author_id, title=row.title, body=row.body,
+            source_head=row.source_head, target_base=row.target_base,
+            state=row.state, created_at=row.created_at,
+            updated_at=row.updated_at, merged_at=row.merged_at,
+            merged_by=row.merged_by,
             merged_revision_id=row.merged_revision_id,
             self_merged=row.self_merged,
         )
 
-    async def add_merge_request(self, mr: MergeRequest) -> MergeRequest:
-        model = MergeRequestModel(
-            report_id=mr.report_id, author_id=mr.author_id, title=mr.title,
-            body=mr.body, source_head=mr.source_head,
-            target_base=mr.target_base, state=mr.state,
+    async def add_review(self, review: Review) -> Review:
+        model = ReviewModel(
+            report_id=review.report_id, kind=review.kind,
+            author_id=review.author_id, title=review.title, body=review.body,
+            source_head=review.source_head, target_base=review.target_base,
+            state=review.state,
         )
         self._session.add(model)
         await self._session.commit()
         await self._session.refresh(model)
-        return self._mr_to_domain(model)
+        return self._review_to_domain(model)
 
-    async def get_merge_request(self, mr_id: str) -> MergeRequest | None:
+    async def get_review(self, review_id: str) -> Review | None:
         row = (await self._session.execute(
-            select(MergeRequestModel).where(MergeRequestModel.id == mr_id)
+            select(ReviewModel).where(ReviewModel.id == review_id)
         )).scalar_one_or_none()
-        return self._mr_to_domain(row) if row else None
+        return self._review_to_domain(row) if row else None
 
-    async def list_merge_requests(
+    async def list_reviews(
         self, report_id: str, state: str | None = None,
-    ) -> list[MergeRequest]:
-        stmt = select(MergeRequestModel).where(
-            MergeRequestModel.report_id == report_id)
+        kind: str | None = None,
+    ) -> list[Review]:
+        stmt = select(ReviewModel).where(ReviewModel.report_id == report_id)
         if state:
-            stmt = stmt.where(MergeRequestModel.state == state)
+            stmt = stmt.where(ReviewModel.state == state)
+        if kind:
+            stmt = stmt.where(ReviewModel.kind == kind)
         result = await self._session.execute(
-            stmt.order_by(MergeRequestModel.created_at.desc()))
-        return [self._mr_to_domain(r) for r in result.scalars().all()]
+            stmt.order_by(ReviewModel.created_at.desc()))
+        return [self._review_to_domain(r) for r in result.scalars().all()]
 
-    async def update_merge_request(self, mr: MergeRequest) -> MergeRequest:
+    async def update_review(self, review: Review) -> Review:
         row = (await self._session.execute(
-            select(MergeRequestModel).where(MergeRequestModel.id == mr.id)
+            select(ReviewModel).where(ReviewModel.id == review.id)
         )).scalar_one()
-        row.title = mr.title
-        row.body = mr.body
-        row.source_head = mr.source_head
-        row.target_base = mr.target_base
-        row.state = mr.state
-        row.merged_at = mr.merged_at
-        row.merged_by = mr.merged_by
-        row.merged_revision_id = mr.merged_revision_id
-        row.self_merged = mr.self_merged
+        for field in ("kind", "title", "body", "source_head", "target_base",
+                      "state", "merged_at", "merged_by", "merged_revision_id",
+                      "self_merged"):
+            setattr(row, field, getattr(review, field))
         await self._session.commit()
         await self._session.refresh(row)
-        return self._mr_to_domain(row)
+        return self._review_to_domain(row)
+
+    async def reviews_for_user(self, user_id: str) -> list[Review]:
+        """Authored or invited — one list, because that is the question
+        being asked: what is waiting for me?"""
+        invited = select(ReviewReviewerModel.review_id).where(
+            ReviewReviewerModel.user_id == user_id)
+        result = await self._session.execute(
+            select(ReviewModel)
+            .where(or_(ReviewModel.author_id == user_id,
+                       ReviewModel.id.in_(invited)))
+            .order_by(ReviewModel.updated_at.desc())
+        )
+        return [self._review_to_domain(r) for r in result.scalars().all()]
+
+    async def add_reviewer(self, reviewer: ReviewReviewer) -> ReviewReviewer:
+        existing = (await self._session.execute(
+            select(ReviewReviewerModel).where(
+                ReviewReviewerModel.review_id == reviewer.review_id,
+                ReviewReviewerModel.user_id == reviewer.user_id)
+        )).scalar_one_or_none()
+        if existing is not None:
+            return reviewer
+        self._session.add(ReviewReviewerModel(
+            review_id=reviewer.review_id, user_id=reviewer.user_id,
+            invited_by=reviewer.invited_by,
+        ))
+        await self._session.commit()
+        return reviewer
+
+    async def list_reviewers(self, review_id: str) -> list[ReviewReviewer]:
+        result = await self._session.execute(
+            select(ReviewReviewerModel)
+            .where(ReviewReviewerModel.review_id == review_id)
+            .order_by(ReviewReviewerModel.invited_at)
+        )
+        return [ReviewReviewer(review_id=r.review_id, user_id=r.user_id,
+                               invited_by=r.invited_by, invited_at=r.invited_at)
+                for r in result.scalars().all()]
+
+    @staticmethod
+    def _comment_to_domain(row: ReviewCommentModel) -> ReviewComment:
+        return ReviewComment(
+            id=row.id, review_id=row.review_id, author_id=row.author_id,
+            anchor=row.anchor, body=row.body, resolved=row.resolved,
+            created_at=row.created_at,
+        )
+
+    async def add_review_comment(self, comment: ReviewComment) -> ReviewComment:
+        model = ReviewCommentModel(
+            review_id=comment.review_id, author_id=comment.author_id,
+            anchor=comment.anchor, body=comment.body,
+            resolved=comment.resolved,
+        )
+        self._session.add(model)
+        await self._session.commit()
+        await self._session.refresh(model)
+        return self._comment_to_domain(model)
+
+    async def list_review_comments(self, review_id: str) -> list[ReviewComment]:
+        result = await self._session.execute(
+            select(ReviewCommentModel)
+            .where(ReviewCommentModel.review_id == review_id)
+            .order_by(ReviewCommentModel.created_at)
+        )
+        return [self._comment_to_domain(r) for r in result.scalars().all()]
+
+    async def get_review_comment(self, comment_id: str) -> ReviewComment | None:
+        row = (await self._session.execute(
+            select(ReviewCommentModel).where(ReviewCommentModel.id == comment_id)
+        )).scalar_one_or_none()
+        return self._comment_to_domain(row) if row else None
+
+    async def update_review_comment(self, comment: ReviewComment) -> ReviewComment:
+        row = (await self._session.execute(
+            select(ReviewCommentModel).where(ReviewCommentModel.id == comment.id)
+        )).scalar_one()
+        row.body = comment.body
+        row.resolved = comment.resolved
+        await self._session.commit()
+        await self._session.refresh(row)
+        return self._comment_to_domain(row)
 
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None:
         model = SectionVersionModel(

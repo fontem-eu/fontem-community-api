@@ -79,21 +79,22 @@ class DocBranch:
 
 
 @dataclass
-class MergeRequest:
-    """A proposal to publish one editor's draft.
+class Review:
+    """A review of an article: a proposed change, or a read of one version.
 
-    ``target_base`` is where main stood when the request was opened. If
-    main has moved since, the request is behind and cannot fast-forward
-    without discarding whatever moved it.
+    ``kind`` is "change" (a draft proposed as the published text, read as
+    a diff and merged) or "article" (one version read end to end, with
+    inline comments and nothing to merge).
     """
 
     id: str | None = None
     report_id: str = ""
+    kind: str = "change"
     author_id: str = ""
     title: str = ""
     body: str = ""
     source_head: str = ""
-    target_base: str = ""
+    target_base: str | None = None
     state: str = "open"
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -104,11 +105,21 @@ class MergeRequest:
 
 
 @dataclass
-class MrComment:
-    """A review comment, anchored to a block of the diff."""
+class ReviewReviewer:
+    """Somebody asked to read a review."""
+
+    review_id: str = ""
+    user_id: str = ""
+    invited_by: str = ""
+    invited_at: datetime | None = None
+
+
+@dataclass
+class ReviewComment:
+    """A comment anchored to a block of the document."""
 
     id: str | None = None
-    mr_id: str = ""
+    review_id: str = ""
     author_id: str = ""
     anchor: str | None = None
     body: str = ""

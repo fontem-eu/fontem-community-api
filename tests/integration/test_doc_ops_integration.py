@@ -111,9 +111,9 @@ def test_the_agent_reads_the_latest_saved_document(client, user_id):
 
     # Publish, because "the last saved version" for a reader is the
     # published one — a draft is the author's, not the article's.
-    mr = client.post(f"/reports/{report['id']}/merge-requests", json={},
+    mr = client.post(f"/reports/{report['id']}/reviews", json={},
                      headers=h).json()
-    client.post(f"/reports/{report['id']}/merge-requests/{mr['id']}/merge",
+    client.post(f"/reports/{report['id']}/reviews/{mr['id']}/publish",
                 headers=h)
 
     body = _read(client, user_id, report["id"])["sections"]

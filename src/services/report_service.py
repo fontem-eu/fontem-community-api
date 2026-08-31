@@ -21,7 +21,9 @@ from datetime import datetime, time, timezone
 
 from src.domain.report import (
     DocRevision,
-    MergeRequest,
+    Review,
+    ReviewComment,
+    ReviewReviewer,
     Report,
     ReportTranslation,
     Section,
@@ -36,7 +38,12 @@ from src.services.authz import (
 )
 from src.services.authz.policy import Principal
 from src.services.nuts import normalize_nuts
-from src.services.exceptions import Conflict, InvalidInput, NotFound
+from src.services.exceptions import (
+    Conflict,
+    InvalidInput,
+    NotFound,
+    PermissionDenied,
+)
 from src.services.access_inheritance import AccessInheritance, max_level
 from src.repositories.group_repository import GroupRepository
 from src.repositories.user_repository import UserRepository
@@ -72,8 +79,9 @@ def _day_end(iso: str | None) -> datetime | None:
 #: enumeration attack needs.
 _NO_SUCH_REVISION = "No such revision."
 
-#: Same reasoning as above for proposals.
-_NO_SUCH_MERGE_REQUEST = "No such merge request."
+#: Same reasoning as above: whether it does not exist or is not
+#: yours is deliberately indistinguishable.
+_NO_SUCH_REVIEW = "No such review."
 
 
 class ReportService:  # pylint: disable=too-many-public-methods
@@ -512,22 +520,52 @@ class ReportService:  # pylint: disable=too-many-public-methods
             user_id, report_id, wanted.content_json,
             head.id if head else None)
 
-    # ── merge requests ─────────────────────────────────────────
+    # ── reviews ────────────────────────────────────────────────
 
-    async def _behind_by(self, report_id: str, base_revision: str) -> int:
-        """How many revisions main has taken since ``base_revision``."""
+    async def _behind_by(self, report_id: str, base_revision: str | None) -> int:
+        """How many revisions the published text has taken since ``base``."""
+        if base_revision is None:
+            return 0
         head = await self.document_head(report_id)
         steps = 0
         cursor = head
         while cursor is not None and cursor.id != base_revision and steps < 500:
             steps += 1
-            cursor = (await self._reports.get_revision(cursor.parent_id)
-                      if cursor.parent_id else None)
+            if not cursor.parent_id:
+                return -1
+            cursor = await self._reports.get_revision(cursor.parent_id)
         return steps if cursor is not None else -1
 
-    async def open_merge_request(
+    async def _can_see_review(self, user_id: str, review: Review) -> bool:
+        """Its author, anyone invited to read it, or anyone who may edit.
+
+        Invitation is the point: asking a colleague to read an article is
+        useless if they then cannot open the thing you asked them to read.
+        """
+        if review.author_id == user_id:
+            return True
+        invited = await self._reports.list_reviewers(review.id)
+        if any(r.user_id == user_id for r in invited):
+            return True
+        try:
+            await self._load_for(user_id, review.report_id, Action.STORIES_EDIT)
+            return True
+        except (PermissionDenied, NotFound):
+            return False
+
+    async def _review_or_404(
+        self, user_id: str, report_id: str, review_id: str,
+    ) -> Review:
+        review = await self._reports.get_review(review_id)
+        if review is None or review.report_id != report_id:
+            raise NotFound(_NO_SUCH_REVIEW)
+        if not await self._can_see_review(user_id, review):
+            raise NotFound(_NO_SUCH_REVIEW)
+        return review
+
+    async def open_change_review(
         self, user_id: str, report_id: str, title: str = "", body: str = "",
-    ) -> MergeRequest:
+    ) -> Review:
         """Propose this editor's draft as the article's published text."""
         await self._load_for(user_id, report_id, Action.STORIES_EDIT)
         draft = await self._reports.get_branch(report_id, user_id)
@@ -538,108 +576,218 @@ class ReportService:  # pylint: disable=too-many-public-methods
         if main_head is not None and draft.head_revision_id == main_head.id:
             raise InvalidInput("Your draft matches the published text.")
 
-        existing = [m for m in await self._reports.list_merge_requests(
-            report_id, "open") if m.author_id == user_id]
-        if existing:
-            # The draft branch is singular, so a second open request for it
-            # would be the same proposal twice. Move the existing one.
-            mr = existing[0]
-            mr.source_head = draft.head_revision_id
-            mr.title = title or mr.title
-            mr.body = body or mr.body
-            return await self._reports.update_merge_request(mr)
+        open_changes = await self._reports.list_reviews(
+            report_id, "open", "change")
+        mine = [r for r in open_changes if r.author_id == user_id]
+        if mine:
+            # The draft branch is singular, so a second open change review
+            # would be the same proposal twice. Move the existing one to
+            # whatever the draft says now.
+            review = mine[0]
+            review.source_head = draft.head_revision_id
+            review.title = title or review.title
+            review.body = body or review.body
+            return await self._reports.update_review(review)
 
-        return await self._reports.add_merge_request(MergeRequest(
-            report_id=report_id, author_id=user_id,
-            title=title or "Proposed revision", body=body,
+        return await self._reports.add_review(Review(
+            report_id=report_id, kind="change", author_id=user_id,
+            title=title or "Proposed changes", body=body,
             source_head=draft.head_revision_id,
-            target_base=main_head.id if main_head else draft.head_revision_id,
+            target_base=main_head.id if main_head else None,
         ))
 
-    async def list_merge_requests(
+    async def open_article_review(
+        self, user_id: str, report_id: str, title: str = "", body: str = "",
+    ) -> Review:
+        """Read one version of a finished article and comment on it.
+
+        No diff and nothing to merge — a self-review before publishing, or
+        somebody else's read. Several can be open at once: a piece can be
+        read by more than one person, and each read is its own
+        conversation.
+        """
+        await self._load_for(user_id, report_id, Action.STORIES_READ)
+        head = (await self.draft_head(user_id, report_id)
+                or await self.document_head(report_id))
+        if head is None:
+            raise InvalidInput("This article has nothing to review yet.")
+        return await self._reports.add_review(Review(
+            report_id=report_id, kind="article", author_id=user_id,
+            title=title or "Article review", body=body,
+            source_head=head.id, target_base=None,
+        ))
+
+    async def list_reviews(
         self, user_id: str, report_id: str, state: str | None = "open",
     ) -> list[dict]:
-        """Open proposals for this article — for people who may edit it.
+        """Reviews on this article that this person may see.
 
-        Readers see the published text and nothing else: a proposal
-        nobody has reviewed is not yet a claim the platform is making.
+        Read access to the article first, so a stranger cannot use this
+        to confirm that a private one exists; then per review, because an
+        invited reviewer may see the one they were asked to read without
+        being able to edit anything.
         """
-        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
-        rows = await self._reports.list_merge_requests(report_id, state)
-        return [await self._mr_view(m) for m in rows]
+        await self._load_for(user_id, report_id, Action.STORIES_READ)
+        rows = await self._reports.list_reviews(report_id, state)
+        out = []
+        for review in rows:
+            if await self._can_see_review(user_id, review):
+                out.append(await self._review_view(review))
+        return out
 
-    async def get_merge_request(
-        self, user_id: str, report_id: str, mr_id: str,
+    async def my_reviews(self, user_id: str) -> list[dict]:
+        """Everything this person started or was asked to read."""
+        rows = await self._reports.reviews_for_user(user_id)
+        out = []
+        for review in rows:
+            view = await self._review_view(review)
+            report = await self._reports.get_by_id(review.report_id)
+            view["report_title"] = report.title if report else ""
+            view["mine"] = review.author_id == user_id
+            out.append(view)
+        return out
+
+    async def get_review(
+        self, user_id: str, report_id: str, review_id: str,
     ) -> dict:
-        """One proposal, with the changes it would make to the article."""
-        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
-        mr = await self._reports.get_merge_request(mr_id)
-        if mr is None or mr.report_id != report_id:
-            raise NotFound(_NO_SUCH_MERGE_REQUEST)
+        """One review: its changes if it proposes any, its document if it
+        does not, and the conversation either way."""
+        review = await self._review_or_404(user_id, report_id, review_id)
+        view = await self._review_view(review)
+        source = await self._reports.get_revision(review.source_head)
 
-        base = await self._reports.get_revision(mr.target_base)
-        source = await self._reports.get_revision(mr.source_head)
-        operations = doc_diff.diff(
-            base.content_json if base else None,
-            source.content_json if source else None)
-        view = await self._mr_view(mr)
-        view["operations"] = operations
+        if review.kind == "change":
+            base = (await self._reports.get_revision(review.target_base)
+                    if review.target_base else None)
+            view["operations"] = doc_diff.diff(
+                base.content_json if base else None,
+                source.content_json if source else None)
+        else:
+            # Nothing to compare against: the reader wants the article as
+            # it stands, in blocks, so a comment can anchor to one.
+            view["blocks"] = doc_diff.blocks(
+                source.content_json if source else None)
+            view["content_doc"] = source.content_json if source else None
+
+        view["comments"] = [
+            {
+                "id": c.id, "author_id": c.author_id, "anchor": c.anchor,
+                "body": c.body, "resolved": c.resolved,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in await self._reports.list_review_comments(review_id)
+        ]
         return view
 
-    async def _mr_view(self, mr: MergeRequest) -> dict:
-        """The row a reviewer reads, including whether it can merge."""
-        base = await self._reports.get_revision(mr.target_base)
-        source = await self._reports.get_revision(mr.source_head)
-        changes = doc_diff.summary(doc_diff.diff(
-            base.content_json if base else None,
-            source.content_json if source else None))
+    async def _review_view(self, review: Review) -> dict:
+        """The row a reviewer reads, including whether it can be published."""
+        changes = {}
         behind = 0
-        if mr.state == "open":
-            behind = await self._behind_by(mr.report_id, mr.target_base)
+        if review.kind == "change":
+            base = (await self._reports.get_revision(review.target_base)
+                    if review.target_base else None)
+            source = await self._reports.get_revision(review.source_head)
+            changes = doc_diff.summary(doc_diff.diff(
+                base.content_json if base else None,
+                source.content_json if source else None))
+            if review.state == "open":
+                behind = await self._behind_by(
+                    review.report_id, review.target_base)
+
+        reviewers = await self._reports.list_reviewers(review.id)
         return {
-            "id": mr.id,
-            "report_id": mr.report_id,
-            "author_id": mr.author_id,
-            "title": mr.title,
-            "body": mr.body,
-            "state": mr.state,
-            "source_head": mr.source_head,
-            "target_base": mr.target_base,
-            "created_at": mr.created_at.isoformat() if mr.created_at else None,
-            "merged_at": mr.merged_at.isoformat() if mr.merged_at else None,
-            "merged_by": mr.merged_by,
-            "self_merged": mr.self_merged,
+            "id": review.id,
+            "report_id": review.report_id,
+            "kind": review.kind,
+            "author_id": review.author_id,
+            "title": review.title,
+            "body": review.body,
+            "state": review.state,
+            "source_head": review.source_head,
+            "target_base": review.target_base,
+            "created_at": (review.created_at.isoformat()
+                           if review.created_at else None),
+            "merged_at": (review.merged_at.isoformat()
+                          if review.merged_at else None),
+            "merged_by": review.merged_by,
+            "self_merged": review.self_merged,
+            "reviewers": [r.user_id for r in reviewers],
             "changes": changes,
-            # Nothing expires and nothing is auto-rebased: a draft that
+            # Nothing expires and nothing is auto-rebased: a proposal that
             # has fallen behind is shown as such, and its author decides.
             "behind": behind,
-            "can_fast_forward": mr.state == "open" and behind == 0,
+            "can_publish": (review.kind == "change"
+                            and review.state == "open" and behind == 0),
         }
 
-    async def merge_merge_request(
-        self, user_id: str, report_id: str, mr_id: str,
+    async def invite_reviewer(
+        self, user_id: str, report_id: str, review_id: str, reviewer_id: str,
     ) -> dict:
-        """Publish a proposal by moving main to its head.
+        """Ask somebody to read this. They can then open it and comment,
+        whatever their access to the article otherwise is."""
+        review = await self._review_or_404(user_id, report_id, review_id)
+        await self._reports.add_reviewer(ReviewReviewer(
+            review_id=review.id, user_id=reviewer_id, invited_by=user_id))
+        return await self._review_view(review)
 
-        Only a fast-forward: if main has moved since the proposal was
-        opened, merging would discard whatever moved it. That case is
-        refused with the difference attached rather than resolved by
-        guesswork.
+    # Six, all load-bearing: who is speaking, which article, which
+    # review, what they said, and which block they said it about.
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    async def comment_on_review(
+        self, user_id: str, report_id: str, review_id: str,
+        body: str, anchor: str | None = None,
+    ) -> dict:
+        """Leave an inline comment, anchored to a block of the document."""
+        review = await self._review_or_404(user_id, report_id, review_id)
+        if not body.strip():
+            raise InvalidInput("A comment needs something in it.")
+        comment = await self._reports.add_review_comment(ReviewComment(
+            review_id=review.id, author_id=user_id, anchor=anchor,
+            body=body.strip(),
+        ))
+        return {
+            "id": comment.id, "author_id": comment.author_id,
+            "anchor": comment.anchor, "body": comment.body,
+            "resolved": comment.resolved,
+            "created_at": (comment.created_at.isoformat()
+                           if comment.created_at else None),
+        }
 
-        An author may merge their own proposal — solo authorship is the
-        normal case here — and the merge records that nobody else read it.
+    async def resolve_review_comment(
+        self, user_id: str, report_id: str, review_id: str, comment_id: str,
+    ) -> dict:
+        review = await self._review_or_404(user_id, report_id, review_id)
+        comment = await self._reports.get_review_comment(comment_id)
+        if comment is None or comment.review_id != review.id:
+            raise NotFound("No such comment.")
+        comment.resolved = True
+        updated = await self._reports.update_review_comment(comment)
+        return {"id": updated.id, "resolved": updated.resolved}
+
+    async def publish_change_review(
+        self, user_id: str, report_id: str, review_id: str,
+    ) -> dict:
+        """Publish a proposal by moving the article to its head.
+
+        Fast-forward only: publishing a proposal whose base has moved
+        would discard whatever moved it, and guessing is exactly what the
+        baseline mechanism exists to prevent.
+
+        An author may publish their own proposal — solo authorship is the
+        normal case here — and the record says nobody else read it.
         """
         await self._load_for(user_id, report_id, Action.STORIES_EDIT)
-        mr = await self._reports.get_merge_request(mr_id)
-        if mr is None or mr.report_id != report_id:
-            raise NotFound(_NO_SUCH_MERGE_REQUEST)
-        if mr.state != "open":
-            raise InvalidInput(f"This proposal is already {mr.state}.")
+        review = await self._review_or_404(user_id, report_id, review_id)
+        if review.kind != "change":
+            raise InvalidInput("An article review has nothing to publish.")
+        if review.state != "open":
+            raise InvalidInput(f"This review is already {review.state}.")
 
-        behind = await self._behind_by(report_id, mr.target_base)
+        behind = await self._behind_by(report_id, review.target_base)
         if behind != 0:
             main_head = await self.document_head(report_id)
-            base = await self._reports.get_revision(mr.target_base)
+            base = (await self._reports.get_revision(review.target_base)
+                    if review.target_base else None)
             raise Conflict(
                 "the published text moved on since this was proposed",
                 payload={
@@ -651,7 +799,7 @@ class ReportService:  # pylint: disable=too-many-public-methods
                 },
             )
 
-        source = await self._reports.get_revision(mr.source_head)
+        source = await self._reports.get_revision(review.source_head)
         if source is None:
             raise NotFound(_NO_SUCH_REVISION)
 
@@ -662,27 +810,29 @@ class ReportService:  # pylint: disable=too-many-public-methods
             report.content_version += 1
             await self._reports.update(report)
 
-        mr.state = "merged"
-        mr.merged_at = datetime.now(timezone.utc)
-        mr.merged_by = user_id
-        mr.merged_revision_id = source.id
-        mr.self_merged = user_id == mr.author_id
-        merged = await self._reports.update_merge_request(mr)
-        return await self._mr_view(merged)
+        review.state = "merged"
+        review.merged_at = datetime.now(timezone.utc)
+        review.merged_by = user_id
+        review.merged_revision_id = source.id
+        review.self_merged = user_id == review.author_id
+        return await self._review_view(
+            await self._reports.update_review(review))
 
-    async def close_merge_request(
-        self, user_id: str, report_id: str, mr_id: str,
+    async def close_review(
+        self, user_id: str, report_id: str, review_id: str,
+        state: str = "closed",
     ) -> dict:
-        """Withdraw a proposal. The draft and its revisions stay put."""
-        await self._load_for(user_id, report_id, Action.STORIES_EDIT)
-        mr = await self._reports.get_merge_request(mr_id)
-        if mr is None or mr.report_id != report_id:
-            raise NotFound(_NO_SUCH_MERGE_REQUEST)
-        if mr.state != "open":
-            raise InvalidInput(f"This proposal is already {mr.state}.")
-        mr.state = "closed"
-        return await self._mr_view(
-            await self._reports.update_merge_request(mr))
+        """Withdraw a proposal, or mark a read as done.
+
+        The draft and every revision stay exactly where they are: nothing
+        here deletes anybody's work.
+        """
+        review = await self._review_or_404(user_id, report_id, review_id)
+        if review.state != "open":
+            raise InvalidInput(f"This review is already {review.state}.")
+        review.state = "completed" if state == "completed" else "closed"
+        return await self._review_view(
+            await self._reports.update_review(review))
 
     # ── translations ───────────────────────────────────────────
     # An article has one original text (report.title/abstract/document,

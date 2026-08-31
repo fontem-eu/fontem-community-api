@@ -56,10 +56,10 @@ class TestTranslationAPI:
         point of the draft/merge split, so these tests go through it.
         """
         cls._save(client, h, rid, doc)
-        mr = client.post(f"/reports/{rid}/merge-requests",
+        mr = client.post(f"/reports/{rid}/reviews",
                          json={"title": "edit"}, headers=h).json()
         return client.post(
-            f"/reports/{rid}/merge-requests/{mr['id']}/merge", headers=h)
+            f"/reports/{rid}/reviews/{mr['id']}/publish", headers=h)
 
     @staticmethod
     def _edited(text):

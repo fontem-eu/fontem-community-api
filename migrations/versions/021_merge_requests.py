@@ -43,6 +43,14 @@ def upgrade() -> None:
         # Fresh build: create_all makes these from the models.
         return
 
+    # 022 renames these to reviews/review_comments. When the chain is
+    # re-run from a stamp older than that — which the idempotency test
+    # does, and a redeploy can — the tables are already there under their
+    # later names, and recreating them collides on the index names that
+    # a rename carries along.
+    if _has(bind, "reviews"):
+        return
+
     if not _has(bind, "merge_requests"):
         op.create_table(
             "merge_requests",
@@ -85,7 +93,7 @@ def upgrade() -> None:
             "ON merge_requests (report_id, author_id) WHERE state = 'open'"
         )
 
-    if not _has(bind, "mr_comments"):
+    if not _has(bind, "mr_comments") and not _has(bind, "review_comments"):
         op.create_table(
             "mr_comments",
             sa.Column("id", _UUID, primary_key=True),

@@ -7,7 +7,9 @@ from uuid import uuid4
 from src.domain.report import (
     DocBranch,
     DocRevision,
-    MergeRequest,
+    Review,
+    ReviewComment,
+    ReviewReviewer,
     Report,
     ReportTranslation,
     Section,
@@ -33,7 +35,9 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         self._revisions: dict[str, DocRevision] = {}
         # Keyed (report_id, owner_id); owner None is main.
         self._branches: dict[tuple[str, str | None], DocBranch] = {}
-        self._merge_requests: dict[str, MergeRequest] = {}
+        self._reviews: dict[str, Review] = {}
+        self._reviewers: list[ReviewReviewer] = []
+        self._review_comments: dict[str, ReviewComment] = {}
 
     async def create(self, report: Report) -> Report:
         if report.id is None:
@@ -205,34 +209,79 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         self._branches[(report_id, owner_id)] = existing
         return deepcopy(existing)
 
-    # ── merge requests ─────────────────────────────────────────
+    # ── reviews ────────────────────────────────────────────────
 
-    async def add_merge_request(self, mr: MergeRequest) -> MergeRequest:
-        stored = deepcopy(mr)
+    async def add_review(self, review: Review) -> Review:
+        stored = deepcopy(review)
         stored.id = stored.id or str(uuid4())
         now = datetime.now(timezone.utc)
         stored.created_at = stored.created_at or now
         stored.updated_at = now
-        self._merge_requests[stored.id] = stored
+        self._reviews[stored.id] = stored
         return deepcopy(stored)
 
-    async def get_merge_request(self, mr_id: str) -> MergeRequest | None:
-        found = self._merge_requests.get(mr_id)
+    async def get_review(self, review_id: str) -> Review | None:
+        found = self._reviews.get(review_id)
         return deepcopy(found) if found else None
 
-    async def list_merge_requests(
+    async def list_reviews(
         self, report_id: str, state: str | None = None,
-    ) -> list[MergeRequest]:
-        found = [m for m in self._merge_requests.values()
-                 if m.report_id == report_id and (not state or m.state == state)]
-        found.sort(key=lambda m: m.created_at or datetime.min, reverse=True)
-        return [deepcopy(m) for m in found]
+        kind: str | None = None,
+    ) -> list[Review]:
+        found = [r for r in self._reviews.values()
+                 if r.report_id == report_id
+                 and (not state or r.state == state)
+                 and (not kind or r.kind == kind)]
+        found.sort(key=lambda r: r.created_at or datetime.min, reverse=True)
+        return [deepcopy(r) for r in found]
 
-    async def update_merge_request(self, mr: MergeRequest) -> MergeRequest:
-        stored = deepcopy(mr)
+    async def update_review(self, review: Review) -> Review:
+        stored = deepcopy(review)
         stored.updated_at = datetime.now(timezone.utc)
-        self._merge_requests[stored.id] = stored
+        self._reviews[stored.id] = stored
         return deepcopy(stored)
+
+    async def reviews_for_user(self, user_id: str) -> list[Review]:
+        invited = {r.review_id for r in self._reviewers
+                   if r.user_id == user_id}
+        found = [r for r in self._reviews.values()
+                 if r.author_id == user_id or r.id in invited]
+        found.sort(key=lambda r: r.updated_at or datetime.min, reverse=True)
+        return [deepcopy(r) for r in found]
+
+    async def add_reviewer(self, reviewer: ReviewReviewer) -> ReviewReviewer:
+        if any(r.review_id == reviewer.review_id and r.user_id == reviewer.user_id
+               for r in self._reviewers):
+            return deepcopy(reviewer)
+        stored = deepcopy(reviewer)
+        stored.invited_at = stored.invited_at or datetime.now(timezone.utc)
+        self._reviewers.append(stored)
+        return deepcopy(stored)
+
+    async def list_reviewers(self, review_id: str) -> list[ReviewReviewer]:
+        return [deepcopy(r) for r in self._reviewers
+                if r.review_id == review_id]
+
+    async def add_review_comment(self, comment: ReviewComment) -> ReviewComment:
+        stored = deepcopy(comment)
+        stored.id = stored.id or str(uuid4())
+        stored.created_at = stored.created_at or datetime.now(timezone.utc)
+        self._review_comments[stored.id] = stored
+        return deepcopy(stored)
+
+    async def list_review_comments(self, review_id: str) -> list[ReviewComment]:
+        found = [c for c in self._review_comments.values()
+                 if c.review_id == review_id]
+        found.sort(key=lambda c: c.created_at or datetime.min)
+        return [deepcopy(c) for c in found]
+
+    async def get_review_comment(self, comment_id: str) -> ReviewComment | None:
+        found = self._review_comments.get(comment_id)
+        return deepcopy(found) if found else None
+
+    async def update_review_comment(self, comment: ReviewComment) -> ReviewComment:
+        self._review_comments[comment.id] = deepcopy(comment)
+        return deepcopy(comment)
 
     async def save_version(self, section_id: str, content: dict, user_id: str) -> None:
         version = SectionVersion(
