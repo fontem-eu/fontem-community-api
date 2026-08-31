@@ -279,3 +279,85 @@ def test_a_session_like_resource_is_never_entered_concurrently():
     assert studio.calls == 24
     for out, _ in outs:
         assert json.loads(out).get("ok"), out
+
+
+
+
+# ── what the repeat signature is keyed on ───────────────────────────────
+#
+# The degenerate-loop guard — a third byte-identical call is answered by
+# the dispatcher instead of running the tool again, after a 1.7B looped
+# calculate(len('…')) twelve times and timed out the staging gate (attest
+# 28604) — is covered for the calculator in test_calculator.py.
+#
+# What is not covered there is what makes two calls "identical", and every
+# one of these is a way for the guard to misfire on a turn that is not
+# looping at all. A guard that refuses honest work is worse than no guard:
+# it costs the user a call that would have worked, and says nothing a
+# reader could act on.
+
+def _unknown_tools_runtime():
+    """A runtime whose unknown names resolve locally to "Unknown tool".
+
+    These are about the repeat signature, not tool resolution, and the
+    generated-tool spec fetch would otherwise need a live fontem-api to
+    say "I have never heard of that".
+    """
+    rt = ToolRuntime()
+
+    async def no_generated(_client):
+        return []
+
+    rt._get_generated_tools = no_generated  # pylint: disable=protected-access
+    return rt
+
+
+def _turn(rt, traced):
+    """Dispatch into one turn's history, on this test's own loop."""
+    def call(name, args):
+        return _run(lambda: _dispatch(rt, name, args, traced=traced))
+    return call
+
+
+def test_the_same_arguments_to_a_different_tool_are_not_a_repeat():
+    """The signature is (tool, args), not args alone.
+
+    Two tools asked the same question are two different questions —
+    resolving an id and then investigating it carry the same argument dict,
+    and keying on args alone would refuse the second.
+    """
+    call = _turn(_unknown_tools_runtime(), [])
+    args = {"query": "Metro Mondego"}
+
+    call("mcp__gmr__unknown_a", args)
+    call("mcp__gmr__unknown_a", args)
+    out, _ = call("mcp__gmr__unknown_b", args)
+
+    assert "already called" not in out, out
+
+
+def test_argument_order_does_not_disguise_a_repeat():
+    """Sorted, so the loop cannot be walked around by accident.
+
+    Nothing makes a model emit its keys in a stable order, so an unsorted
+    signature would let the exact loop this guard exists for run free.
+    """
+    call = _turn(_unknown_tools_runtime(), [])
+
+    call("mcp__gmr__unknown_a", {"from_id": "a", "to_id": "b"})
+    call("mcp__gmr__unknown_a", {"to_id": "b", "from_id": "a"})
+    out, _ = call("mcp__gmr__unknown_a", {"to_id": "b", "from_id": "a"})
+
+    assert "already called with exactly these arguments" in json.loads(out)["error"]
+
+
+def test_a_turn_with_no_history_never_refuses():
+    """`traced=None` means nobody is recording this turn — there is no
+    history to call a repeat, and the guard must not invent one."""
+    rt = ToolRuntime()
+    args = {"expression": "3 + 3"}
+
+    for _ in range(4):
+        out, _ = _run(lambda: _dispatch(
+            rt, calc_tools.CALC_TOOL_NAME, args, traced=None))
+        assert "already called" not in out, out

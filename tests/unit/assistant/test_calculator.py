@@ -4,7 +4,7 @@ The witness property is the point — a number computed here is a tool
 result the grounding check can trace — so the tests also pin that the
 result string reaches the model through the normal dispatch path.
 """
-# pylint: disable=missing-function-docstring
+# pylint: disable=missing-function-docstring,protected-access
 from __future__ import annotations
 
 import ast
@@ -160,6 +160,82 @@ def test_comprehensions_and_logic():
     assert out["result"] == 50.0
 
 
+def test_and_and_or_keep_their_own_meanings():
+    """`and` and `or` are not interchangeable, and nothing else noticed.
+
+    The handler branches on which operator it is; collapsing that branch
+    turns every `and` into an `or`, so a range check like
+    "x > 10 and x < 100" starts answering True for values outside it. The
+    old "logic" test covered comparisons, comprehensions and if/for but
+    never a boolean operator, so the whole branch was unexercised.
+
+    Both operators return the deciding operand, as Python's do — the model
+    writes this syntax fluently precisely because it behaves the way it
+    reads.
+    """
+    assert _calc("1 and 0")["result"] == 0
+    assert _calc("2 and 3")["result"] == 3
+    assert _calc("0 or 5")["result"] == 5
+    assert _calc("7 or 9")["result"] == 7
+    # The shape this actually gets used in: a bounds check where `or` would
+    # answer the opposite.
+    assert _calc("sum(v) > 10 and sum(v) < 100", {"v": [20, 30]})["result"] is True
+    assert _calc("sum(v) > 1000 and sum(v) < 2000", {"v": [20, 30]})["result"] is False
+
+
+def test_and_short_circuits_before_evaluating_the_rest():
+    """Short-circuiting is what makes a guarded division safe to write:
+    `d and n / d` must not evaluate the division when d is 0."""
+    assert _calc("0 and 1 / 0")["result"] == 0
+
+
+def test_the_step_budget_fires_on_its_own_account(monkeypatch):
+    """The mirror of the wall-clock test.
+
+    `test_runaway_loops_hit_the_step_budget_not_the_server` accepts either
+    error, so the step counter could stop counting — or count backwards —
+    and that test would still pass on the two-second clock alone. Pinning
+    the clock without pinning the steps just moves the blind spot.
+    """
+    monkeypatch.setattr(calc_tools, "_MAX_SECONDS", 3600.0)
+    out = _calc("t = 0\n"
+                "for i in range(1000):\n"
+                "    for j in range(1000):\n"
+                "        t += 1\n"
+                "t")
+    assert "steps" in out["error"], out
+
+
+def test_a_trailing_loop_yields_its_bodys_last_value():
+    """A for loop as the final statement is an expression, not a dead end.
+
+    The body's last value becomes the script's result — dropping that makes
+    a shape the model does write ("for each x, x * 2") return nothing at
+    all, which reads to the user as the tool having failed.
+    """
+    out = _calc("r = 0\nfor i in v:\n    i * 2", {"v": [1, 2, 3]})
+    assert out["result"] == 6
+
+
+def test_the_line_cap_admits_exactly_its_stated_limit():
+    """"at most 6 lines" has to accept 6. Off by one here refuses a script
+    the error message just told the model was fine."""
+    limit = calc_tools._MAX_LINES
+    ok = "\n".join([f"x{i} = {i}" for i in range(limit - 1)] + ["x0"])
+    assert "error" not in _calc(ok), _calc(ok)
+    too_long = "\n".join([f"x{i} = {i}" for i in range(limit)] + ["x0"])
+    assert "lines" in _calc(too_long)["error"]
+
+
+def test_the_list_bound_admits_exactly_its_stated_limit():
+    """"bounded at 10,000 items" has to mean 10,000 is allowed, or the
+    message is off by one against the behaviour and the model burns a
+    round rediscovering the real limit."""
+    limit = calc_tools._MAX_LIST_ITEMS
+    assert _calc(f"len(range({limit}))")["result"] == limit
+    assert "bounded" in _calc(f"len(range({limit + 1}))")["error"]
+
+
 def test_scripts_are_capped_at_six_lines():
     assert "6 lines" in _calc("\n".join(f"x{i} = {i}" for i in range(7))
                               + "\nx0")["error"]
@@ -187,6 +263,33 @@ def test_memory_bombs_are_refused():
     # A comprehension fanning out past the list bound is stopped mid-build.
     out = _calc("[0 for i in range(10000) for j in range(10)]")
     assert "bounded" in out["error"]
+
+
+def test_the_wall_clock_can_actually_fire(monkeypatch):
+    """The seconds bound is a real branch, not decoration.
+
+    `test_runaway_loops_hit_the_step_budget_not_the_server` accepts either
+    error, because for a tight loop the step budget wins the race — which
+    means nothing there would notice if the deadline check stopped working.
+    The wall clock is what bounds a calculation that is slow per step
+    rather than long in steps, and since 2026-08-28 every DB-touching
+    dispatch serializes on the turn lock, so a calculation that runs away
+    on the clock holds up the whole turn.
+    """
+    monkeypatch.setattr(calc_tools, "_MAX_SECONDS", -1.0)
+    out = _calc("t = 0\nfor i in range(1000):\n    t += 1\nt")
+    assert "seconds" in out["error"], out
+
+
+def test_the_step_budget_leaves_room_for_the_clock_to_be_checked():
+    """The deadline is only read every 512 ticks, so a step budget below
+    that would make the wall clock unreachable — silently, with no error
+    and no failing test anywhere else. Tuning _MAX_OPS down is exactly the
+    kind of change that would do it."""
+    assert calc_tools._MAX_OPS > 512, (
+        "the wall-clock check is dead code unless a calculation can reach "
+        "512 ticks before the step budget stops it"
+    )
 
 
 def test_range_is_bounded():
