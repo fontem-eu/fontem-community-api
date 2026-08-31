@@ -283,9 +283,11 @@ def test_020_is_idempotent_when_the_chain_is_already_built():
     assert branches == 1
 
 
-def test_021_creates_the_proposal_tables_with_their_rules():
-    """The policy the editors chose lives in the schema, not in prose:
-    one open proposal per editor per article, and only three states."""
+def test_022_lands_the_review_tables_with_their_rules():
+    """The policy lives in the schema, not in prose: one open CHANGE
+    review per editor per article, two kinds, four states — and article
+    reviews deliberately uncapped, because a piece can be read by several
+    people at once."""
     with PostgresContainer("postgres:16-alpine") as pg:
         url = pg.get_connection_url().replace(
             "postgresql+psycopg2://", "postgresql://")
@@ -293,13 +295,47 @@ def test_021_creates_the_proposal_tables_with_their_rules():
         _alembic(url, "upgrade", "head")
         inspector = sa.inspect(engine)
         tables = set(inspector.get_table_names())
-        indexes = {i["name"] for i in inspector.get_indexes("merge_requests")}
+        indexes = {i["name"] for i in inspector.get_indexes("reviews")}
         with engine.begin() as conn:
             states = conn.execute(sa.text(
                 "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-                "WHERE conname = 'ck_merge_requests_state'")).scalar()
+                "WHERE conname = 'ck_reviews_state'")).scalar()
+            kinds = conn.execute(sa.text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'ck_reviews_kind'")).scalar()
         engine.dispose()
 
-    assert {"merge_requests", "mr_comments"} <= tables
-    assert "uq_merge_requests_open" in indexes
-    assert "open" in states and "merged" in states and "closed" in states
+    assert {"reviews", "review_comments", "review_reviewers"} <= tables
+    assert "merge_requests" not in tables and "mr_comments" not in tables
+    assert "uq_reviews_open_change" in indexes
+    assert all(s in states for s in ("open", "merged", "closed", "completed"))
+    assert "change" in kinds and "article" in kinds
+
+
+def test_022_renames_021s_tables_rather_than_stranding_them():
+    """Testing already had merge_requests when the vocabulary changed.
+
+    Carrying two names for the same rows would have cost more than moving
+    them, so this is a rename — and it has to survive a database that
+    stopped at 021 as well as one applying the whole sequence.
+    """
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url = pg.get_connection_url().replace(
+            "postgresql+psycopg2://", "postgresql://")
+        engine = sa.create_engine(url)
+        _alembic(url, "upgrade", "021")
+        with engine.begin() as conn:
+            assert conn.execute(sa.text(
+                "SELECT to_regclass('merge_requests')")).scalar()
+        _alembic(url, "upgrade", "head")
+        inspector = sa.inspect(engine)
+        tables = set(inspector.get_table_names())
+        columns = {c["name"] for c in inspector.get_columns("reviews")}
+        comment_columns = {c["name"]
+                           for c in inspector.get_columns("review_comments")}
+        engine.dispose()
+
+    assert "reviews" in tables and "merge_requests" not in tables
+    assert "kind" in columns
+    # The comment's foreign key moved with it.
+    assert "review_id" in comment_columns and "mr_id" not in comment_columns

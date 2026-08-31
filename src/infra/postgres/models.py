@@ -260,25 +260,39 @@ class DocBranchModel(Base):
     )
 
 
-class MergeRequestModel(Base):
-    """A proposal to move an article's published text to a draft's head."""
+class ReviewModel(Base):
+    """A review of an article, in one of two kinds.
 
-    __tablename__ = "merge_requests"
+    ``change``: a draft proposed as the published text — read as a diff,
+    merged when it is right. ``article``: one version read end to end and
+    commented on, with nothing to merge.
+
+    One table because it is one workflow with one difference. Two would
+    have meant two comment tables, two reviewer tables and two "my
+    reviews" queries.
+    """
+
+    __tablename__ = "reviews"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     report_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False
     )
+    kind: Mapped[str] = mapped_column(Text, nullable=False, default="change")
     author_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
     )
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: What is under review: a draft head for a change, the version being
+    #: read for an article review.
     source_head: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=False
     )
-    target_base: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=False
+    #: What it would be merged into. An article review has nothing to
+    #: merge, so it has no base.
+    target_base: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=True
     )
     state: Mapped[str] = mapped_column(Text, nullable=False, default="open")
     created_at: Mapped[datetime] = mapped_column(
@@ -296,27 +310,53 @@ class MergeRequestModel(Base):
     merged_revision_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("doc_revisions.id"), nullable=True
     )
-    #: Recorded, not forbidden: an author may merge their own proposal,
-    #: and the article's history says that nobody else read it.
+    #: Recorded, not forbidden: an author may merge their own change, and
+    #: the article's history says that nobody else read it.
     self_merged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
-        CheckConstraint("state IN ('open', 'merged', 'closed')",
-                        name="ck_merge_requests_state"),
-        Index("ix_merge_requests_report_state", "report_id", "state"),
-        Index("uq_merge_requests_open", "report_id", "author_id",
-              unique=True, postgresql_where=text("state = 'open'")),
+        CheckConstraint("kind IN ('change', 'article')", name="ck_reviews_kind"),
+        CheckConstraint("state IN ('open', 'merged', 'closed', 'completed')",
+                        name="ck_reviews_state"),
+        Index("ix_reviews_report_state", "report_id", "state"),
+        Index("ix_reviews_author", "author_id"),
+        Index("uq_reviews_open_change", "report_id", "author_id", unique=True,
+              postgresql_where=text("state = 'open' AND kind = 'change'")),
     )
 
 
-class MrCommentModel(Base):
-    """A review comment, anchored to a block rather than a line."""
+class ReviewReviewerModel(Base):
+    """Somebody invited to read a review."""
 
-    __tablename__ = "mr_comments"
+    __tablename__ = "review_reviewers"
+
+    review_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("reviews.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    invited_by: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), nullable=False
+    )
+    invited_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=_utcnow
+    )
+
+    __table_args__ = (Index("ix_review_reviewers_user", "user_id"),)
+
+
+class ReviewCommentModel(Base):
+    """A comment, anchored to a block rather than a line, so it survives
+    edits elsewhere in the document."""
+
+    __tablename__ = "review_comments"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
-    mr_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("merge_requests.id", ondelete="CASCADE"),
+    review_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("reviews.id", ondelete="CASCADE"),
         nullable=False,
     )
     author_id: Mapped[str] = mapped_column(
@@ -329,7 +369,7 @@ class MrCommentModel(Base):
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow
     )
 
-    __table_args__ = (Index("ix_mr_comments_mr", "mr_id"),)
+    __table_args__ = (Index("ix_review_comments_review", "review_id"),)
 
 
 class SectionModel(Base):
