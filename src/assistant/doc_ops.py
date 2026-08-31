@@ -56,14 +56,11 @@ class DocOps:
             # the model gets a reason it can act on rather than a stack.
             return json.dumps({"error": f"cannot read this document: {exc}"})
 
-        if head is None:
-            return json.dumps({
-                "error": "this document has no saved version yet",
-                "hint": "ask the user to save something first, and do not "
-                        "invent a baseline",
-            })
-
-        body = json.dumps(head.content_json)
+        # An article with nothing saved is EMPTY, not unreadable. Writing
+        # its first draft is a normal thing to be asked for, and a
+        # rewrite of nothing destroys nothing — the blind-rewrite guard
+        # exists for documents that cannot be read, not for blank ones.
+        body = json.dumps(head.content_json) if head else "[]"
         if len(body) > MAX_DOC_CHARS:
             dropped = len(body) - MAX_DOC_CHARS
             body = body[:MAX_DOC_CHARS] + TRUNCATED_MARKER.format(
@@ -77,9 +74,12 @@ class DocOps:
             # propose replacements as HTML, which the Apply path
             # sanitises and converts.
             "sections": body,
-            "revision": head.id,
+            "revision": head.id if head else None,
             "note": (
                 "This is the user's last SAVED draft. Their editor buffer "
                 "may contain newer unsaved text."
+                if head else
+                "This article has no saved text yet — anything proposed "
+                "here is its first draft."
             ),
         })

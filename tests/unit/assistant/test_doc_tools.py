@@ -343,9 +343,28 @@ def test_without_a_draft_it_reads_what_is_published():
     assert "the published text" in body["sections"]
 
 
-def test_an_article_with_nothing_saved_says_so_rather_than_inventing():
+def test_an_article_with_nothing_saved_is_empty_not_unreadable():
+    """Writing an article's first draft is a normal thing to be asked
+    for, and a rewrite of nothing destroys nothing. The blind-rewrite
+    guard is for documents that cannot be read, not blank ones — being
+    strict here blocked the whole first-draft flow (promote 30315)."""
     reports = _FakeReports(draft=False)
     reports.document_head = AsyncMock(return_value=None)
     body = json.loads(_run(DocOps(reports, "u-1", "r-1").read()))
-    assert "no saved version" in body["error"]
-    assert "do not invent" in body["hint"]
+    assert "error" not in body
+    assert body["revision"] is None
+    assert "first draft" in body["note"]
+
+
+def test_a_first_draft_of_an_empty_article_is_allowed():
+    """The other half of the same lesson: the guard must not stand
+    between a user and the first draft they asked for."""
+    class _EmptyDoc:
+        async def read(self):
+            return json.dumps({"sections": "[]", "revision": None,
+                               "note": "no saved text yet — first draft"})
+
+    out, _ = _dispatch(_runtime(), "mcp__gmr__replace_body",
+                       {"content": "<p>the first draft</p>"}, traced=[],
+                       doc=_EmptyDoc())
+    assert json.loads(out)["proposed"] is True
