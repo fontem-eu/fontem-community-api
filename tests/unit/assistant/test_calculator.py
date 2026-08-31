@@ -4,7 +4,7 @@ The witness property is the point — a number computed here is a tool
 result the grounding check can trace — so the tests also pin that the
 result string reaches the model through the normal dispatch path.
 """
-# pylint: disable=missing-function-docstring
+# pylint: disable=missing-function-docstring,protected-access
 from __future__ import annotations
 
 import ast
@@ -187,6 +187,33 @@ def test_memory_bombs_are_refused():
     # A comprehension fanning out past the list bound is stopped mid-build.
     out = _calc("[0 for i in range(10000) for j in range(10)]")
     assert "bounded" in out["error"]
+
+
+def test_the_wall_clock_can_actually_fire(monkeypatch):
+    """The seconds bound is a real branch, not decoration.
+
+    `test_runaway_loops_hit_the_step_budget_not_the_server` accepts either
+    error, because for a tight loop the step budget wins the race — which
+    means nothing there would notice if the deadline check stopped working.
+    The wall clock is what bounds a calculation that is slow per step
+    rather than long in steps, and since 2026-08-28 every DB-touching
+    dispatch serializes on the turn lock, so a calculation that runs away
+    on the clock holds up the whole turn.
+    """
+    monkeypatch.setattr(calc_tools, "_MAX_SECONDS", -1.0)
+    out = _calc("t = 0\nfor i in range(1000):\n    t += 1\nt")
+    assert "seconds" in out["error"], out
+
+
+def test_the_step_budget_leaves_room_for_the_clock_to_be_checked():
+    """The deadline is only read every 512 ticks, so a step budget below
+    that would make the wall clock unreachable — silently, with no error
+    and no failing test anywhere else. Tuning _MAX_OPS down is exactly the
+    kind of change that would do it."""
+    assert calc_tools._MAX_OPS > 512, (
+        "the wall-clock check is dead code unless a calculation can reach "
+        "512 ticks before the step budget stops it"
+    )
 
 
 def test_range_is_bounded():
