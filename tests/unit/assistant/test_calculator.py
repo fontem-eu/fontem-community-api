@@ -206,6 +206,27 @@ def test_the_step_budget_fires_on_its_own_account(monkeypatch):
     assert "steps" in out["error"], out
 
 
+def test_a_trailing_loop_yields_its_bodys_last_value():
+    """A for loop as the final statement is an expression, not a dead end.
+
+    The body's last value becomes the script's result — dropping that makes
+    a shape the model does write ("for each x, x * 2") return nothing at
+    all, which reads to the user as the tool having failed.
+    """
+    out = _calc("r = 0\nfor i in v:\n    i * 2", {"v": [1, 2, 3]})
+    assert out["result"] == 6
+
+
+def test_the_line_cap_admits_exactly_its_stated_limit():
+    """"at most 6 lines" has to accept 6. Off by one here refuses a script
+    the error message just told the model was fine."""
+    limit = calc_tools._MAX_LINES
+    ok = "\n".join([f"x{i} = {i}" for i in range(limit - 1)] + ["x0"])
+    assert "error" not in _calc(ok), _calc(ok)
+    too_long = "\n".join([f"x{i} = {i}" for i in range(limit)] + ["x0"])
+    assert "lines" in _calc(too_long)["error"]
+
+
 def test_the_list_bound_admits_exactly_its_stated_limit():
     """"bounded at 10,000 items" has to mean 10,000 is allowed, or the
     message is off by one against the behaviour and the model burns a
