@@ -76,19 +76,23 @@ def _read_js_advertised_actions() -> list[str]:
     formatted on multiple lines as a string array; capture the
     string contents in declaration order."""
     root = Path(__file__).resolve().parents[3].parent
+    # fontem-web FIRST: gmr-web is the pre-rename checkout and many dev
+    # machines still have one lying around. Preferring it meant this test
+    # compared today's Python against an abandoned frontend — it failed
+    # on a stale copy's action list while both live sources agreed.
     js_path = next(
         (root / repo / "src" / "composables" / "useEditProposals.js"
-         for repo in ("gmr-web", "fontem-web")
+         for repo in ("fontem-web", "gmr-web")
          if (root / repo / "src" / "composables"
              / "useEditProposals.js").exists()),
-        root / "gmr-web" / "src" / "composables" / "useEditProposals.js",
+        root / "fontem-web" / "src" / "composables" / "useEditProposals.js",
     )
     if not js_path.exists():
         # Repo layout when running CI in just-this-repo mode: skip
         # the cross-repo check rather than fail. The Python-side
         # internal-consistency test still runs.
         import pytest  # pylint: disable=import-outside-toplevel
-        pytest.skip(f"gmr-web checkout not present at {js_path}; "
+        pytest.skip(f"fontem-web checkout not present at {js_path}; "
                     "cross-repo parity covered by smoke test")
     src = js_path.read_text(encoding="utf-8")
     match = re.search(

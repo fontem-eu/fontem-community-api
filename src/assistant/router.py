@@ -18,7 +18,7 @@ from uuid import uuid4
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth import get_current_user, get_optional_user
 from src.api.rate_limit import anonymous_assist_allowed
@@ -110,6 +110,84 @@ class HistoryMessage(BaseModel):
     tokens_out: int | None = None
 
 
+# ── Contract response models ───────────────────────────────────
+#
+# extra="allow" throughout: handlers enrich these payloads and the
+# enrichments must stay free to evolve. What is DECLARED is what API
+# consumers may rely on — and what the consumer pacts are validated
+# against. Before these existed the whole assistant surface returned a
+# bare ``dict``, i.e. formally promised nothing at all.
+
+
+class AssistMessage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    role: str
+    content: str
+    created_at: str
+    model: str | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    extras: dict = {}
+
+
+class ConversationSummary(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    conversation_key: str
+    title: str
+    updated_at: str
+    message_count: int | None = None
+    last_snippet: str | None = None
+
+
+class ConversationListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    conversations: list[ConversationSummary]
+
+
+class ConversationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    conversation_key: str
+    messages: list[AssistMessage]
+
+
+class ConversationPageResponse(ConversationResponse):
+    """A page of history, oldest-first, with a cursor flag."""
+
+    has_more: bool
+
+
+class AssistantModelInfo(BaseModel):
+    """One offerable model, as local_models.as_dicts() emits it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    label: str
+    tokens_per_second: float | int | None = None
+    context_tokens: int | None = None
+    note: str | None = None
+    hosted: bool | None = None
+
+
+class ModelListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    models: list[AssistantModelInfo]
+    selected: str | None = None
+    active: bool | None = None
+
+
+class ModelChoiceResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    selected: str | None = None
+
+
 # ── Endpoints ──────────────────────────────────────────────────
 
 
@@ -125,6 +203,13 @@ class HistoryMessage(BaseModel):
     # cases are invisible in the schema otherwise, and a client that only
     # reads /openapi.json has no way to learn a turn can be refused.
     responses={
+        # Declared so the schema states what this endpoint actually
+        # produces; without it a spec-driven client (and the pact
+        # cross-validation) sees an endpoint with no content type.
+        200: {
+            "description": "Server-sent event stream of the assistant turn.",
+            "content": {"text/event-stream": {}},
+        },
         422: {"description": "The prompt exceeds the anonymous character cap."},
         429: {"description": "The anonymous per-IP allowance for this window is spent."},
     },
@@ -348,7 +433,8 @@ def _decode_cursor(raw: str) -> tuple[datetime, str] | None:
     return parsed, msg_id
 
 
-@router.get("/conversations/{conversation_key:path}/messages")
+@router.get("/conversations/{conversation_key:path}/messages",
+            response_model=ConversationPageResponse)
 @inject
 async def page_conversation_messages(
     conversation_key: str,
@@ -399,7 +485,8 @@ async def page_conversation_messages(
     }
 
 
-@router.get("/conversations/{conversation_key:path}")
+@router.get("/conversations/{conversation_key:path}",
+            response_model=ConversationResponse)
 @inject
 async def get_conversation(
     conversation_key: str,
@@ -471,7 +558,7 @@ class ConversationRename(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
 
 
-@router.get("/conversations")
+@router.get("/conversations", response_model=ConversationListResponse)
 @inject
 async def list_conversations(
     *,
@@ -631,7 +718,7 @@ async def put_credential(
     return summary.as_dict()
 
 
-@router.get("/models")
+@router.get("/models", response_model=ModelListResponse)
 @inject
 async def list_models(
     *,

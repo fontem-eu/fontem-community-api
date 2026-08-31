@@ -39,6 +39,16 @@ jobs:
         run: pip install --no-cache-dir -r requirements.txt
       - name: Generate OpenAPI spec from code
         run: python3 scripts/generate_openapi.py > /tmp/openapi.json && python3 -c "import json;print('paths:',len(json.load(open('/tmp/openapi.json'))['paths']))"
+      - name: Check the committed spec is current
+        # openapi.json is committed so any consumer can pin the contract at
+        # any commit (raw?ref=<sha>) without a deployment. Informational:
+        # refresh it with `python3 scripts/generate_openapi.py > openapi.json`.
+        run: |
+          if ! diff -q /tmp/openapi.json openapi.json >/dev/null 2>&1; then
+            echo "::warning::openapi.json is stale — run: python3 scripts/generate_openapi.py > openapi.json"
+          else
+            echo "committed openapi.json matches the code"
+          fi
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
