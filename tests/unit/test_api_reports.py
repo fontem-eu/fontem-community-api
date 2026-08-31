@@ -742,3 +742,54 @@ class TestAssistantCommits:
                    headers=h)
         rows = client.get(f"/reports/{rid}/revisions", headers=h).json()
         assert rows[0]["author_kind"] == "human"
+
+
+class TestHistoryCarriesItsReviews:
+    """A change in the history is only half the story — the other half is
+    whether anybody reviewed it, and where that conversation is."""
+
+    async def _seed(self, services):
+        await seed_user(services["user_repo"], "user-1")
+
+    def test_a_published_revision_names_the_review_that_published_it(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+        first = client.put(f"/reports/{rid}/content",
+                           json={"tiptap": _doc("one")}, headers=h).json()
+        drafted = client.put(
+            f"/reports/{rid}/content",
+            json={"tiptap": _doc("two"), "base_revision": first["revision"]},
+            headers=h).json()
+        review = client.post(f"/reports/{rid}/reviews",
+                             json={"title": "Tighten the lead"},
+                             headers=h).json()
+        client.post(f"/reports/{rid}/reviews/{review['id']}/publish", headers=h)
+
+        rows = client.get(f"/reports/{rid}/revisions", headers=h).json()
+        published = next(r for r in rows if r["id"] == drafted["revision"])
+        assert published["published_by"]["title"] == "Tighten the lead"
+        assert published["published_by"]["self_merged"] is True
+        # The revision before it was never proposed on its own.
+        earlier = next(r for r in rows if r["id"] == first["revision"])
+        assert earlier["published_by"] is None
+
+    def test_an_open_review_is_listed_against_what_it_proposes(
+        self, client, services,
+    ):
+        asyncio.get_event_loop().run_until_complete(self._seed(services))
+        h = make_headers("user-1")
+        rid = client.post("/reports", json={"title": "R"}, headers=h).json()["id"]
+        first = client.put(f"/reports/{rid}/content",
+                           json={"tiptap": _doc("one")}, headers=h).json()
+        drafted = client.put(
+            f"/reports/{rid}/content",
+            json={"tiptap": _doc("two"), "base_revision": first["revision"]},
+            headers=h).json()
+        client.post(f"/reports/{rid}/reviews", json={}, headers=h)
+
+        rows = client.get(f"/reports/{rid}/revisions", headers=h).json()
+        proposed = next(r for r in rows if r["id"] == drafted["revision"])
+        assert [rv["state"] for rv in proposed["reviews"]] == ["open"]

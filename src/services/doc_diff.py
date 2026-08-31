@@ -17,6 +17,10 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 from typing import Any
 
+#: Node types the review screen can render for real rather than
+#: describe. Everything else is text, and text is its own description.
+_RENDERABLE_ATOMS = ("widget", "image")
+
 #: Blocks longer than this are compared by a prefix. A block is a
 #: paragraph, not a book, and an unbounded key would make matching cost
 #: grow with document size for no gain in accuracy.
@@ -68,12 +72,20 @@ def blocks(document: dict | None) -> list[dict]:
     for node in doc.get("content") or []:
         if not isinstance(node, dict):
             continue
-        text = _text_of(node)
-        out.append({
+        block = {
             "type": str(node.get("type") or "block"),
             "label": _label(node),
-            "text": text,
-        })
+            "text": _text_of(node),
+        }
+        # Atoms carry no text, so a reviewer reading them as text reads
+        # nothing. Their attributes ride along, which lets the review
+        # screen render the actual widget instead of a description of
+        # one — reviewing "widget:graph_explorer:00d87075" is not
+        # reviewing the thing that will be published.
+        attrs = node.get("attrs")
+        if block["type"] in _RENDERABLE_ATOMS and isinstance(attrs, dict):
+            block["attrs"] = attrs
+        out.append(block)
     return out
 
 

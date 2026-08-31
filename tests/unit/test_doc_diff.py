@@ -96,3 +96,29 @@ def test_the_summary_counts_what_a_history_row_shows():
     assert counts["added"] >= 1
     assert sum(counts.values()) == len(
         [o for o in ops if o["op"] != "equal"])
+
+
+def test_an_atom_carries_its_attributes_so_it_can_be_rendered():
+    """Reviewing "widget:graph_explorer:00d87075" is not reviewing the
+    thing that will be published. The attrs ride along so the review
+    screen can render the actual widget."""
+    doc = {"version": 2, "tiptap": {"type": "doc", "content": [
+        {"type": "widget", "attrs": {"widget_type": "graph_explorer",
+                                     "entityId": "e-1", "depth": 2}},
+        {"type": "paragraph", "content": [{"type": "text", "text": "prose"}]},
+    ]}}
+    widget, prose = doc_diff.blocks(doc)
+    assert widget["attrs"]["widget_type"] == "graph_explorer"
+    assert widget["attrs"]["entityId"] == "e-1"
+    # Prose describes itself; it needs no attrs.
+    assert "attrs" not in prose
+
+
+def test_a_changed_widget_carries_both_sides_attributes():
+    def widget(entity):
+        return {"version": 2, "tiptap": {"type": "doc", "content": [
+            {"type": "widget", "attrs": {"widget_type": "contracts_table",
+                                         "entityId": entity}}]}}
+    op = doc_diff.diff(widget("before-id"), widget("after-id"))[0]
+    assert op["before"]["attrs"]["entityId"] == "before-id"
+    assert op["after"]["attrs"]["entityId"] == "after-id"
