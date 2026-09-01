@@ -36,6 +36,16 @@ _CANONICAL_URL = os.environ.get("CANONICAL_URL", "https://fontem.eu")
 
 # Routes that are public and worth indexing — anything served to an
 # anonymous caller that returns real content.
+#: Kept in step with sitemap_entities.COUNTRIES in fontem-api. Listing a
+#: country here that the API does not know yields a 404 in the index,
+#: which tests/test_sitemap.py guards against.
+ENTITY_COUNTRIES: tuple[str, ...] = (
+    "AUT", "BEL", "BGR", "HRV", "CYP", "CZE", "DNK", "EST", "FIN", "FRA",
+    "DEU", "GRC", "HUN", "IRL", "ITA", "LVA", "LTU", "LUX", "MLT", "NLD",
+    "POL", "PRT", "ROU", "SVK", "SVN", "ESP", "SWE", "ISL", "LIE", "NOR",
+    "CHE", "GBR",
+)
+
 _CORE_ROUTES: list[tuple[str, str]] = [
     ("/", "daily"),
     ("/feed", "hourly"),
@@ -81,6 +91,18 @@ def sitemap_index() -> Response:
     shards = [
         f"{_CANONICAL_URL}/sitemap-core.xml",
         f"{_CANONICAL_URL}/sitemap-stories.xml",
+        # Listed companies, one shard per country. Served by fontem-api
+        # (it owns the graph) and routed there by nginx; this index just
+        # names them.
+        #
+        # Per country rather than one global file, because a global "top
+        # N" buries the small member states — everything Maltese sits
+        # below the German tail. Each country gets its own budget.
+        #
+        # Authorities are NOT listed yet, deliberately: the frontend has
+        # no /authority/:id route, so those URLs would be soft-404s. The
+        # shards exist in fontem-api and go in here once the page does.
+        *(f"{_CANONICAL_URL}/sitemap-companies-{c}.xml" for c in ENTITY_COUNTRIES),
     ]
     items = "\n".join(
         f"  <sitemap><loc>{escape(u)}</loc><lastmod>{today}</lastmod></sitemap>"
