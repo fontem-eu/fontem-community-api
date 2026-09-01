@@ -113,3 +113,34 @@ class TestSitemap:
         for path in ("/sitemap.xml", "/sitemap-core.xml", "/sitemap-stories.xml"):
             resp = client.get(path)
             assert resp.status_code == 200, path
+
+    # ── entity shards ────────────────────────────────────────────────
+    #
+    # One shard per country, not one global file. A global "top N"
+    # buries the small member states: everything Maltese sits below the
+    # German tail, so Malta would publish nothing at all.
+
+    def test_index_lists_a_company_shard_for_every_country(self, client, services):
+        resp = client.get("/sitemap.xml")
+        locs = [el.text for el in ET.fromstring(resp.text).findall(".//sm:sitemap/sm:loc", NS)]
+        for code in sitemap_mod.ENTITY_COUNTRIES:
+            assert any(u.endswith(f"/sitemap-companies-{code}.xml") for u in locs), code
+
+    def test_small_member_states_get_their_own_shard(self, client, services):
+        """The point of sharding per country — none of these survive a
+        global cut."""
+        body = client.get("/sitemap.xml").text
+        for code in ("MLT", "CYP", "LUX", "EST", "LIE"):
+            assert f"/sitemap-companies-{code}.xml" in body, code
+
+    def test_entity_country_codes_are_alpha_3(self, client, services):
+        """Alpha-2 is the drift fixed at source in fontem-api #405; a
+        two-letter code here would match nothing in the graph."""
+        assert sitemap_mod.ENTITY_COUNTRIES
+        assert all(len(c) == 3 and c.isupper() for c in sitemap_mod.ENTITY_COUNTRIES)
+
+    def test_authority_shards_stay_out_until_the_page_exists(self, client, services):
+        """The frontend has no /authority/:id route, so these URLs would
+        be soft-404s at scale. Deleting this test is the wrong way to
+        enable them — add the route first."""
+        assert "sitemap-authorities" not in client.get("/sitemap.xml").text
