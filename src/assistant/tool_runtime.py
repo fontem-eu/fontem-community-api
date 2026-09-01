@@ -806,9 +806,12 @@ class ToolRuntime:
     ) -> tuple[str, int]:
         """The dispatch itself, once provenance is in scope."""
         if name == "mcp__gmr__read_document":
-            # Server-side, as the asking user, against the report this
-            # conversation is bound to. `doc` is absent on non-report
-            # conversations, where there is no document to read.
+            # Server-side, as the asking user, against the article the
+            # user has OPEN — which is not the same as the report this
+            # conversation is about, and reading it as such is what
+            # pointed the tools at a deleted story in production. `doc`
+            # is absent when no article is open, where there is nothing
+            # to read. See _document_under_edit in service.py.
             if doc is None:
                 out = json.dumps({
                     "error": "no document is open in this conversation",
