@@ -71,6 +71,15 @@ class AssistChatBody(BaseModel):
             "inferring it from context_block."
         ),
     )
+    report_id: str | None = Field(
+        None,
+        description=(
+            "The article the user has open, if any. The assistant's "
+            "document tools act on THIS — not on whichever report the "
+            "selected conversation happens to be about, which is a "
+            "different thing the moment somebody switches threads."
+        ),
+    )
     nav: dict | None = Field(
         None,
         description=(
@@ -296,6 +305,7 @@ async def chat_stream(
             message=body.message,
             context_block=body.context_block,
             has_editor=body.has_editor,
+            report_id=body.report_id,
             nav=body.nav,
             credential=credential,
             local_model_id=local_model_id,

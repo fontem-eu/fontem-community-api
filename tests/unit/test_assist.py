@@ -21,7 +21,12 @@ from src.assistant import local_models, navigation
 from src.assistant.context import TurnLimits
 from src.assistant.engine_tools import ANONYMOUS_TOOLS, turn_tool_specs
 from src.assistant.repository import InMemoryAssistRepository
-from src.assistant.service import ANONYMOUS_MAX_PROMPT_CHARS, AssistantService
+from src.assistant.service import (
+    ANONYMOUS_MAX_PROMPT_CHARS,
+    AssistantService,
+    ChatRequest,
+    _document_under_edit,
+)
 from src.assistant.tool_runtime import ToolRuntime
 from tests.conftest import make_headers, seed_user
 
@@ -760,3 +765,42 @@ class TestStreamBoundaryNetting:
         assert "event: error" in body, \
             "the death must be announced, not swallowed"
         assert "cut short" in body
+
+
+class TestTheAssistantEditsTheArticleOnScreen:
+    """The document tools act on the article the user has open.
+
+    Production, MiniMax, 2026-08-31: the author was editing
+    /stories/306c1461…/edit with an older conversation selected in the
+    switcher. The server took the document id out of the CONVERSATION
+    KEY, so every read_document answered "Report d3fa6eff… not found" —
+    a story that no longer exists — and the model spent a long turn
+    reasoning about why it could not see an article that was on screen
+    in front of its user.
+    """
+
+    def test_the_open_article_wins_over_the_selected_thread(self):
+        req = ChatRequest(
+            user_id="u1",
+            conversation_key="report:d3fa6eff-dead-4000-8000-000000000000",
+            message="rewrite this", context_block="",
+            report_id="306c1461-5563-4bfb-bab2-c254fade84bf",
+        )
+        assert _document_under_edit(req) == "306c1461-5563-4bfb-bab2-c254fade84bf"
+
+    def test_the_conversation_key_still_answers_for_older_clients(self):
+        req = ChatRequest(user_id="u1", conversation_key="report:abc",
+                          message="m", context_block="")
+        assert _document_under_edit(req) == "abc"
+
+    def test_a_global_thread_on_an_article_page_still_finds_the_article(self):
+        """The other half: reading the key meant that picking the global
+        thread while editing left the assistant with no document at all."""
+        req = ChatRequest(user_id="u1", conversation_key="global",
+                          message="m", context_block="", report_id="r-9")
+        assert _document_under_edit(req) == "r-9"
+
+    def test_no_article_open_and_no_report_thread_means_no_document(self):
+        req = ChatRequest(user_id="u1", conversation_key="global",
+                          message="m", context_block="")
+        assert _document_under_edit(req) is None
