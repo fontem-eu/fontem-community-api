@@ -416,8 +416,33 @@ class ReportService:  # pylint: disable=too-many-public-methods
         base_id = draft.base_revision_id if draft else None
         if base_id is None:
             base_id = main_head.id if main_head else revision.id
-        await self._reports.set_branch_head(
-            report_id, user_id, revision.id, base_revision_id=base_id)
+        # Compare-and-swap, not a plain write. `_require_baseline` read the
+        # head a few statements ago and two saves can interleave between
+        # that read and this write — both pass the check, both append a
+        # revision, and the second pointer write buries the first.
+        #
+        # That is not a theoretical window. On 2026-09-02 an accept-all
+        # turn applied four insert_studio_plot cards; the four saves raced,
+        # and two revisions 41ms apart came out as SIBLINGS of one parent —
+        # one holding four charts, one holding a single chart. The pointer
+        # ended on the second, so the author's four plots were still in
+        # history but no longer in the document, four times over.
+        #
+        # The loser now gets the same 409 it would have got had it read the
+        # newer head in the first place, so the client's existing
+        # stale-save path handles it and the buffer survives.
+        moved = await self._reports.set_branch_head(
+            report_id, user_id, revision.id, base_revision_id=base_id,
+            expected_head=head_id, cas=True)
+        if moved is None:
+            current = await self.draft_head(user_id, report_id)
+            raise Conflict(
+                "the document changed while this save was in flight",
+                payload={
+                    "current_revision": current.id if current else None,
+                    "current_doc": current.content_json if current else None,
+                },
+            )
 
         if main_head is None:
             await self._publish_first_save(report_id, revision)

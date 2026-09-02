@@ -190,11 +190,20 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         found = self._branches.get((report_id, owner_id))
         return deepcopy(found) if found else None
 
-    async def set_branch_head(
+    async def set_branch_head(  # pylint: disable=too-many-arguments
         self, report_id: str, owner_id: str | None,
         head_revision_id: str, base_revision_id: str | None = None,
-    ) -> DocBranch:
+        *, expected_head: str | None = None, cas: bool = False,
+    ) -> DocBranch | None:
         existing = self._branches.get((report_id, owner_id))
+        if cas:
+            # Mirrors the WHERE clause the postgres repo relies on. An
+            # in-memory repo enforces nothing by itself, so the rule has
+            # to be written here too or the unit tests pass on a promise
+            # the real database is the only one keeping.
+            current = existing.head_revision_id if existing else None
+            if current != expected_head:
+                return None
         if existing is None:
             existing = DocBranch(
                 id=str(uuid4()), report_id=report_id, owner_id=owner_id,

@@ -9,7 +9,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.report import (
@@ -390,10 +391,21 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
         row = (await self._session.execute(stmt)).scalar_one_or_none()
         return self._branch_to_domain(row) if row else None
 
-    async def set_branch_head(
+    async def set_branch_head(  # pylint: disable=too-many-arguments
+        # Five of these describe one pointer write: which branch, where it
+        # moves to, what it is based on, and what it must still be for the
+        # move to apply. Collapsing them into an object would hide the
+        # compare-and-swap contract rather than simplify it.
         self, report_id: str, owner_id: str | None,
         head_revision_id: str, base_revision_id: str | None = None,
-    ) -> DocBranch:
+        *, expected_head: str | None = None, cas: bool = False,
+    ) -> DocBranch | None:
+        if cas:
+            return await self._cas_branch_head(
+                report_id=report_id, owner_id=owner_id,
+                head_revision_id=head_revision_id,
+                base_revision_id=base_revision_id,
+                expected_head=expected_head)
         stmt = select(DocBranchModel).where(DocBranchModel.report_id == report_id)
         stmt = stmt.where(DocBranchModel.owner_id.is_(None) if owner_id is None
                           else DocBranchModel.owner_id == owner_id)
@@ -412,6 +424,61 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
         await self._session.commit()
         await self._session.refresh(row)
         return self._branch_to_domain(row)
+
+    async def _cas_branch_head(  # pylint: disable=too-many-arguments
+        self, *, report_id: str, owner_id: str | None, head_revision_id: str,
+        base_revision_id: str | None, expected_head: str | None,
+    ) -> DocBranch | None:
+        """Move the pointer only while it still reads `expected_head`.
+
+        The condition lives in the WHERE clause, so the database decides
+        the winner rather than the application: `UPDATE ... WHERE
+        head_revision_id = :expected` matches one row or none, and a
+        concurrent writer that got there first leaves us the none. Doing
+        the comparison in Python is what let two saves through.
+
+        `expected_head is None` means "there was no branch yet". The
+        matching write is the INSERT, guarded the same way — a unique
+        index on (report_id, owner_id) means the loser gets an
+        IntegrityError instead of a second row.
+        """
+        owner_match = (DocBranchModel.owner_id.is_(None) if owner_id is None
+                       else DocBranchModel.owner_id == owner_id)
+        if expected_head is None:
+            row = DocBranchModel(
+                report_id=report_id, owner_id=owner_id,
+                head_revision_id=head_revision_id,
+                base_revision_id=base_revision_id or head_revision_id,
+            )
+            self._session.add(row)
+            try:
+                await self._session.commit()
+            except IntegrityError:
+                # Someone created the branch between our read and this
+                # insert. Their revision is the head now, not ours.
+                await self._session.rollback()
+                return None
+            await self._session.refresh(row)
+            return self._branch_to_domain(row)
+
+        values: dict = {"head_revision_id": head_revision_id}
+        if base_revision_id is not None:
+            values["base_revision_id"] = base_revision_id
+        result = await self._session.execute(
+            update(DocBranchModel)
+            .where(DocBranchModel.report_id == report_id)
+            .where(owner_match)
+            .where(DocBranchModel.head_revision_id == expected_head)
+            .values(**values)
+        )
+        if result.rowcount != 1:
+            await self._session.rollback()
+            return None
+        await self._session.commit()
+        stmt = select(DocBranchModel).where(
+            DocBranchModel.report_id == report_id).where(owner_match)
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        return self._branch_to_domain(row) if row else None
 
     # ── reviews ────────────────────────────────────────────────
 

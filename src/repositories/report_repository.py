@@ -111,7 +111,23 @@ class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
     async def set_branch_head(
         self, report_id: str, owner_id: str | None,
         head_revision_id: str, base_revision_id: str | None = None,
-    ) -> DocBranch: ...
+        *, expected_head: str | None = None, cas: bool = False,
+    ) -> DocBranch | None:
+        """Move a branch pointer, optionally only if it has not moved.
+
+        With `cas=True` this is a compare-and-swap: the write applies only
+        while the branch head is still `expected_head` (or the branch does
+        not exist yet, when that is None), and returns None otherwise. The
+        caller turns that None into the 409 it would have raised had it
+        seen the newer head in the first place.
+
+        The flag exists because reading the head and then writing it are
+        two statements, and two saves that interleave between them both
+        pass the read. That is not hypothetical: on 2026-09-02 two saves
+        41ms apart wrote sibling revisions off one parent, and the second
+        pointer write buried a document containing four charts under one
+        containing a single chart.
+        """
 
     # ── reviews ────────────────────────────────────────────────
 
