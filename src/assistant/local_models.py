@@ -155,7 +155,14 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         id="minimax-m3", label="MiniMax M3 [nebius]",
         served_name="MiniMaxAI/MiniMax-M3",
         provider=NEBIUS_PROVIDER,
-        tokens_per_second=40, context_tokens=131072,
+        # 1M, not the 131072 this said until 2026-09-01. Read back from
+        # the provider (GET /v1/models?verbose=true reports
+        # context_length 1048576 for MiniMaxAI/MiniMax-M3, a 428B MoE
+        # reasoning model served on B200). The old figure was a copy of
+        # the Qwen entries above it and understated the window by 8x,
+        # which matters here because context_tokens is what decides the
+        # schema tier and the compact tool surface.
+        tokens_per_second=40, context_tokens=1048576,
         reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
         note="Hosted by Nebius — your question leaves the cluster.",
     ),

@@ -259,6 +259,48 @@ class StudioOps:
             self._user, project_id, plot_id, name, spec)
         return self._with_notes(self._plot_dict(updated), verdict)
 
+    async def plot_recipe(self, project_id: str, plot_id: str) -> dict:
+        """One saved plot, shaped as the widget the editor embeds.
+
+        The Studio stores a plot as a `spec`; the article embeds it as a
+        `pipeline` widget — `data_params` (the sources and the DuckDB
+        transform) plus `ui_params` (which chart, which columns). The
+        translation between the two already existed in the browser, in
+        StudioPlotView's Pocket button. Doing it here as well means the
+        assistant proposes exactly what the Pocket button produces, so
+        both roads end at one renderer rather than two.
+
+        Ownership comes for free: `_svc.get_project` is scoped to the
+        asking user, so a plot id belonging to somebody else resolves to
+        nothing rather than to a chart.
+        """
+        project = await self._svc.get_project(self._user, project_id)
+        plots = getattr(project, "plots", None) or []
+        plot = next((x for x in plots if str(getattr(x, "id", "")) == plot_id), None)
+        if plot is None:
+            return {"error": f"no plot {plot_id!r} in project {project_id!r}"}
+        spec = dict(getattr(plot, "spec", None) or {})
+        chart = spec.get("chart")
+        if not chart:
+            return {"error": f"plot {plot_id!r} has no chart configured",
+                    "hint": "open it in the Studio and pick a chart type"}
+        if not (spec.get("sources") or []):
+            return {"error": f"plot {plot_id!r} has no data sources",
+                    "hint": "the plot cannot re-run without at least one source"}
+        ui = {"chart": chart, "x": spec.get("x", ""), "y": spec.get("y", ""),
+              "y2": spec.get("y2", ""), "level": spec.get("level", 0),
+              "bivariate": spec.get("bivariate", "none"),
+              "series": list(spec.get("series") or []),
+              "corrCols": list(spec.get("corrCols") or [])}
+        if spec.get("events"):
+            ui["events"] = spec["events"]
+        return {
+            "name": getattr(plot, "name", "") or "Studio plot",
+            "data_params": {"sources": list(spec.get("sources") or []),
+                            "transform": spec.get("transform", "")},
+            "ui_params": ui,
+        }
+
     # ── dispatch ───────────────────────────────────────────────
     #: Tool name -> method. No delete: an agent that can remove a user's work
     #: is a different risk conversation, and nothing here needs it.

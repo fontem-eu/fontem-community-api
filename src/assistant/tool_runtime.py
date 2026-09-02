@@ -823,7 +823,15 @@ class ToolRuntime:
             _record_call(traced, call_id, name, args, capped, started, len(out))
             return capped, len(out)
 
-        if name in studio_tools.STUDIO_ACTIONS:
+        # Everything that needs the turn's bound Studio, in one place: the
+        # Studio verbs themselves, and the proposal that embeds one of its
+        # plots in the article. insert_studio_plot is a proposal and would
+        # otherwise be answered further down in `_propose`, but it is
+        # answered here for the same reason read_document is — the object
+        # it needs is bound to the turn, not reachable from execute_tool,
+        # whose signature llm_service and several tests already call.
+        if (name in studio_tools.STUDIO_ACTIONS
+                or name == "mcp__gmr__insert_studio_plot"):
             # Server-side, as the asking user. The service checks access on
             # every call, so this cannot reach a project the user could not
             # open themselves.
@@ -831,13 +839,14 @@ class ToolRuntime:
                 out = json.dumps({
                     "error": "the Data Studio is not available for this turn",
                 })
-                _record_call(traced, call_id, name, args, out, started, 0)
-                return out, 0
-            # The turn's own client and the API it already talks to, handed
-            # over so a Studio write can be checked against the same engines
-            # the user's Run button uses before it is saved.
-            out = await studio.execute(name, args, client=client,
-                                       api_url=self._gmr_api_url)
+            elif name == "mcp__gmr__insert_studio_plot":
+                out = await self._validate_studio_plot(studio, args)
+            else:
+                # The turn's own client and the API it already talks to,
+                # handed over so a Studio write can be checked against the
+                # same engines the user's Run button uses before it is saved.
+                out = await studio.execute(name, args, client=client,
+                                           api_url=self._gmr_api_url)
             _record_call(traced, call_id, name, args, out, started, 0)
             return out, 0
 
@@ -945,6 +954,46 @@ class ToolRuntime:
             return json.dumps({"proposed": True,
                                "action": PROPOSAL_TOOL_ACTIONS[name]})
         return await self._validate_widget(client, args)
+
+    async def _validate_studio_plot(self, studio, args: dict) -> str:
+        """Resolve the plot before it becomes a card.
+
+        Same standard as _validate_widget below: the Apply button is not
+        where a user should discover that a plot id was invented or that
+        the chart was never configured. The recipe rides back in the tool
+        result so the card carries what the editor needs — the frontend
+        does not have to fetch the plot a second time to apply it, and
+        what the user sees proposed is what was validated.
+        """
+        if studio is None:
+            return json.dumps({
+                "error": "the Data Studio is not available on this turn"})
+        project_id = str(args.get("project_id") or "").strip()
+        plot_id = str(args.get("plot_id") or "").strip()
+        if not project_id or not plot_id:
+            return json.dumps({
+                "error": "project_id and plot_id are both required",
+                "hint": "get them from studio_get_project",
+            })
+        try:
+            recipe = await studio.plot_recipe(project_id, plot_id)
+        except Exception as exc:  # pylint: disable=broad-except
+            # A missing project raises out of the service; to the model
+            # that is the same answer as a missing plot, and it must not
+            # look like a platform fault.
+            return json.dumps({
+                "error": f"cannot read plot {plot_id!r}: {exc}"[:200],
+                "hint": "list your projects with studio_list_projects",
+            })
+        if recipe.get("error"):
+            return json.dumps(recipe)
+        return json.dumps({
+            "proposed": True,
+            "action": PROPOSAL_TOOL_ACTIONS["mcp__gmr__insert_studio_plot"],
+            "plot_name": recipe["name"],
+            "data_params": recipe["data_params"],
+            "ui_params": recipe["ui_params"],
+        })
 
     async def _validate_widget(
         self, client: httpx.AsyncClient, args: dict,

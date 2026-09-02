@@ -10,6 +10,13 @@ from __future__ import annotations
 
 #: Widget types the editor can render. Shared by the legacy propose_edit
 #: enum and the first-class insert_widget tool below.
+#:
+#: A Studio plot is deliberately NOT in here. Every type in this tuple is
+#: addressed by an entity id, and insert_widget requires one; a plot is
+#: addressed by (project_id, plot_id) and has no entity at all. Adding it
+#: would make `entityId` conditionally required on a flag — the exact shape
+#: that got propose_edit retired (see PROPOSAL_TOOL_ACTIONS below). It gets
+#: its own verb, `insert_studio_plot`, with required params only.
 WIDGET_TYPES = ("graph_explorer", "contracts_table", "entity_profile")
 
 #: The split proposal tools that replaced the four-action propose_edit, and
@@ -22,6 +29,7 @@ PROPOSAL_TOOL_ACTIONS = {
     "mcp__gmr__set_abstract": "set_abstract",
     "mcp__gmr__replace_body": "replace_body",
     "mcp__gmr__insert_widget": "insert_widget",
+    "mcp__gmr__insert_studio_plot": "insert_studio_plot",
 }
 
 DOC_TOOLS: list[dict] = [
@@ -113,6 +121,36 @@ DOC_TOOLS: list[dict] = [
                               "description": "Graph depth, 1-3."},
                 },
                 "required": ["widget_type", "entityId"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__gmr__insert_studio_plot",
+            "description": (
+                "Proposes inserting a chart you built in Data Studio into "
+                "the report. Give it the project and plot ids from "
+                "studio_list_projects / studio_get_project. The chart is "
+                "embedded as a live recipe — its queries and transform re-run "
+                "when a reader opens the article, so it follows the data "
+                "rather than freezing a picture of it. Validated server-side: "
+                "the plot must exist, belong to you, and have a chart "
+                "configured. Renders as an Apply/Reject card."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Studio project id owning the plot.",
+                    },
+                    "plot_id": {
+                        "type": "string",
+                        "description": "Plot id from studio_get_project.",
+                    },
+                },
+                "required": ["project_id", "plot_id"],
             },
         },
     },

@@ -159,6 +159,7 @@ EDITOR_ONLY_TOOLS = frozenset({
     "mcp__gmr__set_abstract",
     "mcp__gmr__replace_body",
     "mcp__gmr__insert_widget",
+    "mcp__gmr__insert_studio_plot",
 })
 
 

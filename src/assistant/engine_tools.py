@@ -56,6 +56,12 @@ OFFERED_BUILTINS = (
     "mcp__gmr__set_abstract",
     "mcp__gmr__replace_body",
     "mcp__gmr__insert_widget",
+    # The bridge between the two halves of the product: a chart built in
+    # Studio, embedded in the article being written. Without it the model
+    # could build a plot and then had nowhere to put it — in the session
+    # that motivated this it built the chart, could not embed it, and
+    # described it in prose instead.
+    "mcp__gmr__insert_studio_plot",
     # The guarded probe: read-only, capped, same proxies as the Run button.
     # For one-off counts and keys checks; the prompt sends anything worth
     # keeping to a Studio project instead.

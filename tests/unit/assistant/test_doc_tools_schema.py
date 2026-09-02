@@ -30,6 +30,14 @@ EXPECTED_TOOLS = {
         ["widget_type", "entityId", "depth"],
         {"widget_type": "string", "entityId": "string", "depth": "integer"},
     ),
+    # Ids only, both required. A Studio plot has no entity to hang off, so
+    # it is its own verb rather than a widget_type with a conditionally
+    # required entityId — the shape that got propose_edit retired.
+    "mcp__gmr__insert_studio_plot": (
+        ["project_id", "plot_id"],
+        ["project_id", "plot_id"],
+        {"project_id": "string", "plot_id": "string"},
+    ),
 }
 
 
@@ -86,6 +94,7 @@ def test_proposal_actions_map_advertised_tools_to_frontend_actions():
         "mcp__gmr__set_abstract": "set_abstract",
         "mcp__gmr__replace_body": "replace_body",
         "mcp__gmr__insert_widget": "insert_widget",
+        "mcp__gmr__insert_studio_plot": "insert_studio_plot",
     }
     for tool_name in PROPOSAL_TOOL_ACTIONS:
         assert tool_name in _by_name(), f"{tool_name} is mapped but not advertised"

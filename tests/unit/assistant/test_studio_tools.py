@@ -43,6 +43,7 @@ def test_the_offered_surface_is_deliberately_small():
         "mcp__gmr__set_abstract",
         "mcp__gmr__replace_body",
         "mcp__gmr__insert_widget",
+        "mcp__gmr__insert_studio_plot",
         "mcp__gmr__query_graph",
         "mcp__gmr__calculate",
         "mcp__gmr__studio_list_projects",
@@ -105,6 +106,7 @@ def test_the_only_ui_gated_tool_is_the_one_that_needs_a_surface():
         "mcp__gmr__set_abstract",
         "mcp__gmr__replace_body",
         "mcp__gmr__insert_widget",
+        "mcp__gmr__insert_studio_plot",
     }
 
 
