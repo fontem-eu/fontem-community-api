@@ -139,8 +139,18 @@ class TestSitemap:
         assert sitemap_mod.ENTITY_COUNTRIES
         assert all(len(c) == 3 and c.isupper() for c in sitemap_mod.ENTITY_COUNTRIES)
 
-    def test_authority_shards_stay_out_until_the_page_exists(self, client, services):
-        """The frontend has no /authority/:id route, so these URLs would
-        be soft-404s at scale. Deleting this test is the wrong way to
-        enable them — add the route first."""
-        assert "sitemap-authorities" not in client.get("/sitemap.xml").text
+    def test_index_lists_an_authority_shard_for_every_country(self, client, services):
+        """Held out until /authority/:authority_id rendered a real page —
+        the SPA catch-all used to answer 200 with a not-found view, so
+        these would have been ~16,000 soft-404s. The page exists now."""
+        body = client.get("/sitemap.xml").text
+        for code in sitemap_mod.ENTITY_COUNTRIES:
+            assert f"/sitemap-authorities-{code}.xml" in body, code
+
+    def test_both_entity_families_are_advertised_per_country(self, client, services):
+        """Companies and authorities, each sharded per country so a small
+        member state is not buried under a larger one's tail."""
+        body = client.get("/sitemap.xml").text
+        for code in ("MLT", "CYP", "LIE"):
+            assert f"/sitemap-companies-{code}.xml" in body, code
+            assert f"/sitemap-authorities-{code}.xml" in body, code
