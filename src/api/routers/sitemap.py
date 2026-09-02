@@ -99,10 +99,12 @@ def sitemap_index() -> Response:
         # N" buries the small member states — everything Maltese sits
         # below the German tail. Each country gets its own budget.
         #
-        # Authorities are NOT listed yet, deliberately: the frontend has
-        # no /authority/:id route, so those URLs would be soft-404s. The
-        # shards exist in fontem-api and go in here once the page does.
         *(f"{_CANONICAL_URL}/sitemap-companies-{c}.xml" for c in ENTITY_COUNTRIES),
+        # Authorities, now that /authority/:authority_id renders the full
+        # entity page. They were held out while the SPA catch-all
+        # answered 200 with a not-found view for those URLs: advertising
+        # ~16,000 of them would have advertised ~16,000 soft-404s.
+        *(f"{_CANONICAL_URL}/sitemap-authorities-{c}.xml" for c in ENTITY_COUNTRIES),
     ]
     items = "\n".join(
         f"  <sitemap><loc>{escape(u)}</loc><lastmod>{today}</lastmod></sitemap>"
