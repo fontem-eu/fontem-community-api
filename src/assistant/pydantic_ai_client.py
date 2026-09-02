@@ -40,7 +40,15 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from src.assistant import engine_tools, studio_tools, tool_runtime, tool_budget, tool_trace
+from src.assistant import (
+    context_budget,
+    engine_tools,
+    local_models,
+    studio_tools,
+    tool_budget,
+    tool_runtime,
+    tool_trace,
+)
 from src.assistant.engine_tools import ANONYMOUS_TOOLS, turn_tool_specs
 from src.assistant import generated_tools
 from src.assistant.tool_runtime import (
@@ -102,6 +110,30 @@ class PydanticAIUnavailable(RuntimeError):
     """pydantic-ai is not importable, or too old for the API used here."""
 
 
+def _reply_ceiling(payload: dict, system: str, message: str) -> int:
+    """How many tokens this turn may generate.
+
+    The model's own `reply_max_tokens` — 8k for a direct answerer, 32k for
+    a reasoning model whose thinking is spent before the first answer
+    token — but never more than the window has left after the prompt.
+
+    The subtraction matters on the small local models: qwen3-4b has 32k of
+    context, so handing it a flat 8k ceiling on top of a long conversation
+    asks for tokens that do not exist, and llama.cpp answers that with a
+    400 rather than a short reply. Characters-per-token uses the same
+    deliberately pessimistic 3 as context_budget, for the same reason:
+    being wrong high overflows the window, being wrong low only shortens
+    a reply nobody was going to reach.
+    """
+    model = local_models.resolve(payload.get("local_model_id"))
+    prompt_chars = len(system or "") + len(message or "")
+    for m in payload.get("history") or []:
+        prompt_chars += len(str(m.get("content") or ""))
+    spent = prompt_chars // context_budget.CHARS_PER_TOKEN
+    room = model.context_tokens - spent - 512      # 512: same safety margin
+    return max(512, min(model.reply_max_tokens, room))
+
+
 def _import_pydantic_ai():
     """Import lazily and name the failure.
 
@@ -115,10 +147,11 @@ def _import_pydantic_ai():
         from pydantic_ai import Agent
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
+        from pydantic_ai.settings import ModelSettings
         from pydantic_ai.tools import Tool
     except ImportError as exc:                      # pragma: no cover - env
         raise PydanticAIUnavailable(str(exc)) from exc
-    return Agent, OpenAIChatModel, OpenAIProvider, Tool
+    return Agent, OpenAIChatModel, OpenAIProvider, Tool, ModelSettings
 
 
 class PydanticAIProxyClient:
@@ -216,7 +249,8 @@ class PydanticAIProxyClient:
             return
 
         try:
-            agent_cls, model_cls, provider_cls, tool_cls = _import_pydantic_ai()
+            (agent_cls, model_cls, provider_cls, tool_cls,
+             settings_cls) = _import_pydantic_ai()
         except PydanticAIUnavailable as exc:
             yield _sse("error", {"error": f"pydantic-ai engine unavailable: {exc}"})
             yield _sse("done", {})
@@ -280,7 +314,21 @@ class PydanticAIProxyClient:
                 model = model_cls(route.model, provider=provider_cls(
                     base_url=route.base_url,
                     api_key=route.api_key or "none"))
-                agent = agent_cls(model, system_prompt=system, tools=tools)
+                # A ceiling we chose, rather than whatever the provider
+                # defaults to. Without one, pydantic-ai reports a truncated
+                # reply as "Model token limit (provider default) exceeded
+                # before any response was generated" — a message that names
+                # no number because we sent none, on a turn the author
+                # cannot get back.
+                #
+                # Capped against what the window can still hold: max_tokens
+                # is output on top of the prompt, so a generous constant on
+                # a 32k model with a long thread asks for more than exists.
+                agent = agent_cls(
+                    model, system_prompt=system, tools=tools,
+                    model_settings=settings_cls(
+                        max_tokens=_reply_ceiling(payload, system, message)),
+                )
                 async for event in self._run(
                     agent, message, start, pending_nav, name_cache, traced,
                 ):

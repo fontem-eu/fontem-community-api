@@ -87,6 +87,20 @@ class LocalModel:  # pylint: disable=too-many-instance-attributes
     #: reads these; CLI flags override them.
     eval_max_rounds: int = 6
     eval_max_tokens: int = 900
+    #: What a SERVED turn may generate. Deliberately generous, and
+    #: deliberately not `eval_max_tokens`: an eval wants a short leash so a
+    #: run is cheap and comparable, a user wants their answer finished.
+    #:
+    #: This exists because the serving path set no ceiling at all, so
+    #: whatever the provider defaults to applied — and pydantic-ai turns a
+    #: truncated reply into `Model token limit (provider default) exceeded
+    #: before any response was generated`, which is what an author saw
+    #: mid-article. Naming a number makes the ceiling ours, high, and
+    #: visible in the error if it is ever hit.
+    #:
+    #: Reasoning models override it upward: their thinking is spent before
+    #: the first answer token, so the same budget buys far less answer.
+    reply_max_tokens: int = 8_000
 
     @property
     def hosted(self) -> bool:
@@ -148,6 +162,7 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         provider=NEBIUS_PROVIDER,
         tokens_per_second=40, context_tokens=131072,
         reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
+        reply_max_tokens=32_000,
         note="Hosted by Nebius. Thorough but long-winded: it took 122 tool "
              "calls across our evaluation fixture where the 8B took 15.",
     ),
@@ -164,6 +179,7 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         # schema tier and the compact tool surface.
         tokens_per_second=40, context_tokens=1048576,
         reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
+        reply_max_tokens=32_000,
         note="Hosted by Nebius — your question leaves the cluster.",
     ),
     LocalModel(
@@ -172,6 +188,7 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         provider=NEBIUS_PROVIDER,
         tokens_per_second=25, context_tokens=131072,
         reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
+        reply_max_tokens=32_000,
         note="Hosted by Nebius. Scored worst of these on sticking to figures "
              "the tools returned.",
     ),
@@ -181,6 +198,7 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
         provider=OPENROUTER_PROVIDER,
         tokens_per_second=20, context_tokens=1048576,
         reasoning=True, eval_max_rounds=12, eval_max_tokens=4000,
+        reply_max_tokens=32_000,
         note="Hosted by OpenRouter, on an undisclosed provider's preview "
              "model. Prompts are shared with them. For evaluation, not "
              "everyday use.",
