@@ -131,14 +131,35 @@ class DatabaseProvider(Provider):
 
         Writes are committed eagerly by the repository layer (via
         session.commit()) so that data is visible to clients before
-        the response is sent. The teardown here only handles rollback
-        on unhandled exceptions and session cleanup.
+        the response is sent. The teardown here rolls back a failed
+        request, commits a clean one, and closes either way.
+
+        The exception arrives as the RESULT of the yield, not raised at
+        it. dishka resumes a generator provider with
+        `agen.asend(exception)` rather than `athrow` (see
+        dishka/async_container.py __aexit__), so a provider written as
+        `yield session; await session.commit()` wrapped in `except` runs
+        the COMMIT on a failed request and never reaches the except
+        branch — that branch only ever catches errors raised by the
+        commit itself.
+
+        That is not a style point. It committed half-finished requests,
+        and when the transaction was already invalid the commit raised
+        `PendingRollbackError`, which dishka wrapped in an ExitError and
+        returned as a 500 — replacing the real error with a teardown
+        error. Production, 2026-09-01: every failing
+        POST /assist/chat/stream reported the rollback complaint and
+        nothing about what actually went wrong in the turn.
         """
         session = factory()
         try:
-            yield session
-            await session.commit()
+            request_error = yield session
+            if request_error is not None:
+                await session.rollback()
+            else:
+                await session.commit()
         except Exception:
+            # The commit (or rollback) above failed on its own account.
             await session.rollback()
             raise
         finally:
