@@ -1,8 +1,8 @@
-"""Personal access tokens for connecting an external client to Fontem.
+"""Personal access tokens for connecting an external client to Dargle.
 
 These are what a user pastes into Claude Desktop, Claude Code or ChatGPT
 so their own client can reach our MCP tools. They authorise access to
-*Fontem data* — which is entirely ours to grant — and are a different
+*Dargle data* — which is entirely ours to grant — and are a different
 thing from the LLM provider credential we deliberately do not hold.
 
 Only the SHA-256 hash is stored, following the same discipline as

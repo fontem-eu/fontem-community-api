@@ -1,10 +1,10 @@
 """What data the platform actually holds, assembled at runtime.
 
-The assistant used to be told, in prose, that Fontem covers "public
+The assistant used to be told, in prose, that Dargle covers "public
 procurement, corporate ownership, lobbying and democratic accountability".
 That sentence is true and badly incomplete: the platform also serves 40-odd
 Eurostat regional datasets — demography, health, crime, migration, education.
-Asked about population, the model answered that Fontem holds no demographic
+Asked about population, the model answered that Dargle holds no demographic
 data. It was reasoning correctly from what it had been told.
 
 Hand-written scope prose cannot be kept honest. Every new feed would need
@@ -182,7 +182,7 @@ def format_catalogue(catalogue: dict) -> str:
                          + (f"; +{more} more" if more > 0 else ""))
 
     header = (
-        "## What Fontem holds\n\n"
+        "## What Dargle holds\n\n"
         "This list is generated from the platform's own source registries at "
         "the time of this turn, so it is complete and current. If a topic "
         "appears below, the data IS here — find it with a tool rather than "

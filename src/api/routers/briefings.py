@@ -191,7 +191,7 @@ async def atom_feed(
 
     regions = ", ".join(watch.nuts)
     body = atom.render(
-        title=f"{group.name} — Fontem",
+        title=f"{group.name} — Dargle",
         subtitle=f"{group.description} Regions: {regions}."
                  if group.description else f"Regions: {regions}.",
         feed_url=f"{SITE_URL}/capi/feeds/{token}.atom",
