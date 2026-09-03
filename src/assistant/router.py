@@ -835,7 +835,7 @@ async def delete_credential(
 
 # ── MCP access tokens ─────────────────────────────────────────
 #
-# What a user pastes into their own LLM client so it can reach Fontem's
+# What a user pastes into their own LLM client so it can reach Dargle's
 # tools. Shown once at creation and never again: a token that can be
 # re-read is a token an attacker can re-read.
 

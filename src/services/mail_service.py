@@ -56,7 +56,7 @@ class MailService:
         self._suppress = os.environ.get("MAIL_SUPPRESS", "true").lower() == "true"
         self._api_key = os.environ.get("BREVO_API_KEY", "")
         self._from_email = os.environ.get("MAIL_FROM", "noreply@fontem.eu")
-        self._from_name = os.environ.get("MAIL_FROM_NAME", "Fontem")
+        self._from_name = os.environ.get("MAIL_FROM_NAME", "Dargle")
         self._reply_to = os.environ.get("MAIL_REPLY_TO", "support@fontem.eu")
 
     @property

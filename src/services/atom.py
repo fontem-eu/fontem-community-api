@@ -53,9 +53,9 @@ def render(title: str, subtitle: str, feed_url: str, site_url: str, items) -> st
     newest = max((i.item_time for i in items if i.item_time), default=None)
     SubElement(feed, "updated").text = _rfc3339(newest)
     author = SubElement(feed, "author")
-    SubElement(author, "name").text = "Fontem"
+    SubElement(author, "name").text = "Dargle"
     SubElement(author, "uri").text = site_url
-    SubElement(feed, "generator", {"uri": site_url}).text = "Fontem Briefings"
+    SubElement(feed, "generator", {"uri": site_url}).text = "Dargle Briefings"
 
     for item in items:
         entry = SubElement(feed, "entry")

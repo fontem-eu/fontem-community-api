@@ -10,51 +10,51 @@ from __future__ import annotations
 
 def verification_email(name: str, link: str) -> tuple[str, str, str]:
     """Return (subject, html, text) for the email-verification message."""
-    subject = "Confirm your Fontem email"
+    subject = "Confirm your Dargle email"
     greeting = f"Hi {name}," if name else "Hi,"
     text = (
         f"{greeting}\n\n"
-        "Welcome to Fontem. Confirm your email address to start "
+        "Welcome to Dargle. Confirm your email address to start "
         "publishing, commenting, and following stories:\n\n"
         f"{link}\n\n"
-        "This link expires in 24 hours. If you didn't create a Fontem "
+        "This link expires in 24 hours. If you didn't create a Dargle "
         "account, you can ignore this email.\n\n"
-        "— The Fontem team"
+        "— The Dargle team"
     )
     html = (
         f"<p>{greeting}</p>"
-        "<p>Welcome to Fontem. Confirm your email address to start "
+        "<p>Welcome to Dargle. Confirm your email address to start "
         "publishing, commenting, and following stories:</p>"
         f'<p><a href="{link}">Confirm my email</a></p>'
         "<p>This link expires in 24 hours. If you didn't create a "
-        "Fontem account, you can ignore this email.</p>"
-        "<p>— The Fontem team</p>"
+        "Dargle account, you can ignore this email.</p>"
+        "<p>— The Dargle team</p>"
     )
     return subject, html, text
 
 
 def password_reset_email(name: str, link: str) -> tuple[str, str, str]:
     """Return (subject, html, text) for the password-reset message."""
-    subject = "Reset your Fontem password"
+    subject = "Reset your Dargle password"
     greeting = f"Hi {name}," if name else "Hi,"
     text = (
         f"{greeting}\n\n"
-        "We received a request to reset your Fontem password. Set a "
+        "We received a request to reset your Dargle password. Set a "
         "new one here:\n\n"
         f"{link}\n\n"
         "This link expires in 1 hour and can be used once. If you "
         "didn't request a reset, you can ignore this email — your "
         "password hasn't changed.\n\n"
-        "— The Fontem team"
+        "— The Dargle team"
     )
     html = (
         f"<p>{greeting}</p>"
-        "<p>We received a request to reset your Fontem password. Set a "
+        "<p>We received a request to reset your Dargle password. Set a "
         "new one here:</p>"
         f'<p><a href="{link}">Reset my password</a></p>'
         "<p>This link expires in 1 hour and can be used once. If you "
         "didn't request a reset, you can ignore this email — your "
         "password hasn't changed.</p>"
-        "<p>— The Fontem team</p>"
+        "<p>— The Dargle team</p>"
     )
     return subject, html, text

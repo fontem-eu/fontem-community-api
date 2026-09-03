@@ -99,7 +99,7 @@ _LOCKOUT_MINUTES = 15
 
 GOOGLE_CLIENT_ID = os.environ.get(
     "GOOGLE_CLIENT_ID",
-    # Fontem Google OAuth client — ID-token verification uses this as
+    # Dargle Google OAuth client — ID-token verification uses this as
     # the audience. Must match the client_id the frontend initialises
     # GSI with (gmr-web/src/views/LoginView.vue). Rotate in lockstep.
     "1055538305131-87jn8h6gunj55q1akfdkuv6kpg43ld4t.apps.googleusercontent.com",
@@ -363,7 +363,7 @@ async def google_login(
     refresh_service: FromDishka[RefreshTokenService],
     storage: FromDishka[MinioStorage],
 ) -> TokenResponse:
-    """Exchange a Google ID token for a Fontem session JWT + refresh cookie."""
+    """Exchange a Google ID token for a Dargle session JWT + refresh cookie."""
     payload = await _verify_google_token(body.credential)
 
     email = payload["email"]
