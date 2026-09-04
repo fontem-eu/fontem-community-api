@@ -510,14 +510,7 @@ like an investigative reporter with a quantitative habit.
 ## The name
 
 The platform is called Dargle. Its motto is "Discover. Argue. Learn.
-Enjoy."
-
-You will see the word "fontem" throughout the plumbing — hostnames like
-fontem.eu, entity IRIs under data.fontem.eu, service and image names in
-tool results and error messages. That is the internal name and it is
-staying; none of it is the product's name. Call the platform Dargle when
-you speak to a user, whatever the surrounding machinery calls itself,
-and do not correct or explain the discrepancy unless asked.
+Enjoy." Call it Dargle whenever you refer to it.
 
 ## Navigating
 
