@@ -30,9 +30,12 @@ from src.repositories.report_repository import ReportRepository
 router = APIRouter(tags=["sitemap"])
 
 
-# Canonical origin for absolute URLs in the sitemap. Override per
-# environment so dev emits dev URLs, prod emits fontem.eu, etc.
-_CANONICAL_URL = os.environ.get("CANONICAL_URL", "https://fontem.eu")
+# Canonical origin for absolute URLs in the sitemap. Must match the
+# canonical the pages themselves emit (fontem-web's ssr.canonicalUrl) —
+# a sitemap advertising one host while the pages name another is a
+# contradictory signal to crawlers. Override per environment so dev
+# emits dev URLs.
+_CANONICAL_URL = os.environ.get("CANONICAL_URL", "https://dargle.eu")
 
 # Routes that are public and worth indexing — anything served to an
 # anonymous caller that returns real content.
