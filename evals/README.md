@@ -167,3 +167,37 @@ leaderboard.
 because the harness imports the shipped assistant rather than copying it, so a
 rename in `src.assistant` silently breaks every run — which is exactly what
 happened for a week after 2b37dcc.
+
+---
+
+## `story_loop.py` — the iteration harness (not a score)
+
+Everything above scores prompts. This does something different: it drives
+the assistant through **one whole job** — write a data story, with plots
+built in Data Studio and embedded in the article — and writes down what
+happened, for a person to read.
+
+    python evals/story_loop.py --model minimax-m3
+
+It is **not a gate**, and nothing in CI runs it. `evals/` is outside
+pytest's `testpaths`, which is what keeps it that way. It talks to a live
+environment, spends model tokens, and its output is a report rather than a
+verdict.
+
+It targets **testing**, which reads the same `fontem-shared` graph as
+production — so the data is real without the run touching prod.
+
+The report has two halves, and the first is the one that pays:
+
+* **Reasoning** — every tool call in order, its arguments, and what came
+  back. A turn that goes wrong is almost always obvious here and almost
+  never obvious in the finished prose. The first version of this harness
+  keyed on an event name that does not exist and recorded every call with
+  empty arguments; half the signal was missing and the report still looked
+  plausible, which is the failure mode to watch for in a harness like this.
+* **Artifacts** — the article as it ended up, the Studio projects and plots
+  that now exist, and how many proposals were applied versus merely made.
+
+Proposals are applied here rather than in a browser: the frontend applier
+has unit tests, and driving Chromium would make the loop slow enough to
+stop using, which is the problem this exists to fix.
