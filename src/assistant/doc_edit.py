@@ -134,32 +134,40 @@ def _splice_in_block(block: dict, start: int, end: int, new_text: str) -> dict:
     Offsets are block-local. The replacement inherits the marks of the
     text node it starts in, so replacing three words inside a bold run
     stays bold instead of silently losing the emphasis.
+
+    The three surviving pieces of a cut node — what came before the span,
+    the replacement, what came after — are appended through one helper
+    rather than three conditionals, because the conditionals were the
+    whole of this function's complexity and none of them said anything.
     """
-    out_children: list[dict] = []
+    out: list[dict] = []
     cursor = 0
-    inserted = False
+    #: Consumed by the first node the span cuts, so the replacement lands
+    #: once even when the span covers several text nodes.
+    pending = new_text
+
+    def keep(node: dict, text: str) -> None:
+        if text:
+            out.append({**node, "text": text})
+
     for child in block.get("content") or []:
         if child.get("type") != "text":
-            out_children.append(child)
+            out.append(child)
             continue
         text = str(child.get("text") or "")
-        node_start, node_end = cursor, cursor + len(text)
-        cursor = node_end
-        if node_end <= start or node_start >= end:
-            out_children.append(child)
+        node_start, cursor = cursor, cursor + len(text)
+        if cursor <= start or node_start >= end:
+            out.append(child)                       # untouched by the span
             continue
-        prefix = text[:max(0, start - node_start)]
-        suffix = text[max(0, end - node_start):]
-        if prefix:
-            out_children.append({**child, "text": prefix})
-        if not inserted and new_text:
-            out_children.append({**child, "text": new_text})
-            inserted = True
-        if suffix:
-            out_children.append({**child, "text": suffix})
-    if not inserted and new_text:
-        out_children.append({"type": "text", "text": new_text})
-    return {**block, "content": out_children}
+        keep(child, text[:max(0, start - node_start)])
+        keep(child, pending)
+        pending = ""
+        keep(child, text[max(0, end - node_start):])
+
+    # A span that touched no text node at all — an empty paragraph, say.
+    if pending:
+        out.append({"type": "text", "text": pending})
+    return {**block, "content": out}
 
 
 def replace_span(doc: Any, start: int, end: int, new_text: str) -> dict:
