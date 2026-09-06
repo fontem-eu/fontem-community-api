@@ -22,29 +22,61 @@ of those is a 400 the model cannot diagnose from the error alone.
 """
 from __future__ import annotations
 
+from src.services.studio_validation import CHART_TYPES as VALIDATOR_CHART_TYPES
+
 #: Query engines a source can use. Each runs through a read-only,
 #: row-and-timeout-capped proxy; see the Studio documentation for schemas.
 QUERY_LANGS = ("cypher", "sql", "sparql")
 
-#: Chart types the plot renderer understands.
-CHART_TYPES = ("line", "bar", "area", "scatter", "map", "table")
+#: Re-exported from the validator, never redefined. This module used to
+#: carry its own copy — ("line", "bar", "area", "scatter", "map", "table")
+#: — and the two drifted until only `line` overlapped. The model was
+#: offered six chart types, five of which the validator refuses on sight,
+#: and none of bar_h, corr_matrix, stat or atlas_map, which work. It cost
+#: an iteration run three refused plots before it gave up on charting.
+#:
+#: The test below pins this against studio_validation, not against itself:
+#: the old test asserted the schema matched THIS constant, which is why a
+#: drift between the offer and the enforcement was invisible.
+CHART_TYPES = VALIDATOR_CHART_TYPES
 
 PROJECT_ID_PARAM = {
     "type": "string",
     "description": "Project id, from studio_list_projects.",
 }
 
+#: The description is generated from CHART_TYPES rather than written out,
+#: so it cannot drift from the enum beside it. Both were wrong before: the
+#: prose and the enum agreed with each other and disagreed with the
+#: validator, which is the worst arrangement — nothing looked inconsistent
+#: from inside this file.
 PLOT_SPEC_PARAM = {
     "type": "object",
     "description": (
-        "Chart definition. `sources`: query ids to load. `transform`: "
+        "Chart definition. `sources`: the queries to draw from, as "
+        "{name, lang, query} OBJECTS — not ids, not names. `transform`: "
         "optional DuckDB SQL over those sources, run in the browser. "
-        "`chart`: one of line, bar, area, scatter, map, table. `x`/`y`: "
-        "column names in the transformed result. `series`: optional column "
-        "to split lines or bar groups by."
+        "`chart`: one of " + ", ".join(CHART_TYPES) + ". `x`/`y`: column "
+        "names in the transformed result. `series`: optional column to "
+        "split lines or bar groups by."
     ),
     "properties": {
-        "sources": {"type": "array", "items": {"type": "string"}},
+        # Objects, because that is what studio_validation accepts. The
+        # schema said `string` and the validator answered "source 0 is not
+        # an object", which is a refusal the model cannot act on: it was
+        # doing exactly what it was told.
+        "sources": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "lang": {"type": "string", "enum": ["sql", "cypher", "sparql"]},
+                    "query": {"type": "string"},
+                },
+                "required": ["name", "lang", "query"],
+            },
+        },
         "transform": {"type": "string"},
         "chart": {"type": "string", "enum": list(CHART_TYPES)},
         "x": {"type": "string"},
