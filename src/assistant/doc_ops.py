@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 
-from src.assistant import tool_budget
+from src.assistant import doc_edit, tool_budget
 
 #: One document read may not eat the whole turn's tool budget: the body is
 #: the largest thing the tool surface can return, and a 90k-character story
@@ -34,6 +34,23 @@ class DocOps:
         self._svc = report_service
         self._user = user_id
         self._report = report_id
+
+    async def content(self):
+        """The stored TipTap document itself, for the editing verbs.
+
+        `read` returns the model-facing JSON string; this returns the
+        structure the character-addressed edits are computed against, so
+        the offsets a model got from one are the offsets the other
+        applies. Returns None when the document cannot be read at all,
+        which the caller reports rather than treating as empty — an edit
+        against a document we could not load is an edit against nothing.
+        """
+        try:
+            head = (await self._svc.draft_head(self._user, self._report)
+                    or await self._svc.document_head(self._report))
+        except Exception:  # pylint: disable=broad-except
+            return None
+        return head.content_json if head else []
 
     async def read(self) -> str:
         """Title, abstract and body of the conversation's report.
@@ -60,7 +77,13 @@ class DocOps:
         # its first draft is a normal thing to be asked for, and a
         # rewrite of nothing destroys nothing — the blind-rewrite guard
         # exists for documents that cannot be read, not for blank ones.
-        body = json.dumps(head.content_json) if head else "[]"
+        content = head.content_json if head else []
+        # The coordinate space for find_in_document, replace_part and the
+        # at_char on the insert verbs. Sent alongside the JSON rather than
+        # instead of it: the JSON is what carries widgets and marks, and
+        # the text is what the model can count characters in.
+        text = doc_edit.body_text(content)
+        body = json.dumps(content)
         if len(body) > MAX_DOC_CHARS:
             dropped = len(body) - MAX_DOC_CHARS
             body = body[:MAX_DOC_CHARS] + TRUNCATED_MARKER.format(
@@ -71,9 +94,14 @@ class DocOps:
             "title": report.title,
             "abstract": getattr(report, "abstract", None),
             # TipTap document JSON. Text lives in the `text` fields;
-            # propose replacements as HTML, which the Apply path
-            # sanitises and converts.
+            # propose whole-body replacements as HTML, which the Apply
+            # path sanitises and converts. `body_text` below is the same
+            # prose as one string, and is the ONLY thing character
+            # offsets refer to — find_in_document returns offsets into
+            # it, replace_part and at_char consume them.
             "sections": body,
+            "body_text": text,
+            "body_text_length": len(text),
             "revision": head.id if head else None,
             "note": (
                 "This is the user's last SAVED draft. Their editor buffer "

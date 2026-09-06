@@ -55,6 +55,13 @@ OFFERED_BUILTINS = (
     "mcp__gmr__set_title",
     "mcp__gmr__set_abstract",
     "mcp__gmr__replace_body",
+    # Character-addressed editing. replace_body costs the whole article to
+    # change a sentence, which on a long data story is most of a turn's
+    # output budget spent restating text nobody asked to change. find
+    # locates, replace_part changes; both address body_text from
+    # read_document. See doc_edit.py for the coordinate space.
+    "mcp__gmr__find_in_document",
+    "mcp__gmr__replace_part",
     "mcp__gmr__insert_widget",
     # The bridge between the two halves of the product: a chart built in
     # Studio, embedded in the article being written. Without it the model
@@ -115,6 +122,11 @@ COMPACT_BUILTINS = (
     "mcp__gmr__read_document",
     "mcp__gmr__set_title",
     "mcp__gmr__replace_body",
+    # find_in_document/replace_part are deliberately NOT here. A small
+    # model would benefit from not restating the article, but tool COUNT
+    # is the binding constraint at this tier — sixteen broke a 4B, and
+    # test_compact_surface caps the width at the twelve that worked.
+    # Focused editing is a full-surface feature.
     "mcp__gmr__calculate",
 )
 

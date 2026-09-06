@@ -112,7 +112,15 @@ def test_python_and_js_advertised_actions_match():
     implemented-but-unadvertised for stored conversations), so the parity
     is between PROPOSAL_TOOL_ACTIONS' action names and the JS constant."""
     js_actions = _read_js_advertised_actions()
-    assert tuple(js_actions) == tuple(PROPOSAL_TOOL_ACTIONS.values()), (
-        f"Python advertises {tuple(PROPOSAL_TOOL_ACTIONS.values())}; JS "
+    # De-duplicated, order preserved. Two VERBS may share one frontend
+    # action — replace_part and replace_body both end in a whole-body swap,
+    # because the server computes the revised document and the editor
+    # applies it the same way either way. What must hold is that every
+    # action Python can advertise is one JS handles; requiring the maps to
+    # be the same length would force a meaningless duplicate into the JS
+    # list to describe that.
+    py_actions = list(dict.fromkeys(PROPOSAL_TOOL_ACTIONS.values()))
+    assert tuple(js_actions) == tuple(py_actions), (
+        f"Python advertises {tuple(py_actions)}; JS "
         f"advertises {tuple(js_actions)}. Update both sides together."
     )

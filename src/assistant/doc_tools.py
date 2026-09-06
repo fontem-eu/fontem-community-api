@@ -28,6 +28,7 @@ PROPOSAL_TOOL_ACTIONS = {
     "mcp__gmr__set_title": "set_title",
     "mcp__gmr__set_abstract": "set_abstract",
     "mcp__gmr__replace_body": "replace_body",
+    "mcp__gmr__replace_part": "replace_body",
     "mcp__gmr__insert_widget": "insert_widget",
     "mcp__gmr__insert_studio_plot": "insert_studio_plot",
 }
@@ -119,6 +120,15 @@ DOC_TOOLS: list[dict] = [
                     },
                     "depth": {"type": "integer",
                               "description": "Graph depth, 1-3."},
+                    "at_char": {
+                        "type": "integer",
+                        "description": (
+                            "Where to put it: a character offset into "
+                            "body_text from read_document. The widget lands "
+                            "after the paragraph that offset falls in. Omit "
+                            "to append at the end."
+                        ),
+                    },
                 },
                 "required": ["widget_type", "entityId"],
             },
@@ -149,8 +159,79 @@ DOC_TOOLS: list[dict] = [
                         "type": "string",
                         "description": "Plot id from studio_get_project.",
                     },
+                    "at_char": {
+                        "type": "integer",
+                        "description": (
+                            "Where to put it: a character offset into "
+                            "body_text from read_document. The chart lands "
+                            "after the paragraph that offset falls in — put "
+                            "it after the text that introduces it. Omit to "
+                            "append at the end."
+                        ),
+                    },
                 },
                 "required": ["project_id", "plot_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__gmr__find_in_document",
+            "description": (
+                "Finds a substring in the article body and returns its "
+                "character offsets, for use with replace_part or at_char. "
+                "Also returns how many times it occurs: if that is more "
+                "than 1, quote a longer, unique phrase before editing, or "
+                "you will change the wrong one. Reads only — proposes "
+                "nothing and changes nothing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"substring": {
+                    "type": "string",
+                    "description": (
+                        "Text to locate, exactly as it appears in "
+                        "body_text from read_document."
+                    ),
+                }},
+                "required": ["substring"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp__gmr__replace_part",
+            "description": (
+                "Proposes replacing ONE PASSAGE of the body, addressed by "
+                "character offsets into body_text from read_document. Use "
+                "this, not replace_body, to change a sentence, fix a "
+                "figure or add a paragraph: replace_body costs the whole "
+                "article and risks dropping text you were not asked to "
+                "touch. Get offsets from find_in_document. Within one "
+                "paragraph the replacement is exact; a span crossing "
+                "paragraphs replaces every paragraph it touches. Blank "
+                "lines in new_text start new paragraphs. Renders as one "
+                "Apply/Reject card showing the whole revised body."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start": {"type": "integer",
+                              "description": "First character to replace."},
+                    "end": {"type": "integer",
+                            "description": (
+                                "One past the last character to replace. "
+                                "start == end inserts without deleting."
+                            )},
+                    "new_text": {"type": "string",
+                                 "description": (
+                                     "Replacement text. Empty deletes the "
+                                     "span."
+                                 )},
+                },
+                "required": ["start", "end", "new_text"],
             },
         },
     },

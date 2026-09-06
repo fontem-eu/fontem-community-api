@@ -160,6 +160,11 @@ EDITOR_ONLY_TOOLS = frozenset({
     "mcp__gmr__replace_body",
     "mcp__gmr__insert_widget",
     "mcp__gmr__insert_studio_plot",
+    # Both address the open article by character offset. Without one there
+    # is nothing to search and nothing to patch, and the model would spend
+    # a turn finding that out.
+    "mcp__gmr__find_in_document",
+    "mcp__gmr__replace_part",
 })
 
 
