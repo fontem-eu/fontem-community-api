@@ -42,7 +42,8 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.assistant import calc_tools, doc_tools, generated_tools, legacy_tools, probe_tools
+from src.assistant import (calc_tools, doc_edit, doc_tools, generated_tools,
+                           legacy_tools, probe_tools)
 from src.assistant.freshness import _format_freshness_summary
 from src.assistant.catalogue import CatalogueCache
 
@@ -573,6 +574,92 @@ async def _document_is_readable(doc) -> bool:
     return isinstance(body, dict) and not body.get("error")
 
 
+async def _answer_doc_edit(doc, name: str, args: dict) -> str:
+    """find_in_document and replace_part, against the stored document.
+
+    Both refuse rather than guess when there is nothing to read: an edit
+    computed against a document we could not load is an edit against
+    nothing, and the model can act on a sentence saying so.
+    """
+    if doc is None:
+        return json.dumps({"error": "no document is open in this conversation"})
+    content = await doc.content()
+    if content is None:
+        return json.dumps({"error": "cannot read this document"})
+    if name == "mcp__gmr__find_in_document":
+        return json.dumps(
+            doc_edit.find(content, str(args.get("substring") or "")))
+    return _replace_part_result(content, args)
+
+
+async def _resolve_at_block(doc, name: str, args: dict) -> int | None:
+    """The model's `at_char` as an editor block index, or None.
+
+    None means "append", which is what every insert did before positions
+    existed. A non-numeric at_char is the model's mistake and is treated
+    as absent: losing the widget over a bad coordinate is a worse answer
+    than putting it at the end.
+    """
+    if name not in ("mcp__gmr__insert_widget", "mcp__gmr__insert_studio_plot"):
+        return None
+    if args.get("at_char") is None or doc is None:
+        return None
+    content = await doc.content()
+    if content is None:
+        return None
+    try:
+        return doc_edit.block_index_at(content, int(args["at_char"]))
+    except (TypeError, ValueError):
+        return None
+
+
+def _with_at_block(result: str, at_block: int | None) -> str:
+    """Carry the resolved position back on a successful proposal."""
+    if at_block is None:
+        return result
+    try:
+        payload = json.loads(result)
+    except (ValueError, TypeError):
+        return result
+    if not isinstance(payload, dict) or payload.get("error"):
+        return result
+    payload["at_block"] = at_block
+    return json.dumps(payload)
+
+
+def _replace_part_result(content, args: dict) -> str:
+    """Compute the revised body for a replace_part call.
+
+    The card is drawn from the tool CALL, but a card carrying
+    `start/end/new_text` would leave the browser to redo this arithmetic
+    against an editor buffer that may have moved since the model measured
+    it. So the whole revised document rides back in the RESULT — the same
+    thing insert_studio_plot does with its recipe, and for the same
+    reason: what the user sees proposed is what was validated.
+    """
+    try:
+        start, end = int(args.get("start")), int(args.get("end"))
+    except (TypeError, ValueError):
+        return json.dumps({
+            "error": "start and end must be integers, as returned by "
+                     "find_in_document",
+        })
+    revised = doc_edit.replace_span(
+        content, start, end, str(args.get("new_text") or ""))
+    if "error" in revised:
+        return json.dumps(revised)
+    return json.dumps({
+        "proposed": True,
+        "action": doc_tools.PROPOSAL_TOOL_ACTIONS["mcp__gmr__replace_part"],
+        # The editor applies this directly. JSON, not HTML: a Studio plot
+        # already in the article has data_params/ui_params objects that do
+        # not survive an HTML round trip, and an edit to the prose around
+        # a chart must not delete the chart.
+        "content_json": revised,
+        "body_text": doc_edit.body_text(revised),
+    })
+
+
 def _has_read_document(traced: list | None) -> bool:
     """Whether this turn has actually seen the document.
 
@@ -823,6 +910,26 @@ class ToolRuntime:
             _record_call(traced, call_id, name, args, capped, started, len(out))
             return capped, len(out)
 
+        # The character-addressed edits. Both need the STORED document, and
+        # both are answered here rather than in _propose for the same reason
+        # read_document is: `doc` is bound to the turn.
+        if name in ("mcp__gmr__find_in_document", "mcp__gmr__replace_part"):
+            out = await _answer_doc_edit(doc, name, args)
+            capped, budget[0] = tool_budget.cap_tool_result(out, budget[0])
+            _record_call(traced, call_id, name, args, capped, started, len(out))
+            return capped, len(out)
+
+        # `at_char` is the model's coordinate; `at_block` is the editor's.
+        # Converted here, once, where the stored document is in scope —
+        # rather than in the browser, where the buffer may have moved on
+        # and the offsets would no longer mean what the model measured.
+        #
+        # It rides back in the RESULT, never in `args`. The card is matched
+        # to its refusal by comparing the args the server saw with the args
+        # the card was drawn from; adding a field here would make every
+        # positioned widget fail that comparison and lose its refusal.
+        at_block = await _resolve_at_block(doc, name, args)
+
         # Everything that needs the turn's bound Studio, in one place: the
         # Studio verbs themselves, and the proposal that embeds one of its
         # plots in the article. insert_studio_plot is a proposal and would
@@ -840,7 +947,8 @@ class ToolRuntime:
                     "error": "the Data Studio is not available for this turn",
                 })
             elif name == "mcp__gmr__insert_studio_plot":
-                out = await self._validate_studio_plot(studio, args)
+                out = _with_at_block(
+                    await self._validate_studio_plot(studio, args), at_block)
             else:
                 # The turn's own client and the API it already talks to,
                 # handed over so a Studio write can be checked against the
@@ -864,7 +972,8 @@ class ToolRuntime:
             _record_call(traced, call_id, name, args, result, started, 0)
             return result, 0
 
-        raw = await self.execute_tool(client, name, args)
+        raw = _with_at_block(
+            await self.execute_tool(client, name, args), at_block)
         # Keep the id->name mapping fresh from every result, so the status
         # line says "Investigating Siemens Energy AG/ADR" rather than a UUID.
         # Read from the FULL result, before the budget cap truncates it.

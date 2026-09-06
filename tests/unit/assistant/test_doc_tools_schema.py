@@ -25,18 +25,31 @@ EXPECTED_TOOLS = {
     "mcp__gmr__set_title": (["title"], ["title"], {"title": "string"}),
     "mcp__gmr__set_abstract": (["abstract"], ["abstract"], {"abstract": "string"}),
     "mcp__gmr__replace_body": (["content"], ["content"], {"content": "string"}),
+    # at_char is optional: a widget with no position still appends, which
+    # is what every call did before positions existed.
     "mcp__gmr__insert_widget": (
         ["widget_type", "entityId"],
-        ["widget_type", "entityId", "depth"],
-        {"widget_type": "string", "entityId": "string", "depth": "integer"},
+        ["widget_type", "entityId", "depth", "at_char"],
+        {"widget_type": "string", "entityId": "string", "depth": "integer",
+         "at_char": "integer"},
     ),
     # Ids only, both required. A Studio plot has no entity to hang off, so
     # it is its own verb rather than a widget_type with a conditionally
     # required entityId — the shape that got propose_edit retired.
     "mcp__gmr__insert_studio_plot": (
         ["project_id", "plot_id"],
-        ["project_id", "plot_id"],
-        {"project_id": "string", "plot_id": "string"},
+        ["project_id", "plot_id", "at_char"],
+        {"project_id": "string", "plot_id": "string", "at_char": "integer"},
+    ),
+    # Character-addressed editing. Offsets are into body_text from
+    # read_document; see assistant/doc_edit.py for the coordinate space.
+    "mcp__gmr__find_in_document": (
+        ["substring"], ["substring"], {"substring": "string"},
+    ),
+    "mcp__gmr__replace_part": (
+        ["start", "end", "new_text"],
+        ["start", "end", "new_text"],
+        {"start": "integer", "end": "integer", "new_text": "string"},
     ),
 }
 
@@ -95,6 +108,10 @@ def test_proposal_actions_map_advertised_tools_to_frontend_actions():
         "mcp__gmr__replace_body": "replace_body",
         "mcp__gmr__insert_widget": "insert_widget",
         "mcp__gmr__insert_studio_plot": "insert_studio_plot",
+        # replace_part is a different VERB with the same frontend action:
+        # the server computes the revised body, so what the editor applies
+        # is a whole-body swap either way.
+        "mcp__gmr__replace_part": "replace_body",
     }
     for tool_name in PROPOSAL_TOOL_ACTIONS:
         assert tool_name in _by_name(), f"{tool_name} is mapped but not advertised"
