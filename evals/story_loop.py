@@ -149,6 +149,9 @@ class Loop:
         self.reply: list[str] = []
         self.errors: list[str] = []
         self.usage: dict = {}
+        #: Index into `calls` where each follow-up turn began,
+        #: so the report can show which turn did what.
+        self.turn_boundaries: list[int] = []
 
     async def _api(self, method: str, path: str, **kw):
         return await self._http.request(
@@ -312,6 +315,10 @@ def report(loop: Loop, meta: dict, applied: list[str], article, projects) -> str
     if not loop.calls:
         out.append("_No tool calls. The model answered from memory._")
     for i, c in enumerate(loop.calls, 1):
+        if (i - 1) in loop.turn_boundaries:
+            out.append("")
+            out.append(f"--- turn {loop.turn_boundaries.index(i - 1) + 2} ---")
+            out.append("")
         args = json.dumps(c.get("args") or {})[:400]
         res = (c.get("result") or "")[:400].replace("\n", " ")
         out.append(f"{i:>3}. `{c['tool']}`  {args}")
@@ -375,6 +382,12 @@ async def main() -> int:
     ap.add_argument("--turns", type=int, default=1,
                     help="follow-up turns saying 'continue', for a model "
                          "that stops mid-plan")
+    ap.add_argument("--then", action="append", default=[], metavar="MESSAGE",
+                    help="a scripted follow-up turn, repeatable. A real "
+                         "iteration is a conversation, and the focused-edit "
+                         "verbs only come up on a SECOND pass -- the first "
+                         "is a blank article, where a whole-body draft is "
+                         "the right call.")
     args = ap.parse_args()
 
     email, password = credentials(args.namespace)
@@ -411,8 +424,16 @@ async def main() -> int:
         await loop.turn(report_id, prompt, key)
         for _ in range(max(0, args.turns - 1)):
             await loop.turn(report_id, "Please continue.", key)
-
+        # Apply between turns, not only at the end: the second turn is
+        # supposed to EDIT what the first wrote, and it reads the saved
+        # document. Leaving the draft unapplied would hand it a blank
+        # article and make a focused edit impossible to even attempt.
         applied = await apply_proposals(loop, report_id)
+        for follow_up in args.then:
+            loop.turn_boundaries.append(len(loop.calls))
+            await loop.turn(report_id, follow_up, key)
+            applied += await apply_proposals(loop, report_id)
+
         article = await loop.read_document(report_id)
         projects = await loop.studio_projects()
 
