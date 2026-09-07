@@ -330,7 +330,18 @@ def _eval(node: ast.AST, frame: _Frame):
     frame.budget.tick()
     handler = _NODE_HANDLERS.get(type(node))
     if handler is None:
-        raise ValueError(f"unsupported syntax: {type(node).__name__}")
+        # Name the rule, not just the rejected node. "unsupported syntax:
+        # Dict" reads as a spelling problem, so a model rephrases; it does
+        # not learn that the answer must be ONE number. A run wanting to
+        # return several named figures at once wrote `result = {...}`
+        # twice, was told "unsupported syntax: Dict" twice, and only then
+        # fell back to the two bare expressions that were always the way
+        # to do it. Three calls for two percentages.
+        raise ValueError(
+            f"unsupported syntax: {type(node).__name__} — this evaluates "
+            f"arithmetic over numbers and lists of numbers, and the result "
+            f"must be a single number. To report several figures, make one "
+            f"call per figure.")
     return handler(node, frame)
 
 
