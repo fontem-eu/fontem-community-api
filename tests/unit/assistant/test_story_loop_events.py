@@ -117,3 +117,36 @@ class TestReadingTheFinishedArticle:
     def test_an_article_with_nothing_saved_is_empty_not_an_error(self):
         assert story_loop.article_doc({}) == {}
         assert story_loop.article_doc({"content_doc": None}) == {}
+
+
+class TestAnchoredInsertion:
+    """The harness must place widgets the way the editor does.
+
+    Run 4 ended with four charts after the source line because the model
+    had no offsets to give. With `after_text` it quotes a sentence instead,
+    and the position is worked out HERE -- after this turn's body has been
+    applied, which is exactly the document the model was describing.
+    """
+
+    @staticmethod
+    def _apply(anchor, at_block=None):
+        doc = {"type": "doc", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Intro."}]},
+            {"type": "paragraph", "content": [
+                {"type": "text", "text": "Below: a direct comparison."}]},
+            {"type": "paragraph", "content": [{"type": "text", "text": "Source: TED."}]}]}
+        blocks = list(doc["content"])
+        at = story_loop.doc_edit.block_after_anchor(doc, anchor) if anchor else None
+        if at is None:
+            at = at_block
+        return len(blocks) if at is None else max(0, min(int(at), len(blocks)))
+
+    def test_the_chart_lands_under_the_paragraph_that_introduces_it(self):
+        assert self._apply("Below: a direct comparison") == 2
+
+    def test_an_unmatched_anchor_falls_back_to_at_block(self):
+        assert self._apply("no such sentence", at_block=1) == 1
+
+    def test_with_neither_it_appends_rather_than_vanishing(self):
+        assert self._apply(None) == 3
+        assert self._apply("no such sentence") == 3

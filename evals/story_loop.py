@@ -42,6 +42,9 @@ from pathlib import Path
 import httpx
 from html.parser import HTMLParser
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from src.assistant import doc_edit  # noqa: E402  pylint: disable=wrong-import-position
+
 #: The default brief. Deliberately the user's own wording: the point is to
 #: watch the assistant handle a real request, not a request engineered to
 #: be easy for it.
@@ -324,7 +327,15 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
                 "data_params": result.get("data_params"),
                 "ui_params": result.get("ui_params")}}
             blocks = list(tiptap.get("content") or [])
-            at = result.get("at_block")
+            # Anchor first, exactly as the editor does it: `after_text` is
+            # resolved HERE, against the article as it stands after this
+            # turn's body has been applied -- which is the whole point of
+            # anchors. `at_block` came from an at_char measured against the
+            # last SAVED text, so it is the fallback, not the default.
+            anchor = (call.get("args") or {}).get("after_text")
+            at = doc_edit.block_after_anchor(tiptap, anchor) if anchor else None
+            if at is None:
+                at = result.get("at_block")
             at = len(blocks) if at is None else max(0, min(int(at), len(blocks)))
             blocks.insert(at, node)
             tiptap = {**tiptap, "content": blocks}

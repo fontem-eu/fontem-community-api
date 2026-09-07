@@ -152,13 +152,17 @@ class TestTheToolSurface:
         # The lesson from propose_edit: required params only, no flags whose
         # validity depends on another field.
         #
-        # at_char is the one optional, and it does not reopen that door: it
-        # is independently meaningful, valid with any pair of ids, and its
-        # absence means "append" rather than "some other field decides".
+        # The two positions are the only optionals, and neither reopens
+        # that door: both are independently meaningful, valid with any pair
+        # of ids, and their absence means "append" rather than "some other
+        # field decides". They do not depend on each other either -- when
+        # both are given the anchor simply wins, because it is resolved
+        # against the article as it stands at apply time.
         spec = next(t for t in doc_tools.DOC_TOOLS
                     if t["function"]["name"] == "mcp__gmr__insert_studio_plot")
         params = spec["function"]["parameters"]
-        assert set(params["properties"]) == {"project_id", "plot_id", "at_char"}
+        assert set(params["properties"]) == {
+            "project_id", "plot_id", "at_char", "after_text"}
         assert set(params["required"]) == {"project_id", "plot_id"}
 
     def test_a_studio_plot_is_not_smuggled_into_the_entity_widget_enum(self):
