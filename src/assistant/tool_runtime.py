@@ -545,6 +545,15 @@ def _system_prompt_with_today(base: str) -> str:
     return f"{base.rstrip()}\n\nToday's date is {today}."
 
 
+def _calls_so_far(traced: list | None) -> int:
+    """How many calls this turn has recorded. `traced` is None when nothing
+    is tracing, and `len(traced or [])` at the call site cost more than it
+    looked: Sonar counts each `or` toward cognitive complexity, and three of
+    them took `_dispatch_inner` from under the threshold to 17 over it.
+    """
+    return len(traced) if traced else 0
+
+
 def _record_call(traced: list | None, call_id: str, name: str, args: dict,
                  result: str, started: float, raw_len: int) -> None:
     """Queue the trace for this call. The closures cannot yield; this rides
@@ -882,7 +891,7 @@ class ToolRuntime:
                 # with an error, which are exactly when a model most needs
                 # to know how much turn is left.
                 return out + tool_budget.pacing_note(
-                    budget, len(traced or [])), raw_len
+                    budget, _calls_so_far(traced)), raw_len
             except asyncio.TimeoutError:
                 out = json.dumps({
                     "error": (f"{name} timed out after "
