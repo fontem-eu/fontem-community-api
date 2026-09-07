@@ -25,21 +25,24 @@ EXPECTED_TOOLS = {
     "mcp__gmr__set_title": (["title"], ["title"], {"title": "string"}),
     "mcp__gmr__set_abstract": (["abstract"], ["abstract"], {"abstract": "string"}),
     "mcp__gmr__replace_body": (["content"], ["content"], {"content": "string"}),
-    # at_char is optional: a widget with no position still appends, which
-    # is what every call did before positions existed.
+    # Both positions are optional: a widget with neither still appends,
+    # which is what every call did before positions existed. `after_text`
+    # names the paragraph to follow and is resolved where the edit is
+    # applied; `at_char` is an offset into the last SAVED text.
     "mcp__gmr__insert_widget": (
         ["widget_type", "entityId"],
-        ["widget_type", "entityId", "depth", "at_char"],
+        ["widget_type", "entityId", "depth", "at_char", "after_text"],
         {"widget_type": "string", "entityId": "string", "depth": "integer",
-         "at_char": "integer"},
+         "at_char": "integer", "after_text": "string"},
     ),
     # Ids only, both required. A Studio plot has no entity to hang off, so
     # it is its own verb rather than a widget_type with a conditionally
     # required entityId — the shape that got propose_edit retired.
     "mcp__gmr__insert_studio_plot": (
         ["project_id", "plot_id"],
-        ["project_id", "plot_id", "at_char"],
-        {"project_id": "string", "plot_id": "string", "at_char": "integer"},
+        ["project_id", "plot_id", "at_char", "after_text"],
+        {"project_id": "string", "plot_id": "string", "at_char": "integer",
+         "after_text": "string"},
     ),
     # Character-addressed editing. Offsets are into body_text from
     # read_document; see assistant/doc_edit.py for the coordinate space.

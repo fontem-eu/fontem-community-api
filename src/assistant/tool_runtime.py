@@ -601,6 +601,12 @@ async def _resolve_at_block(doc, name: str, args: dict) -> int | None:
     """
     if name not in ("mcp__gmr__insert_widget", "mcp__gmr__insert_studio_plot"):
         return None
+    if args.get("after_text"):
+        # One instruction per card. `after_text` is resolved where the edit
+        # is applied, against the article as it then stands; resolving
+        # at_char here as well would put a second, staler position on the
+        # same card and leave the applier to arbitrate.
+        return None
     if args.get("at_char") is None or doc is None:
         return None
     content = await doc.content()

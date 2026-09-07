@@ -120,13 +120,30 @@ DOC_TOOLS: list[dict] = [
                     },
                     "depth": {"type": "integer",
                               "description": "Graph depth, 1-3."},
+                    "after_text": {
+                        "type": "string",
+                        "description": (
+                            "PREFERRED. A short phrase from the paragraph "
+                            "this should follow, quoted exactly; it lands "
+                            "immediately after that paragraph. Use this "
+                            "whenever you have proposed body text in this "
+                            "same turn: your proposal is a card the user has "
+                            "not accepted yet, so read_document still "
+                            "returns the last SAVED text and there are no "
+                            "offsets to measure. The phrase is matched when "
+                            "the edit is applied, against the article as it "
+                            "then stands. Not found means it appends."
+                        ),
+                    },
                     "at_char": {
                         "type": "integer",
                         "description": (
-                            "Where to put it: a character offset into "
-                            "body_text from read_document. The widget lands "
-                            "after the paragraph that offset falls in. Omit "
-                            "to append at the end."
+                            "A character offset into body_text from "
+                            "read_document; the widget lands after the "
+                            "paragraph that offset falls in. Only meaningful "
+                            "for text ALREADY SAVED — prefer after_text. "
+                            "Ignored when after_text is given. Omit both to "
+                            "append at the end."
                         ),
                     },
                 },
@@ -159,13 +176,29 @@ DOC_TOOLS: list[dict] = [
                         "type": "string",
                         "description": "Plot id from studio_get_project.",
                     },
+                    "after_text": {
+                        "type": "string",
+                        "description": (
+                            "PREFERRED. A short phrase from the paragraph "
+                            "this should follow, quoted exactly; it lands "
+                            "immediately after that paragraph. Use this "
+                            "whenever you have proposed body text in this "
+                            "same turn: your proposal is a card the user has "
+                            "not accepted yet, so read_document still "
+                            "returns the last SAVED text and there are no "
+                            "offsets to measure. The phrase is matched when "
+                            "the edit is applied, against the article as it "
+                            "then stands. Not found means it appends."
+                        ),
+                    },
                     "at_char": {
                         "type": "integer",
                         "description": (
-                            "Where to put it: a character offset into "
-                            "body_text from read_document. The chart lands "
-                            "after the paragraph that offset falls in — put "
-                            "it after the text that introduces it. Omit to "
+                            "A character offset into body_text from "
+                            "read_document; the chart lands after the "
+                            "paragraph that offset falls in. Only meaningful "
+                            "for text ALREADY SAVED — prefer after_text. "
+                            "Ignored when after_text is given. Omit both to "
                             "append at the end."
                         ),
                     },

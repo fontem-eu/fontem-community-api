@@ -265,3 +265,40 @@ def _as_doc(original: Any, blocks: list[dict]) -> dict:
     if isinstance(original, dict) and original.get("type"):
         return {**original, "content": blocks}
     return {"type": "doc", "content": blocks}
+
+
+def _normalised(text: str) -> str:
+    """Collapse whitespace and case, for anchor matching.
+
+    An anchor is a phrase the model quotes from prose it just wrote. By the
+    time that prose is a document it has been through HTML and TipTap, and
+    line breaks and runs of spaces do not survive that intact. Matching on
+    the exact bytes would fail on a difference no reader could see.
+    """
+    return " ".join(text.split()).casefold()
+
+
+def block_after_anchor(doc: Any, anchor: str) -> int | None:
+    """Index just after the first block containing `anchor`, or None.
+
+    This is the apply-time half of anchor placement. The model names a
+    phrase instead of a character offset, because in the turn that writes
+    the body there are no offsets to name: a proposal is a card awaiting
+    the user, so `read_document` still returns the last SAVED text, and a
+    model that has just proposed a whole article reads back "".
+
+    Iteration 4 hit exactly that. It proposed the body, read the document,
+    got body_text_length 0, and inserted four charts with no position --
+    so an article whose prose says "Below: a direct comparison" ends with
+    all four charts after the source line.
+
+    None means "not found", and the caller appends: a chart at the end is
+    a worse article, a lost chart is a worse bug.
+    """
+    if not anchor or not anchor.strip():
+        return None
+    needle = _normalised(anchor)
+    for i, block in enumerate(_top_blocks(doc)):
+        if needle in _normalised(_text_of(block)):
+            return i + 1
+    return None
