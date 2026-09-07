@@ -14,6 +14,9 @@ import pathlib
 import pytest
 
 from src.assistant import studio_tools
+from src.services.studio_validation import (
+    CHART_TYPES as VALIDATOR_CHART_TYPES,
+)
 from src.assistant.engine_tools import (
     OFFERED_BUILTINS, OFFERED_GENERATED, turn_tool_specs,
 )
@@ -145,7 +148,30 @@ def test_the_query_languages_and_charts_are_pinned():
     assert lang["enum"] == list(studio_tools.QUERY_LANGS)
     spec = by_name["mcp__gmr__studio_add_plot"][
         "function"]["parameters"]["properties"]["spec"]
-    assert spec["properties"]["chart"]["enum"] == list(studio_tools.CHART_TYPES)
+    # Against the VALIDATOR, not against studio_tools' own constant. The
+    # old assertion compared the schema to the copy it was generated from,
+    # so when the two definitions drifted — the tool offering line, bar,
+    # area, scatter, map, table while the validator enforced bar_h, line,
+    # corr_matrix, stat, atlas_map — this test still passed. The model was
+    # offered six chart types, five of them refused on sight.
+    assert spec["properties"]["chart"]["enum"] == list(VALIDATOR_CHART_TYPES)
+    assert list(studio_tools.CHART_TYPES) == list(VALIDATOR_CHART_TYPES), (
+        "the tool surface and the validator must offer the same chart "
+        "types; a model cannot act on a refusal for a type it was offered"
+    )
+
+
+def test_the_plot_spec_asks_for_sources_the_validator_accepts():
+    """`sources` are {name, lang, query} objects.
+
+    The schema said `array of string`, the validator answered "source 0 is
+    not an object", and the model was doing exactly what it was told."""
+    by_name = {t["function"]["name"]: t for t in studio_tools.STUDIO_TOOLS}
+    spec = by_name["mcp__gmr__studio_add_plot"][
+        "function"]["parameters"]["properties"]["spec"]
+    items = spec["properties"]["sources"]["items"]
+    assert items["type"] == "object"
+    assert set(items["required"]) == {"name", "lang", "query"}
 
 
 def test_the_plot_tool_says_the_transform_is_duckdb():
