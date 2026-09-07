@@ -865,7 +865,7 @@ class ToolRuntime:
         scope = (audit or audit_context).tool_call(call_id, name)
         with scope:
             try:
-                return await asyncio.wait_for(
+                out, raw_len = await asyncio.wait_for(
                     self._dispatch_inner(
                         client, name, args, studio=studio,
                         nav_routes=nav_routes, pending_nav=pending_nav,
@@ -875,6 +875,14 @@ class ToolRuntime:
                     ),
                     timeout=TOOL_CALL_TIMEOUT_S,
                 )
+                # Where the turn stands, appended once here rather than at
+                # each of the three places a result is capped: every path
+                # out of _dispatch_inner funnels through this return, so
+                # one line covers them all — including the ones that answer
+                # with an error, which are exactly when a model most needs
+                # to know how much turn is left.
+                return out + tool_budget.pacing_note(
+                    budget, len(traced or [])), raw_len
             except asyncio.TimeoutError:
                 out = json.dumps({
                     "error": (f"{name} timed out after "
@@ -907,7 +915,6 @@ class ToolRuntime:
                 return out, 0
             out = await doc.read()
             capped, budget[0] = tool_budget.cap_tool_result(out, budget[0])
-            capped += tool_budget.pacing_note(budget, len(traced or []))
             _record_call(traced, call_id, name, args, capped, started, len(out))
             return capped, len(out)
 
@@ -917,7 +924,6 @@ class ToolRuntime:
         if name in ("mcp__gmr__find_in_document", "mcp__gmr__replace_part"):
             out = await _answer_doc_edit(doc, name, args)
             capped, budget[0] = tool_budget.cap_tool_result(out, budget[0])
-            capped += tool_budget.pacing_note(budget, len(traced or []))
             _record_call(traced, call_id, name, args, capped, started, len(out))
             return capped, len(out)
 
@@ -984,7 +990,6 @@ class ToolRuntime:
         except (ValueError, TypeError):
             pass
         capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
-        capped += tool_budget.pacing_note(budget, len(traced or []))
         _record_call(traced, call_id, name, args, capped, started, len(raw))
         return capped, len(raw)
 
