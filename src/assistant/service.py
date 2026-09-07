@@ -181,6 +181,10 @@ class AssistantService:
         #: Best-effort provider of the rendered graph-schema prompt block
         #: (see schema_context). None keeps every existing wiring working.
         schema_provider=None,
+        #: Best-effort provider of the "What Dargle holds" prompt block (see
+        #: catalogue.CatalogueContext). None keeps every existing wiring
+        #: working, and costs the turn only a stale scope answer.
+        catalogue_provider=None,
         #: ReportService (or None). Enables the document tools: read_document
         #: and the proposal verbs are bound per turn to the report the
         #: conversation key names, as the asking user.
@@ -196,12 +200,24 @@ class AssistantService:
         self._turn_limits = turn_limits
         self._fixed_prefix_chars = fixed_prefix_chars
         self._schema = schema_provider
+        self._catalogue = catalogue_provider
         self._reports = report_service
         self._reply_tokens = reply_tokens
         self._context_budget = context_char_budget
         self._projects = project_service
 
     # ─────────── Turn handling ────────────
+
+    async def _catalogue_block(self) -> str:
+        """The "What Dargle holds" block, or "" when nothing provides one.
+
+        Wrapped rather than inlined because both turn paths need it and
+        neither should have to remember that the provider is optional.
+        """
+        if self._catalogue is None:
+            return ""
+        return await self._catalogue.block()
+
 
     # NOSONAR S3776: SSE stream reconciliation is inherently sequential.
     # The branch and statement counts are the SSE vocabulary itself — one
@@ -247,6 +263,14 @@ class AssistantService:
                 local_models.resolve(req.local_model_id).context_tokens):
             schema_block = await self._schema.block()
 
+        # The catalogue is NOT tiered, unlike the schema. It is ~1.3k tokens
+        # and it is the block the base prompt calls "the authority on scope",
+        # so a model that does not carry it answers "we don't have that"
+        # about data the platform serves. That failure gets worse, not
+        # better, on the smaller models -- they have the least room to
+        # discover the holdings by probing.
+        catalogue_block = await self._catalogue_block()
+
         stored = await self._repo.history_turns(conv.id)
         # What the stored summary already covers is represented by the
         # summary, not by the turns themselves — otherwise they fall off again
@@ -254,8 +278,9 @@ class AssistantService:
         prior = summariser.unsummarised(stored, conv.summary_through)
         windowed, overflow = fit_history(
             prior,
-            self._limits_for(req.local_model_id,
-                             extra_prefix_chars=len(schema_block)),
+            self._limits_for(
+                req.local_model_id,
+                extra_prefix_chars=len(schema_block) + len(catalogue_block)),
         )
 
         # Summarise only what just fell off, and only when something did.
@@ -283,6 +308,7 @@ class AssistantService:
             windowed,
             site_map=navigation.system_context(req.nav),
             schema_block=schema_block,
+            catalogue_block=catalogue_block,
         )
 
         # Persist the user row immediately with an estimate.
@@ -530,6 +556,10 @@ class AssistantService:
             # is told the truth about what it knows.
             [],
             site_map=navigation.system_context(req.nav),
+            # A signed-out visitor asking "what data do you have" is the
+            # single most likely anonymous question, and the wayfinder
+            # carries the same base prompt promising this block.
+            catalogue_block=await self._catalogue_block(),
         )
         payload = {
             "system": system_prompt,

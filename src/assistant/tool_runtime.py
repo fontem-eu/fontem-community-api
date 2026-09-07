@@ -45,7 +45,6 @@ import httpx
 from src.assistant import (calc_tools, doc_edit, doc_tools, generated_tools,
                            legacy_tools, probe_tools)
 from src.assistant.freshness import _format_freshness_summary
-from src.assistant.catalogue import CatalogueCache
 
 from src.assistant import (
     local_models, mock_llm, navigation, studio_tools, tool_budget, tool_trace,
@@ -706,7 +705,6 @@ class ToolRuntime:
         self._freshness_cache: tuple[float, str] | None = None
         # What the platform holds, generated from its own registries. Same
         # best-effort contract as the coverage block above.
-        self._catalogue = CatalogueCache()
         # Tool schemas derived from the API's own spec. Loaded once per
         # process: the spec changes only on deploy, and a deploy makes a
         # new pod.
@@ -724,10 +722,6 @@ class ToolRuntime:
         """Delegate to the shared executor, which needs no client state."""
         return await generated_tools.execute(
             client, self._gmr_api_url, self._generated or [], (name, args))
-
-    async def _get_catalogue_block(self, client: httpx.AsyncClient) -> str:
-        """What data exists, for the system prompt."""
-        return await self._catalogue.get(client, self._gmr_api_url)
 
     async def _get_freshness_summary(self, client: httpx.AsyncClient) -> str:
         """Return the formatted source-freshness block for system prompt
