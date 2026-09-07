@@ -152,6 +152,8 @@ class Loop:
         #: Index into `calls` where each follow-up turn began,
         #: so the report can show which turn did what.
         self.turn_boundaries: list[int] = []
+        #: How far into `calls` the applier has already gone.
+        self.applied_through: int = 0
 
     async def _api(self, method: str, path: str, **kw):
         return await self._http.request(
@@ -254,6 +256,23 @@ class Loop:
             self.usage = data
 
 
+def article_doc(article: dict) -> dict:
+    """The TipTap document out of a GET /data-stories/{id} response.
+
+    The field is `content_doc`, and it holds the STORED shape --
+    {"tiptap": doc, "version": n} -- not the document. Reading
+    `content_json` (which does not exist on this response) returned None,
+    so the harness started every apply from an empty document and reported
+    every finished article as "0 blocks" while 15 blocks sat in the
+    database. A report that under-counts the artifacts is worse than one
+    that fails: it reads as the model having done nothing.
+    """
+    doc = article.get("content_doc") or {}
+    if isinstance(doc, dict) and isinstance(doc.get("tiptap"), dict):
+        return doc["tiptap"]
+    return doc if isinstance(doc, dict) else {}
+
+
 async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
     """Apply what the model proposed, the way the editor would.
 
@@ -262,10 +281,20 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
     nobody notices is how a run looks better than it was.
     """
     applied = []
-    doc = await loop.read_document(report_id)
-    tiptap = (doc.get("content_json")
-              or {"type": "doc", "content": []})
-    for call in loop.calls:
+    # Only calls made SINCE the last apply. This walked the whole list
+    # every time, so turn 1's proposals were re-applied after turn 2 --
+    # the article got its charts inserted twice, the counts came out
+    # "proposed: 10, applied: 11", and the second save collided with the
+    # first on the revision check.
+    new_calls = loop.calls[loop.applied_through:]
+    loop.applied_through = len(loop.calls)
+    article = await loop.read_document(report_id)
+    tiptap = article_doc(article) or {"type": "doc", "content": []}
+    # The save is concurrency-checked: "a save that does not name its
+    # baseline is refused rather than guessed at". Applying between turns
+    # without naming one earned a 409 and lost the turn's edits.
+    base = article.get("head_revision")
+    for call in new_calls:
         try:
             result = json.loads(call.get("result") or "{}")
         except (ValueError, TypeError):
@@ -301,12 +330,22 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
             tiptap = {**tiptap, "content": blocks}
             applied.append(f"{tool}@{at}")
     if applied:
-        await loop.save_document(report_id, tiptap)
+        await loop.save_document(report_id, tiptap, base_revision=base)
     return applied
 
 
 def report(loop: Loop, meta: dict, applied: list[str], article, projects) -> str:
     out = [f"# Assistant story loop — {meta['started']}", ""]
+    # First thing in the report, because a turn cut short upstream looks
+    # exactly like a model that chose to stop -- and reading it as the
+    # latter is how you "discover" behaviour that never happened. One run
+    # ended after three calls on a Connection error and its trace was
+    # briefly mistaken for the model declining to write anything.
+    if loop.errors:
+        out.append("> **THIS RUN IS NOT CLEAN — do not read behaviour from it.**")
+        for e in loop.errors:
+            out.append(f"> {e}")
+        out.append("")
     out.append(f"model: **{meta['model']}**   base: {meta['base_url']}")
     out.append(f"article: `{meta['report_id']}`   turns: {meta['turns']}")
     out.append("")
@@ -342,8 +381,7 @@ def report(loop: Loop, meta: dict, applied: list[str], article, projects) -> str
         out.append(f"  - {p.get('name')!r}  plots={len(plots)} "
                    f"queries={len(p.get('queries') or [])}")
     out.append("")
-    body = article.get("content_json") or {}
-    blocks = body.get("content") or []
+    blocks = article_doc(article).get("content") or []
     widgets = [b for b in blocks if b.get("type") == "widget"]
     out.append(f"Article blocks: {len(blocks)}  (widgets embedded: {len(widgets)})")
     out.append("")

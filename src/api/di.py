@@ -23,6 +23,9 @@ from sqlalchemy.ext.asyncio import (
 
 from src.assistant.context import TurnLimits
 from src.assistant import langgraph_client, pydantic_ai_client, schema_context
+# The class, not the module: `catalogue` is already a parameter name in this
+# file, where it means the named-query repository.
+from src.assistant.catalogue import CatalogueContext
 from src.assistant.tool_runtime import _DEFAULT_GMR_API
 from src.assistant.pg_repository import PgAssistRepository
 from src.assistant.proxy_client import ClaudeProxyClient
@@ -678,6 +681,15 @@ class AssistantProvider(Provider):
         return schema_context.SchemaContext(
             os.environ.get("GMR_API_INTERNAL", _DEFAULT_GMR_API))
 
+    @provide(scope=Scope.APP)
+    def catalogue_provider(self) -> CatalogueContext:
+        # App-scoped for the same reason as the schema: the holdings are the
+        # same for every user, so this is one fetch per pod per TTL -- and
+        # zero fetches when the llm-prefill ConfigMap is mounted, which it is
+        # in every deployed environment.
+        return CatalogueContext(
+            os.environ.get("GMR_API_INTERNAL", _DEFAULT_GMR_API))
+
     @provide(scope=Scope.REQUEST)
     def credential_repository(self, session: AsyncSession) -> CredentialRepository:
         return CredentialRepository(session)
@@ -696,7 +708,7 @@ class AssistantProvider(Provider):
     def assistant_service(
         self, repo: AssistRepository, proxy: ProxyClient,
         projects: DataProjectService, schema: schema_context.SchemaContext,
-        reports: ReportService,
+        reports: ReportService, holdings: CatalogueContext,
     ) -> AssistantService:
         return AssistantService(
             repo=repo,
@@ -718,6 +730,10 @@ class AssistantProvider(Provider):
             # it varies per model tier, so the service passes it per turn as
             # extra_prefix_chars once it knows which model is answering.
             schema_provider=schema,
+            # Not tiered and not part of the fixed prefix either: the service
+            # adds its length to extra_prefix_chars per turn, alongside the
+            # schema's, so the history budget sees the real prefix.
+            catalogue_provider=holdings,
             # Same trust shape as project_service: server-side, per-request,
             # as the asking user, with the service checking access per call.
             report_service=reports,

@@ -180,12 +180,19 @@ def _render_turn(turn: Turn) -> str:
     return f"{head}: {turn.content}" if turn.content else f"{head}: (called)"
 
 
+# The argument count IS the prompt's section list, and each section is
+# named at every call site. Collapsing them into one container would hide
+# which sections a caller supplies -- the exact thing that went wrong when
+# the catalogue stopped being passed and nothing noticed.
+# pylint: disable=too-many-arguments
 def build_system_prompt(
     base_prompt: str,
     context_block: str,
     history: list[Turn],
+    *,
     site_map: str = "",
     schema_block: str = "",
+    catalogue_block: str = "",
 ) -> str:
     """Stitch the base system prompt, caller context, and history.
 
@@ -193,6 +200,8 @@ def build_system_prompt(
 
         <base_prompt>
         <site_map>            <- stable across the whole conversation
+        <catalogue_block>     <- what the platform holds
+        <schema_block>        <- how that data is shaped
 
         Current context:
         <context_block>       <- changes when the user navigates
@@ -215,6 +224,14 @@ def build_system_prompt(
 
     if site_map:
         parts.append(site_map.strip())
+
+    if catalogue_block:
+        # The catalogue goes ahead of the schema: knowing the data EXISTS is
+        # what stops the model answering "we don't have that", and knowing
+        # its shape is only useful afterwards. Stable for the cache's TTL
+        # (and fully static when the prefill file is mounted), so it sits
+        # with the other stable sections.
+        parts.append(catalogue_block.strip())
 
     if schema_block:
         # Stable for at least the schema cache's TTL, so it sits with the

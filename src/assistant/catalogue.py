@@ -243,3 +243,41 @@ class CatalogueCache:
             block = ""
         self._cached = (now, block)
         return block
+
+
+class CatalogueContext:
+    """The holdings block, for the prompt builder.
+
+    The same shape as schema_context.SchemaContext: own the fetch, own the
+    cache, hand back a string. The service should not have to hold an httpx
+    client to answer "what does this platform have".
+
+    This exists because the injection was lost. `2b37dcc refactor:
+    decommission the hand-written executor` removed the two lines that
+    called it, and everything else survived -- the ConfigMap, the CronJob
+    that writes it, the volume mount, the cache, and the system prompt's
+    promise that "a 'What Dargle holds' block below lists its data ... that
+    list, not this paragraph, is the authority on scope".
+
+    So the model was told to consult a block it was never given. It noticed:
+    "There's no holdings block shown in the prompt". And it did what anyone
+    would, discovering the holdings by probing -- 25 graph queries in one
+    run to establish what a mounted 5KB file already said.
+    """
+
+    def __init__(self, api_url: str, ttl: float = CATALOGUE_TTL_SECONDS) -> None:
+        self._url = api_url
+        self._cache = CatalogueCache(ttl=ttl)
+
+    async def block(self) -> str:
+        """Prefill if mounted, a live fetch otherwise, "" if neither works."""
+        prefill = read_prefill()
+        if prefill:
+            return prefill
+        try:
+            async with httpx.AsyncClient(timeout=CATALOGUE_FETCH_TIMEOUT) as client:
+                return await self._cache.get(client, self._url)
+        except FETCH_ERRORS:
+            # A missing catalogue costs the model a few discovery calls.
+            # Failing the turn over prompt garnish costs the user the turn.
+            return ""

@@ -88,3 +88,32 @@ def test_a_malformed_payload_does_not_kill_the_run(loop):
     loop._event("chunk", "not json at all")
     loop._event("tool_result", "{{{")
     assert loop.calls == [] and loop.reply == []
+
+
+class TestReadingTheFinishedArticle:
+    """The harness reports what the run produced, so it must read it.
+
+    The field on GET /data-stories/{id} is `content_doc`, holding the
+    STORED shape {"tiptap": doc, "version": n}. Reading a `content_json`
+    that does not exist on that response returned None: every apply
+    started from an empty document, and every finished article was
+    reported as "0 blocks" while fifteen sat in the database. A report
+    that under-counts the artifacts reads as the model having done
+    nothing, which is the opposite of the truth and the worst way for a
+    harness to be wrong.
+    """
+
+    def test_it_unwraps_the_stored_shape(self):
+        doc = story_loop.article_doc(
+            {"content_doc": {"version": 2, "tiptap": {
+                "type": "doc", "content": [{"type": "paragraph"}]}}})
+        assert doc["content"] == [{"type": "paragraph"}]
+
+    def test_it_accepts_a_bare_document(self):
+        doc = story_loop.article_doc(
+            {"content_doc": {"type": "doc", "content": [{"type": "heading"}]}})
+        assert doc["content"] == [{"type": "heading"}]
+
+    def test_an_article_with_nothing_saved_is_empty_not_an_error(self):
+        assert story_loop.article_doc({}) == {}
+        assert story_loop.article_doc({"content_doc": None}) == {}
