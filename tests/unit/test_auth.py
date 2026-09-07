@@ -112,6 +112,24 @@ class TestGoogleAuth:
         assert me_resp.status_code == 200
         assert me_resp.json()["email"] == "alice@gmail.com"
 
+    def test_access_token_carries_roles_and_trust_level(self, client):
+        """A service that is not this one has to authorize somehow.
+
+        fontem-api gates its operator endpoints (entity-resolution
+        merges, value-review decisions) on being an administrator, and it
+        has no access to `user_roles`. Both signals travel because the
+        policy here treats either as admin, and shipping one would let
+        the two services disagree about who an administrator is.
+        """
+        from src.api.auth import JWT_ALGORITHM, JWT_SECRET  # pylint: disable=import-outside-toplevel
+
+        with _patch_verify():
+            resp = client.post("/auth/google", json={"credential": "fake"})
+        claims = jwt.decode(
+            resp.json()["access_token"], JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        assert "roles" in claims and isinstance(claims["roles"], list)
+        assert "trust_level" in claims
+
     def test_user_id_is_valid_uuid(self, client):
         """Regression: user ID must be a valid UUID for PostgreSQL compatibility."""
         with _patch_verify():

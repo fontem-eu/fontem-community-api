@@ -215,7 +215,19 @@ class LogoutResponse(BaseModel):
 # ── Token issuance ─────────────────────────────────────────────────
 
 
-def _mint_access_jwt(user: User) -> str:
+def _mint_access_jwt(user: User, roles: list[str] | None = None) -> str:
+    """Mint an access token.
+
+    Carries `roles` and `trust_level` so a service that is NOT this one
+    can authorize without reaching into this database. fontem-api needs
+    exactly that: its operator endpoints (entity-resolution merges,
+    value-review decisions) must be admin-only, and it has no access to
+    `user_roles`.
+
+    Both signals travel because the policy here treats either as admin
+    (see authz/policy.py `_is_admin`); shipping only one would let the
+    two services disagree about who an administrator is.
+    """
     now = datetime.now(timezone.utc)
     expires = now + _ACCESS_TOKEN_TTL
     return jwt.encode(
@@ -223,6 +235,8 @@ def _mint_access_jwt(user: User) -> str:
             "sub": user.id,
             "email": user.email,
             "name": user.name,
+            "roles": list(roles or []),
+            "trust_level": user.trust_level,
             "iat": int(now.timestamp()),
             "exp": int(expires.timestamp()),
         },
@@ -250,12 +264,13 @@ def _to_token_response(
     )
 
 
-async def _issue_session(
+async def _issue_session(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     user: User,
     request: Request,
     response: Response,
     refresh_service: RefreshTokenService,
     storage: MinioStorage,
+    user_repo: UserRepository,
 ) -> TokenResponse:
     """Mint access JWT + open a refresh family + set the cookie.
 
@@ -275,7 +290,8 @@ async def _issue_session(
         (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
     )
     _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
-    return _to_token_response(user, _mint_access_jwt(user), storage)
+    return _to_token_response(
+        user, _mint_access_jwt(user, await user_repo.get_roles(user.id)), storage)
 
 
 # ── Google OAuth ───────────────────────────────────────────────────
@@ -390,7 +406,8 @@ async def google_login(
     if sanction is not None and sanction.type == "ban":
         raise HTTPException(status_code=401, detail=_BANNED_DETAIL)
 
-    return await _issue_session(user, request, response, refresh_service, storage)
+    return await _issue_session(
+        user, request, response, refresh_service, storage, user_repo)
 
 
 # ── Local account registration + login ─────────────────────────────
@@ -489,7 +506,8 @@ async def register(
     # so a flaky Brevo never 500s a registration — the token is
     # persisted and the user can hit "resend".
     await verify_service.issue(user)
-    return await _issue_session(user, request, response, refresh_service, storage)
+    return await _issue_session(
+        user, request, response, refresh_service, storage, user_repo)
 
 
 @router.post(
@@ -562,7 +580,8 @@ async def login(
 
     await user_repo.clear_failed_logins(user.id)
 
-    return await _issue_session(user, request, response, refresh_service, storage)
+    return await _issue_session(
+        user, request, response, refresh_service, storage, user_repo)
 
 
 # ── Refresh + logout + sign-out-everywhere ─────────────────────────
@@ -642,7 +661,8 @@ async def refresh(
             (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
         )
         _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
-    return _to_token_response(user, _mint_access_jwt(user), storage)
+    return _to_token_response(
+        user, _mint_access_jwt(user, await user_repo.get_roles(user.id)), storage)
 
 
 @router.post("/logout")
