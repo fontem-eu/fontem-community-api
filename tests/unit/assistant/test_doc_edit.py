@@ -33,11 +33,22 @@ class TestTheCoordinateSpace:
     def test_block_spans_are_the_offsets_of_each_block(self):
         assert doc_edit.block_spans(DOC) == [(0, 10), (12, 21)]
 
-    def test_a_widget_occupies_a_position_but_no_characters(self):
+    def test_a_chart_reads_as_a_marker_not_as_a_blank_gap(self):
+        # It used to contribute NO characters, so the model read its own
+        # article and saw an empty gap where its chart was — then rewrote
+        # the body as HTML, which cannot carry a chart, and lost it. The
+        # marker is what makes a chart something it can see, keep, move or
+        # deliberately remove.
         doc = {"type": "doc", "content": [_p("Before."), _widget(), _p("After.")]}
-        # "Before." 0..7, widget 9..9, "After." 11..17
-        assert doc_edit.block_spans(doc) == [(0, 7), (9, 9), (11, 17)]
-        assert doc_edit.body_text(doc) == "Before.\n\n\n\nAfter."
+        marker = "[[chart 1: pipeline]]"
+        assert doc_edit.body_text(doc) == f"Before.\n\n{marker}\n\nAfter."
+        assert doc_edit.block_spans(doc) == [
+            (0, 7), (9, 9 + len(marker)), (11 + len(marker), 17 + len(marker))]
+
+    def test_the_marker_is_addressable_like_any_other_text(self):
+        doc = {"type": "doc", "content": [_p("Before."), _widget(), _p("After.")]}
+        found = doc_edit.find(doc, "[[chart 1:")
+        assert found["found"] and found["count"] == 1
 
     def test_a_bare_block_list_is_accepted_as_a_document(self):
         # read_document hands back whatever was stored; early drafts are a
