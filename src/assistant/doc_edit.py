@@ -66,10 +66,28 @@ def _text_of(node: Any) -> str:
 
 
 def _top_blocks(doc: Any) -> list[dict]:
-    """The document's top-level blocks, whatever wrapper it arrived in."""
+    """The document's top-level blocks, whatever wrapper it arrived in.
+
+    Three shapes reach this, and missing the first one made every
+    character-addressed tool answer as though the article were empty:
+
+      {"tiptap": {...}, "version": 2}   what save_document STORES
+      {"type": "doc", "content": [...]} the TipTap document itself
+      [block, block, ...]               early drafts, a bare block list
+
+    The stored shape is a wrapper, so reading `content` off it finds
+    nothing. On a blank article that is indistinguishable from correct,
+    which is why it survived the first run: only once the article had text
+    did find_in_document start reporting "not in the body" for every
+    substring, including "the", and replace_part refuse a span against a
+    body it measured as 0 characters.
+    """
     if isinstance(doc, list):
         return [b for b in doc if isinstance(b, dict)]
     if isinstance(doc, dict):
+        inner = doc.get("tiptap")
+        if isinstance(inner, (dict, list)):
+            return _top_blocks(inner)
         content = doc.get("content")
         if isinstance(content, list):
             return [b for b in content if isinstance(b, dict)]
@@ -236,7 +254,14 @@ def block_index_at(doc: Any, char: int) -> int:
 
 
 def _as_doc(original: Any, blocks: list[dict]) -> dict:
-    """Put rebuilt blocks back in the shape the document arrived in."""
+    """Put rebuilt blocks back in the shape the document arrived in.
+
+    A stored document must come back stored-shaped: handing the editor a
+    bare {"type": "doc"} where it expected {"tiptap": ...} would apply an
+    edit that silently replaced the whole wrapper.
+    """
+    if isinstance(original, dict) and isinstance(original.get("tiptap"), (dict, list)):
+        return {**original, "tiptap": _as_doc(original["tiptap"], blocks)}
     if isinstance(original, dict) and original.get("type"):
         return {**original, "content": blocks}
     return {"type": "doc", "content": blocks}
