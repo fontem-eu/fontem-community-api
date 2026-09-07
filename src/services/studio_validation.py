@@ -244,9 +244,23 @@ def _axis_errors(spec: dict, columns: list[str]) -> list[str]:
     known = {c.lower() for c in columns}
     errors = []
     named = [("x", spec.get("x")), ("y", spec.get("y")), ("y2", spec.get("y2"))]
-    named += [(f"series[{i}]", s) for i, s in enumerate(spec.get("series") or [])]
-    named += [(f"corrCols[{i}]", s)
-              for i, s in enumerate(spec.get("corrCols") or [])]
+    for key in ("series", "corrCols"):
+        value = spec.get(key)
+        if value is None or value == []:
+            continue
+        if not isinstance(value, list):
+            # Never enumerate a bare string here. `series: "period"` used to
+            # be iterated character by character and answered with one error
+            # per letter -- "series[0]='p' is not a column", through to 'd'.
+            # A model cannot act on that; the one that met it dropped the
+            # field and shipped a chart missing the comparison it was for.
+            errors.append(
+                f"{key} must be an ARRAY of column names, one drawn per "
+                f"column — got {type(value).__name__}. It is not a column "
+                f"to group by: return one column per group and name them "
+                f"all here. Available: {', '.join(sorted(columns))}")
+            continue
+        named += [(f"{key}[{i}]", v) for i, v in enumerate(value)]
     for label, value in named:
         if isinstance(value, str) and value and value.lower() not in known:
             errors.append(

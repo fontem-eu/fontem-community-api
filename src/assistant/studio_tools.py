@@ -57,8 +57,11 @@ PLOT_SPEC_PARAM = {
         "{name, lang, query} OBJECTS — not ids, not names. `transform`: "
         "optional DuckDB SQL over those sources, run in the browser. "
         "`chart`: one of " + ", ".join(CHART_TYPES) + ". `x`/`y`: column "
-        "names in the transformed result. `series`: optional column to "
-        "split lines or bar groups by."
+        "names in the transformed result. `series`: optional ARRAY of "
+        "column names, one drawn per column — it is NOT a column to group "
+        "by. To compare two periods, return one column per period "
+        "(e.g. RETURN sector, before_eur, after_eur) and pass "
+        "series: [\"before_eur\", \"after_eur\"]."
     ),
     "properties": {
         # Objects, because that is what studio_validation accepts. The
@@ -81,7 +84,16 @@ PLOT_SPEC_PARAM = {
         "chart": {"type": "string", "enum": list(CHART_TYPES)},
         "x": {"type": "string"},
         "y": {"type": "string"},
-        "series": {"type": "string"},
+        # An ARRAY, because the renderer does
+        #     series: Array.isArray(spec.series) ? [...spec.series] : []
+        # and draws "one line per chosen series column". Declared as a
+        # string, it was read as a grouping column — a different idea
+        # entirely — and a string given to the validator was iterated
+        # CHARACTER BY CHARACTER: series:"period" came back as six errors,
+        # "series[0]='p' is not a column", through to 'd'. The model could
+        # not act on that, dropped `series`, and shipped a chart with no
+        # before/after split — which was the whole point of the article.
+        "series": {"type": "array", "items": {"type": "string"}},
     },
 }
 
