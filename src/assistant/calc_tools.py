@@ -53,7 +53,12 @@ CALC_TOOLS: list[dict] = [
                 "+ - * / // % ** and comparisons, and the functions sum, "
                 "mean, avg, median, stdev, pstdev, min, max, abs, round, "
                 "len, sqrt, floor, ceil, range. The result is the last "
-                "expression line (or assign to `result`). Numbers from "
+                "expression line (or assign to `result`), and it may be a "
+                "number, a list, or a MAPPING of names to those — ask for "
+                "every figure you need in ONE call, e.g. result = "
+                "{'before': b, 'after': a, 'drop_pct': (b - a) / b * 100}. "
+                "Names in a mapping are labels only; values are numbers. "
+                "Numbers from "
                 "tool results can be bound by name via `values`; numeric "
                 "strings are accepted there. No imports, strings, or "
                 "attribute access."
@@ -100,6 +105,9 @@ _MAX_POW = 1_000
 #: Integer width bound — the memory cap. Repeated squaring in a loop turns
 #: ints into gigabytes; ~20k bits (2.5KB per number) does not.
 _MAX_INT_BITS = 20_000
+
+#: A result key is a label for a number, not a payload.
+_MAX_KEY_CHARS = 64
 #: Interpreted-step budget: every node visit and loop iteration is a tick.
 _MAX_OPS = 100_000
 #: Wall-clock bound, checked every few hundred ticks.
@@ -188,6 +196,8 @@ def _guard_size(result):
         raise ValueError("intermediate value is too large")
     if isinstance(result, list) and len(result) > _MAX_LIST_ITEMS:
         raise ValueError(f"lists are bounded at {_MAX_LIST_ITEMS} items")
+    if isinstance(result, dict) and len(result) > _MAX_LIST_ITEMS:
+        raise ValueError(f"a result mapping is bounded at {_MAX_LIST_ITEMS} entries")
     return result
 
 
@@ -275,6 +285,33 @@ def _eval_list(node: ast.List, frame: _Frame):
     return _guard_size([_eval(e, frame) for e in node.elts])
 
 
+def _eval_dict(node: ast.Dict, frame: _Frame):
+    """A mapping of constant keys to evaluated values.
+
+    Keys are read straight off the AST rather than evaluated, so a string
+    key is allowed WITHOUT making strings expressible generally. That
+    distinction is deliberate: `_eval_constant` refuses strings because a
+    1.7B model looped on `len('some text')` for three minutes and timed out
+    the staging gate, and that guard stays exactly as it was. A key is a
+    label, not an operand.
+    """
+    out = {}
+    for key_node, value_node in zip(node.keys, node.values):
+        if key_node is None:
+            raise ValueError("`**` is not supported in a result mapping")
+        if not isinstance(key_node, ast.Constant) or isinstance(key_node.value, bool):
+            raise ValueError("result keys must be plain names, e.g. "
+                             "{'before': ..., 'after': ...}")
+        if not isinstance(key_node.value, (str, int, float)):
+            raise ValueError("result keys must be text or numbers")
+        key = str(key_node.value)
+        if len(key) > _MAX_KEY_CHARS:
+            raise ValueError(f"result key is longer than {_MAX_KEY_CHARS} characters")
+        out[key] = _eval(value_node, frame)
+        _guard_size(out)
+    return out
+
+
 def _eval_listcomp(node: ast.ListComp, frame: _Frame):
     out: list = []
 
@@ -311,6 +348,7 @@ _NODE_HANDLERS = {
     ast.IfExp: _eval_ifexp,
     ast.Call: _eval_call,
     ast.List: _eval_list,
+    ast.Dict: _eval_dict,
     # A tuple evaluates exactly as a list -- ast.Tuple carries the same
     # `.elts`. This does NOT make `result = (a, b)` work: a non-scalar
     # result is still refused. It makes the refusal TRUE. Before, the
@@ -339,9 +377,9 @@ def _eval(node: ast.AST, frame: _Frame):
         # to do it. Three calls for two percentages.
         raise ValueError(
             f"unsupported syntax: {type(node).__name__} — this evaluates "
-            f"arithmetic over numbers and lists of numbers, and the result "
-            f"must be a single number. To report several figures, make one "
-            f"call per figure.")
+            f"arithmetic over numbers, lists and mappings of them. Several "
+            f"figures at once is fine: "
+            f"result = {{'before': ..., 'after': ...}}.")
     return handler(node, frame)
 
 
@@ -433,6 +471,24 @@ def _as_num(v) -> float:
     return float(v)
 
 
+def _check_finite(value) -> None:
+    """Every number in the result is finite, however deeply it is nested.
+
+    A result may now be a number, a list, or a mapping of names to those —
+    a data story ends in a handful of named figures, and making each one a
+    separate round trip was costing four calls to report three numbers. The
+    finiteness rule did not change, only the shape it has to walk.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("the result is not a finite number")
+    if isinstance(value, list):
+        for item in value:
+            _check_finite(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _check_finite(item)
+
+
 def _prevalidate(expression: str) -> str | None:
     if not expression:
         return "expression is required"
@@ -461,11 +517,7 @@ def execute(args: dict) -> str:
         if result is None:
             raise ValueError("end with an expression line, or assign to "
                              "`result`")
-        if isinstance(result, list):
-            raise ValueError("the result is a list, not a number — "
-                             "aggregate it (sum, mean, …)")
-        if isinstance(result, float) and not math.isfinite(result):
-            raise ValueError("the result is not a finite number")
+        _check_finite(result)
     except ZeroDivisionError:
         return json.dumps({"error": "division by zero"})
     except RecursionError:

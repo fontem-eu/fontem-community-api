@@ -907,6 +907,7 @@ class ToolRuntime:
                 return out, 0
             out = await doc.read()
             capped, budget[0] = tool_budget.cap_tool_result(out, budget[0])
+            capped += tool_budget.pacing_note(budget, len(traced or []))
             _record_call(traced, call_id, name, args, capped, started, len(out))
             return capped, len(out)
 
@@ -916,6 +917,7 @@ class ToolRuntime:
         if name in ("mcp__gmr__find_in_document", "mcp__gmr__replace_part"):
             out = await _answer_doc_edit(doc, name, args)
             capped, budget[0] = tool_budget.cap_tool_result(out, budget[0])
+            capped += tool_budget.pacing_note(budget, len(traced or []))
             _record_call(traced, call_id, name, args, capped, started, len(out))
             return capped, len(out)
 
@@ -982,6 +984,7 @@ class ToolRuntime:
         except (ValueError, TypeError):
             pass
         capped, budget[0] = tool_budget.cap_tool_result(raw, budget[0])
+        capped += tool_budget.pacing_note(budget, len(traced or []))
         _record_call(traced, call_id, name, args, capped, started, len(raw))
         return capped, len(raw)
 
