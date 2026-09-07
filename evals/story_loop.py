@@ -191,6 +191,12 @@ class Loop:
         if r.status_code >= 400:
             self.errors.append(f"set_title {r.status_code}: {r.text[:160]}")
 
+    async def set_abstract(self, report_id: str, abstract: str):
+        r = await self._api("PUT", f"/data-stories/{report_id}",
+                            json={"abstract": abstract})
+        if r.status_code >= 400:
+            self.errors.append(f"set_abstract {r.status_code}: {r.text[:160]}")
+
     async def studio_projects(self):
         r = await self._api("GET", "/studio/projects")
         return r.json() if r.status_code < 400 else []
@@ -321,6 +327,15 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
             if title:
                 await loop.set_title(report_id, title)
                 applied.append(tool)
+        elif tool == "mcp__gmr__set_abstract":
+            # The editor applies this like any other card. Leaving it out
+            # reported an honest "1 proposed but not applied" and then
+            # measured an article whose abstract the model had written and
+            # the harness had thrown away.
+            abstract = (call.get("args") or {}).get("abstract")
+            if abstract:
+                await loop.set_abstract(report_id, abstract)
+                applied.append(tool)
         elif tool == "mcp__gmr__insert_studio_plot":
             node = {"type": "widget", "attrs": {
                 "widget_type": "pipeline", "schema_version": 1,
@@ -399,6 +414,9 @@ def report(loop: Loop, meta: dict, applied: list[str], article, projects,
         mark = "NEW " if p.get("id") not in seen_before else "    "
         out.append(f"  - {mark}{p.get('name')!r}  plots={len(plots)} "
                    f"queries={len(p.get('queries') or [])}")
+    out.append("")
+    abstract = (article.get("abstract") or "").strip()
+    out.append(f"Abstract: {abstract[:200] or '(none)'}")
     out.append("")
     blocks = article_doc(article).get("content") or []
     widgets = [b for b in blocks if b.get("type") == "widget"]
