@@ -19,6 +19,11 @@ from __future__ import annotations
 from src.assistant import doc_edit
 
 
+def _texts(blocks):
+    """The blocks' text, through the public reader."""
+    return doc_edit.body_text({"type": "doc", "content": blocks}).split("\n\n")
+
+
 def _p(text):
     return {"type": "paragraph", "content": [{"type": "text", "text": text}]}
 
@@ -77,9 +82,23 @@ def test_a_marker_for_a_chart_that_does_not_exist_is_dropped():
     assert doc_edit.body_text({"type": "doc", "content": out}) == "Tail."
 
 
-def test_a_rewrite_of_an_article_with_no_charts_is_untouched():
+def test_a_rewrite_of_an_article_with_no_charts_keeps_its_prose():
     blocks = [_p("Just prose.")]
-    assert doc_edit.restore_widgets(blocks, {"type": "doc", "content": []}) is blocks
+    out = doc_edit.restore_widgets(blocks, {"type": "doc", "content": []})
+    assert _texts(out) == ["Just prose."]
+
+
+def test_a_marker_is_removed_even_when_there_are_no_charts_at_all():
+    # This used to return early, so a marker in the incoming body was
+    # passed through as TEXT. Iteration 7 saved literal
+    # `[[chart 1: EU public spending on Russian suppliers...]]` into an
+    # article, printed beside the chart it was meant to be. Losing a chart
+    # is bad; rendering the plumbing is worse.
+    out = doc_edit.restore_widgets(
+        [_p("Prose."), _p("[[chart 1: not here]]"), _p("Tail.")],
+        {"type": "doc", "content": []})
+    assert _texts(out) == ["Prose.", "Tail."]
+    assert "[[chart" not in "".join(_texts(out))
 
 
 # ── charts are atomic under replace_part ──────────────────────

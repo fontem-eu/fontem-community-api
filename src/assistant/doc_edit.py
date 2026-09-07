@@ -450,9 +450,12 @@ def restore_widgets(blocks: list[dict], previous: Any) -> list[dict]:
     what markers buy -- deleting a chart on purpose, which it could not
     express at all before.
     """
+    # No early-out when `previous` holds no widgets. A marker that resolves
+    # to nothing must still be REMOVED, and skipping the walk is how literal
+    # `[[chart 1: ...]]` text reached a published article in iteration 7 --
+    # printed brackets beside the chart they were meant to be. Losing a
+    # chart is bad; rendering the plumbing is worse.
     widgets = widgets_of(previous)
-    if not widgets:
-        return blocks
     out: list[dict] = []
     for block in blocks:
         out.extend(_split_on_markers(block, widgets))
