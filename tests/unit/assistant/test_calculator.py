@@ -53,8 +53,11 @@ def test_an_unknown_name_names_the_fix():
     assert "values" in out["error"]
 
 
-def test_a_list_result_asks_for_an_aggregate():
-    assert "aggregate" in _calc("[1, 2]")["error"]
+def test_a_list_result_is_returned():
+    # Was "aggregate it": a list result used to be refused. A data story
+    # ends in several figures, and one call per figure cost run 5 four
+    # calls for three numbers. Lists and mappings now come back as they are.
+    assert _calc("[1, 2]")["result"] == [1, 2]
 
 
 # ── the whitelist is a wall ───────────────────────────────────

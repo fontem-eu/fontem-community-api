@@ -14,17 +14,15 @@ import json
 from src.assistant.calc_tools import execute, _NODE_HANDLERS
 
 
-def test_a_parenthesised_result_gets_the_real_rule_not_a_parser_error():
+def test_a_parenthesised_result_is_the_same_request_as_a_bracketed_one():
     # `result = (a, b)` and `result = [a, b]` are the same request and must
     # get the same answer. The tuple form used to die at the parser with
-    # "unsupported syntax: Tuple", which reads as a spelling problem; the
-    # list form got the actual rule. The run met the first and burnt three
-    # calls before landing on two scalar calls, which is the intended use.
+    # "unsupported syntax: Tuple" while the list form got a different
+    # message entirely. Both now simply work; what is pinned here is that
+    # they agree, which is the property that was broken.
     tup = json.loads(execute({"expression": "result = (1, 2)"}))
     lst = json.loads(execute({"expression": "result = [1, 2]"}))
-    assert tup == lst
-    assert "not a number" in tup["error"]
-    assert "syntax" not in tup["error"]
+    assert tup["result"] == lst["result"] == [1, 2]
 
 
 def test_tuple_is_whitelisted_alongside_list():
@@ -84,17 +82,18 @@ def test_a_saved_article_carries_the_same_warning():
     assert "do not re-propose" in out["note"].lower()
 
 
-def test_an_unsupported_node_names_the_rule_not_just_the_node():
-    # Iteration 4 wanted several named figures at once, wrote
-    # `result = {...}` twice, was told "unsupported syntax: Dict" twice,
-    # and only then fell back to the bare expressions that were always the
-    # way. The node name alone reads as a spelling problem.
-    err = json.loads(execute({"expression": "result = {'a': 1}"}))["error"]
-    assert "Dict" in err
-    assert "must be a single number" in err
-    assert "one call per figure" in err
+def test_the_mapping_iteration_4_wanted_is_now_simply_allowed():
+    # Iteration 4 wrote `result = {...}` twice, was told "unsupported
+    # syntax: Dict" twice, and fell back to one call per figure. Iteration 5
+    # met a clearer message and still spent four calls on three numbers.
+    # The shape itself was the problem, so the shape is now supported.
+    out = json.loads(execute({"expression": "result = {'a': 1, 'b': 2}"}))
+    assert out["result"] == {"a": 1, "b": 2}
 
 
-def test_the_rule_is_stated_for_any_rejected_node():
+def test_a_still_unsupported_node_names_the_rule_not_just_the_node():
+    # The lesson survives the change: a refusal has to teach the shape that
+    # works, or the model retries the same one. A set is still unsupported.
     err = json.loads(execute({"expression": "result = {1, 2}"}))["error"]
-    assert "Set" in err and "single number" in err
+    assert "Set" in err
+    assert "'before'" in err, "point at the shape that does work"

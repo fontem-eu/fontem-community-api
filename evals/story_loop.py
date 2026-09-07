@@ -501,14 +501,18 @@ async def main() -> int:
         print(f"article {report_id}, model {args.model}, asking...",
               file=sys.stderr)
 
+        # Apply between EVERY turn, not only at the end. The comment here
+        # used to say exactly that while the code applied once, after the
+        # whole --turns loop -- so turn 2 read back a blank article, which
+        # is the state this is supposed to prevent. In run 5 it spent all
+        # 18 of its calls researching and building a plot it then had
+        # nowhere to anchor, and proposed nothing at all.
         await loop.turn(report_id, prompt, key)
-        for _ in range(max(0, args.turns - 1)):
-            await loop.turn(report_id, "Please continue.", key)
-        # Apply between turns, not only at the end: the second turn is
-        # supposed to EDIT what the first wrote, and it reads the saved
-        # document. Leaving the draft unapplied would hand it a blank
-        # article and make a focused edit impossible to even attempt.
         applied = await apply_proposals(loop, report_id)
+        for _ in range(max(0, args.turns - 1)):
+            loop.turn_boundaries.append(len(loop.calls))
+            await loop.turn(report_id, "Please continue.", key)
+            applied += await apply_proposals(loop, report_id)
         for follow_up in args.then:
             loop.turn_boundaries.append(len(loop.calls))
             await loop.turn(report_id, follow_up, key)

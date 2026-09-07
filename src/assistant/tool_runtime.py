@@ -545,6 +545,15 @@ def _system_prompt_with_today(base: str) -> str:
     return f"{base.rstrip()}\n\nToday's date is {today}."
 
 
+def _calls_so_far(traced: list | None) -> int:
+    """How many calls this turn has recorded. `traced` is None when nothing
+    is tracing, and `len(traced or [])` at the call site cost more than it
+    looked: Sonar counts each `or` toward cognitive complexity, and three of
+    them took `_dispatch_inner` from under the threshold to 17 over it.
+    """
+    return len(traced) if traced else 0
+
+
 def _record_call(traced: list | None, call_id: str, name: str, args: dict,
                  result: str, started: float, raw_len: int) -> None:
     """Queue the trace for this call. The closures cannot yield; this rides
@@ -865,7 +874,7 @@ class ToolRuntime:
         scope = (audit or audit_context).tool_call(call_id, name)
         with scope:
             try:
-                return await asyncio.wait_for(
+                out, raw_len = await asyncio.wait_for(
                     self._dispatch_inner(
                         client, name, args, studio=studio,
                         nav_routes=nav_routes, pending_nav=pending_nav,
@@ -875,6 +884,14 @@ class ToolRuntime:
                     ),
                     timeout=TOOL_CALL_TIMEOUT_S,
                 )
+                # Where the turn stands, appended once here rather than at
+                # each of the three places a result is capped: every path
+                # out of _dispatch_inner funnels through this return, so
+                # one line covers them all — including the ones that answer
+                # with an error, which are exactly when a model most needs
+                # to know how much turn is left.
+                return out + tool_budget.pacing_note(
+                    budget, _calls_so_far(traced)), raw_len
             except asyncio.TimeoutError:
                 out = json.dumps({
                     "error": (f"{name} timed out after "

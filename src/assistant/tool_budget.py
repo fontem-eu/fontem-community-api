@@ -19,6 +19,8 @@ stayed invisible until a browser drove the real path.
 """
 from __future__ import annotations
 
+import time
+
 #: Ceiling on a single tool result before it enters the conversation.
 MAX_TOOL_RESULT_CHARS = 8_000
 
@@ -75,4 +77,54 @@ def cap_tool_result(result: str, remaining: int) -> tuple[str, int]:
             dropped=len(result) - allowance, total=len(result),
         ),
         remaining - allowance,
+    )
+
+
+#: Fraction of the turn's tool-output budget that must be spent before the
+#: model is told where it stands. Below this, a running commentary is noise;
+#: above it, the turn is closer to its end than the model can otherwise tell.
+PACING_THRESHOLD = 0.5
+
+
+def new_turn_budget(total: int) -> list:
+    """The per-turn cell every tool result is capped against.
+
+    ``[remaining, total, started]``. It is a list because the tool closures
+    mutate ``[0]`` in place and cannot return it; the two extra slots let
+    the pacing note say how far through the turn we are without threading
+    another parameter through a dispatch signature that was already split
+    for argument count.
+
+    Callers that predate this — tests, and any engine not yet updated —
+    still pass ``[total]``, and `pacing_note` returns "" for those rather
+    than guessing.
+    """
+    return [total, total, time.monotonic()]
+
+
+def pacing_note(budget: list, calls_made: int) -> str:
+    """A short line telling the model where it is in the turn, or "".
+
+    A model cannot see its own clock. In one eval run the second turn spent
+    all eighteen of its calls researching, built a chart, and proposed
+    nothing at all -- there was no signal that the turn was running out, so
+    nothing prompted it to land the work it had already done. The hard stop
+    that does exist (BUDGET_EXHAUSTED) arrives as a cliff, after the room to
+    act on it is gone.
+
+    Deliberately reports what is MEASURED -- calls made, elapsed seconds,
+    budget left -- and one instruction. Estimating "you have N calls left"
+    would be a guess: the ceiling is on output volume, not on call count.
+    """
+    if len(budget) < 3:
+        return ""
+    remaining, total, started = budget[0], budget[1], budget[2]
+    if not total or remaining <= 0 or (total - remaining) / total < PACING_THRESHOLD:
+        return ""
+    return (
+        f"\n\n[turn so far: {calls_made} tool calls, "
+        f"{int(time.monotonic() - started)}s, "
+        f"{remaining} of {total} characters of tool output left. "
+        "Propose your edits before it runs out — a turn that ends with "
+        "research and no proposal delivers nothing.]"
     )
