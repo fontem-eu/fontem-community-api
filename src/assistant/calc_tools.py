@@ -311,6 +311,17 @@ _NODE_HANDLERS = {
     ast.IfExp: _eval_ifexp,
     ast.Call: _eval_call,
     ast.List: _eval_list,
+    # A tuple evaluates exactly as a list -- ast.Tuple carries the same
+    # `.elts`. This does NOT make `result = (a, b)` work: a non-scalar
+    # result is still refused. It makes the refusal TRUE. Before, the
+    # parenthesised form died at the parser with "unsupported syntax:
+    # Tuple", which reads as "rephrase it", while the square-bracketed
+    # form got "the result is a list, not a number -- aggregate it",
+    # which is the actual rule. A run computing two percentages met the
+    # first message and spent three calls guessing at spellings; the
+    # second message would have sent it straight to two calls, which is
+    # how the tool is meant to be used.
+    ast.Tuple: _eval_list,
     ast.ListComp: _eval_listcomp,
 }
 
