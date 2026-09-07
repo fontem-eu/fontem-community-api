@@ -82,3 +82,19 @@ def test_a_saved_article_carries_the_same_warning():
     out = _read(_Head(doc))
     assert out["body_text"] == "hello"
     assert "do not re-propose" in out["note"].lower()
+
+
+def test_an_unsupported_node_names_the_rule_not_just_the_node():
+    # Iteration 4 wanted several named figures at once, wrote
+    # `result = {...}` twice, was told "unsupported syntax: Dict" twice,
+    # and only then fell back to the bare expressions that were always the
+    # way. The node name alone reads as a spelling problem.
+    err = json.loads(execute({"expression": "result = {'a': 1}"}))["error"]
+    assert "Dict" in err
+    assert "must be a single number" in err
+    assert "one call per figure" in err
+
+
+def test_the_rule_is_stated_for_any_rejected_node():
+    err = json.loads(execute({"expression": "result = {1, 2}"}))["error"]
+    assert "Set" in err and "single number" in err
