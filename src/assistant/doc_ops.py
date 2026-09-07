@@ -83,43 +83,39 @@ class DocOps:
         # instead of it: the JSON is what carries widgets and marks, and
         # the text is what the model can count characters in.
         text = doc_edit.body_text(content)
-        body = json.dumps(content)
-        if len(body) > MAX_DOC_CHARS:
-            dropped = len(body) - MAX_DOC_CHARS
-            body = body[:MAX_DOC_CHARS] + TRUNCATED_MARKER.format(
-                dropped=dropped, total=len(body) + dropped)
+        if len(text) > MAX_DOC_CHARS:
+            dropped = len(text) - MAX_DOC_CHARS
+            text = text[:MAX_DOC_CHARS] + TRUNCATED_MARKER.format(
+                dropped=dropped, total=len(text) + dropped)
 
         return json.dumps({
             "report_id": self._report,
             "title": report.title,
             "abstract": getattr(report, "abstract", None),
-            # TipTap document JSON. Text lives in the `text` fields;
-            # propose whole-body replacements as HTML, which the Apply
-            # path sanitises and converts. `body_text` below is the same
-            # prose as one string, and is the ONLY thing character
-            # offsets refer to — find_in_document returns offsets into
-            # it, replace_part and at_char consume them.
-            "sections": body,
+            # ONE representation of the article, not two. This used to send
+            # the TipTap JSON as `sections` alongside the text, which cost
+            # most of the result budget (7k characters on a 14-block story),
+            # truncated away on longer ones, and gave the model a structure
+            # it had no verb to edit. Everything it can do -- find,
+            # replace_part, at_char, after_text -- is measured in this text.
+            #
+            # Charts appear as `[[chart N: label]]`. They used to appear as
+            # nothing at all, so a rewrite dropped them silently; see
+            # doc_edit.MARKER_RE.
             "body_text": text,
             "body_text_length": len(text),
             "revision": head.id if head else None,
-            # Every edit verb PROPOSES; the user accepts the card in
-            # their editor. So the text a model just wrote is legitimately
-            # absent from here, and saying only "no saved text yet" invites
-            # the reading that the write failed. One run proposed a whole
-            # body, searched it for a marker it had just written, got
-            # "not in the body", re-read the document, found it still
-            # empty -- and proposed the entire body a second time.
             "note": (
                 ("This is the user's last SAVED draft. Their editor buffer "
                  "may contain newer unsaved text."
                  if head else
                  "This article has no saved text yet — anything proposed "
                  "here is its first draft.")
-                + " Edits you propose do NOT appear here: they are shown "
-                  "to the user as cards to accept, and this endpoint "
-                  "returns only saved text. Do not re-propose something "
-                  "you have already proposed this turn — it is pending, "
-                  "not lost."
+                + " A `[[chart N: ...]]` marker IS a chart: keep it to keep "
+                  "the chart, move it to move the chart, drop it to remove "
+                  "the chart. Edits you propose do NOT appear here: they are "
+                  "shown to the user as cards to accept, and this endpoint "
+                  "returns only saved text. Do not re-propose something you "
+                  "have already proposed this turn — it is pending, not lost."
             ),
         })

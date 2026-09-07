@@ -79,7 +79,7 @@ def test_read_document_returns_the_saved_document():
     out, _ = _dispatch(_runtime(), "mcp__gmr__read_document", {}, doc=doc)
     body = json.loads(out)
     assert body["title"] == "Draft"
-    assert "hello" in body["sections"]
+    assert "hello" in body["body_text"]
     assert "SAVED" in body["note"]
 
 
@@ -107,7 +107,11 @@ def test_an_oversize_document_is_truncated_with_a_marker():
     reports = _FakeReports()
     fat = MagicMock()
     fat.id = "rev-fat"
-    fat.content_json = {"type": "doc", "text": "x" * 20_000}
+    # Long in the coordinate space the model reads, which is what the cap
+    # now measures. It used to measure the TipTap JSON, which was sent
+    # alongside the text and is no longer sent at all.
+    fat.content_json = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "x" * 20_000}]}]}
     reports.draft_head = AsyncMock(return_value=fat)
     doc = DocOps(reports, "u-1", "r-1")
     out = _run(doc.read())
@@ -332,15 +336,15 @@ def test_the_agent_reads_the_draft_not_the_published_text():
     reports.document_head = AsyncMock(return_value=published)
 
     body = json.loads(_run(DocOps(reports, "u-1", "r-1").read()))
-    assert "my unpublished draft" in body["sections"]
-    assert "the published text" not in body["sections"]
+    assert "my unpublished draft" in body["body_text"]
+    assert "the published text" not in body["body_text"]
     assert body["revision"] == "rev-1"
 
 
 def test_without_a_draft_it_reads_what_is_published():
     reports = _FakeReports(text="the published text", draft=False)
     body = json.loads(_run(DocOps(reports, "u-1", "r-1").read()))
-    assert "the published text" in body["sections"]
+    assert "the published text" in body["body_text"]
 
 
 def test_an_article_with_nothing_saved_is_empty_not_unreadable():

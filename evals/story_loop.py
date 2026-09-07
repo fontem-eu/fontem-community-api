@@ -320,7 +320,14 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
                 # replace_body: the model sent HTML, which the browser
                 # would hand to TipTap. Converted here so the follow-up
                 # turn reads back a real article instead of a blank one.
-                tiptap = html_to_tiptap(call["args"]["content"])
+                #
+                # The charts are put back from the document being replaced:
+                # HTML cannot carry a widget's data_params, so before
+                # markers existed a whole-body rewrite deleted every chart
+                # in the article. Run 6 lost one exactly that way.
+                blocks = html_to_tiptap(call["args"]["content"]).get("content") or []
+                tiptap = {"type": "doc",
+                          "content": doc_edit.restore_widgets(blocks, tiptap)}
                 applied.append(f"{tool} (html)")
         elif tool == "mcp__gmr__set_title":
             title = (call.get("args") or {}).get("title")
