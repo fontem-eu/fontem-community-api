@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+from html.parser import HTMLParser
 
 #: The default brief. Deliberately the user's own wording: the point is to
 #: watch the assistant handle a real request, not a request engineered to
@@ -74,6 +75,66 @@ def credentials(namespace: str) -> tuple[str, str]:
     password = os.environ.get("TEST_PASSWORD") or _kubectl_secret(
         namespace, "gmr-smoke-creds", "password")
     return email, password
+
+
+class _HtmlToTipTap(HTMLParser):
+    """Just enough HTML to apply what a first draft proposes.
+
+    The browser does this properly, via TipTap's own schema. Here it only
+    has to be faithful enough that the NEXT turn reads back something like
+    what the model wrote — otherwise the follow-up faces a blank article
+    and focused editing cannot even be attempted, which is exactly what
+    made the first multi-turn run useless.
+
+    Models also wrap drafts in a whole <!DOCTYPE html> document; the
+    structural tags are simply ignored rather than becoming headings.
+    """
+
+    _BLOCKS = {"p": "paragraph", "h1": "heading", "h2": "heading",
+               "h3": "heading", "li": "paragraph"}
+    _SKIP = {"html", "head", "body", "meta", "title", "style", "script",
+             "table", "thead", "tbody", "tr", "td", "th"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocks: list[dict] = []
+        self._tag: str | None = None
+        self._buf: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        del attrs
+        if tag in self._BLOCKS:
+            self._flush()
+            self._tag = tag
+
+    def handle_endtag(self, tag):
+        if tag in self._BLOCKS:
+            self._flush()
+
+    def handle_data(self, data):
+        if self._tag and data.strip():
+            self._buf.append(data)
+
+    def _flush(self) -> None:
+        text = " ".join(" ".join(self._buf).split())
+        if text and self._tag:
+            block = {"type": self._BLOCKS[self._tag],
+                     "content": [{"type": "text", "text": text}]}
+            if self._tag.startswith("h"):
+                block["attrs"] = {"level": int(self._tag[1])}
+            self.blocks.append(block)
+        self._tag, self._buf = None, []
+
+    def close(self):
+        super().close()
+        self._flush()
+
+
+def html_to_tiptap(html: str) -> dict:
+    parser = _HtmlToTipTap()
+    parser.feed(html)
+    parser.close()
+    return {"type": "doc", "content": parser.blocks}
 
 
 class Loop:
@@ -115,6 +176,12 @@ class Loop:
             self.errors.append(f"save_document {r.status_code}: {r.text[:200]}")
             return None
         return r.json().get("revision")
+
+    async def set_title(self, report_id: str, title: str):
+        r = await self._api("PUT", f"/data-stories/{report_id}",
+                            json={"title": title})
+        if r.status_code >= 400:
+            self.errors.append(f"set_title {r.status_code}: {r.text[:160]}")
 
     async def studio_projects(self):
         r = await self._api("GET", "/studio/projects")
@@ -205,7 +272,19 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
         tool = call["tool"]
         if tool in ("mcp__gmr__replace_part", "mcp__gmr__replace_body"):
             if result.get("content_json"):
+                # replace_part: the server already spliced it.
                 tiptap = result["content_json"]
+                applied.append(tool)
+            elif (call.get("args") or {}).get("content"):
+                # replace_body: the model sent HTML, which the browser
+                # would hand to TipTap. Converted here so the follow-up
+                # turn reads back a real article instead of a blank one.
+                tiptap = html_to_tiptap(call["args"]["content"])
+                applied.append(f"{tool} (html)")
+        elif tool == "mcp__gmr__set_title":
+            title = (call.get("args") or {}).get("title")
+            if title:
+                await loop.set_title(report_id, title)
                 applied.append(tool)
         elif tool == "mcp__gmr__insert_studio_plot":
             node = {"type": "widget", "attrs": {
