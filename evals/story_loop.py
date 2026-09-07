@@ -334,7 +334,8 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
     return applied
 
 
-def report(loop: Loop, meta: dict, applied: list[str], article, projects) -> str:
+def report(loop: Loop, meta: dict, applied: list[str], article, projects,
+           pre_existing: set | None = None) -> str:
     out = [f"# Assistant story loop — {meta['started']}", ""]
     # First thing in the report, because a turn cut short upstream looks
     # exactly like a model that chose to stop -- and reading it as the
@@ -375,10 +376,17 @@ def report(loop: Loop, meta: dict, applied: list[str], article, projects) -> str
     out.append("")
     out.append("## Artifacts")
     out.append("")
-    out.append(f"Studio projects now: {len(projects)}")
-    for p in projects[:10]:
+    seen_before = pre_existing or set()
+    fresh = [p for p in projects if p.get("id") not in seen_before]
+    out.append(f"Studio projects now: {len(projects)}  "
+               f"(**{len(fresh)} created by this run**)")
+    # New first: what this run built is the thing being evaluated, and it
+    # was previously indistinguishable from what the last run left behind.
+    ordered = fresh + [p for p in projects if p.get("id") in seen_before]
+    for p in ordered[:10]:
         plots = p.get("plots") or []
-        out.append(f"  - {p.get('name')!r}  plots={len(plots)} "
+        mark = "NEW " if p.get("id") not in seen_before else "    "
+        out.append(f"  - {mark}{p.get('name')!r}  plots={len(plots)} "
                    f"queries={len(p.get('queries') or [])}")
     out.append("")
     blocks = article_doc(article).get("content") or []
@@ -454,6 +462,11 @@ async def main() -> int:
 
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
         loop = Loop(http, args.base_url, token)
+        # Studio projects accumulate across runs in the shared environment,
+        # and the model finds the previous run's by name and reuses it. That
+        # is realistic, but it makes "what did THIS run build" unanswerable
+        # from the final list -- so take the before-picture and diff.
+        pre_existing = {p.get("id") for p in await loop.studio_projects()}
         report_id = await loop.create_article(f"EU spending in Russian companies {started}")
         key = f"report:{report_id}"
         print(f"article {report_id}, model {args.model}, asking...",
@@ -478,7 +491,7 @@ async def main() -> int:
     meta = {"started": started, "model": args.model,
             "base_url": args.base_url, "report_id": report_id,
             "turns": args.turns}
-    text = report(loop, meta, applied, article, projects)
+    text = report(loop, meta, applied, article, projects, pre_existing)
     RESULTS.mkdir(exist_ok=True)
     path = RESULTS / f"story-loop-{started}-{args.model}.md"
     path.write_text(text, encoding="utf-8")
