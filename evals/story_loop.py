@@ -254,6 +254,23 @@ class Loop:
             self.usage = data
 
 
+def article_doc(article: dict) -> dict:
+    """The TipTap document out of a GET /data-stories/{id} response.
+
+    The field is `content_doc`, and it holds the STORED shape --
+    {"tiptap": doc, "version": n} -- not the document. Reading
+    `content_json` (which does not exist on this response) returned None,
+    so the harness started every apply from an empty document and reported
+    every finished article as "0 blocks" while 15 blocks sat in the
+    database. A report that under-counts the artifacts is worse than one
+    that fails: it reads as the model having done nothing.
+    """
+    doc = article.get("content_doc") or {}
+    if isinstance(doc, dict) and isinstance(doc.get("tiptap"), dict):
+        return doc["tiptap"]
+    return doc if isinstance(doc, dict) else {}
+
+
 async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
     """Apply what the model proposed, the way the editor would.
 
@@ -262,9 +279,8 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
     nobody notices is how a run looks better than it was.
     """
     applied = []
-    doc = await loop.read_document(report_id)
-    tiptap = (doc.get("content_json")
-              or {"type": "doc", "content": []})
+    tiptap = article_doc(await loop.read_document(report_id)) \
+        or {"type": "doc", "content": []}
     for call in loop.calls:
         try:
             result = json.loads(call.get("result") or "{}")
@@ -307,6 +323,16 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
 
 def report(loop: Loop, meta: dict, applied: list[str], article, projects) -> str:
     out = [f"# Assistant story loop — {meta['started']}", ""]
+    # First thing in the report, because a turn cut short upstream looks
+    # exactly like a model that chose to stop -- and reading it as the
+    # latter is how you "discover" behaviour that never happened. One run
+    # ended after three calls on a Connection error and its trace was
+    # briefly mistaken for the model declining to write anything.
+    if loop.errors:
+        out.append("> **THIS RUN IS NOT CLEAN — do not read behaviour from it.**")
+        for e in loop.errors:
+            out.append(f"> {e}")
+        out.append("")
     out.append(f"model: **{meta['model']}**   base: {meta['base_url']}")
     out.append(f"article: `{meta['report_id']}`   turns: {meta['turns']}")
     out.append("")
@@ -342,8 +368,7 @@ def report(loop: Loop, meta: dict, applied: list[str], article, projects) -> str
         out.append(f"  - {p.get('name')!r}  plots={len(plots)} "
                    f"queries={len(p.get('queries') or [])}")
     out.append("")
-    body = article.get("content_json") or {}
-    blocks = body.get("content") or []
+    blocks = article_doc(article).get("content") or []
     widgets = [b for b in blocks if b.get("type") == "widget"]
     out.append(f"Article blocks: {len(blocks)}  (widgets embedded: {len(widgets)})")
     out.append("")
