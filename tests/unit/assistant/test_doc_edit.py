@@ -153,3 +153,43 @@ class TestBlockIndexAt:
 
     def test_an_empty_document_takes_the_first_slot(self):
         assert doc_edit.block_index_at({"type": "doc", "content": []}, 0) == 0
+
+
+class TestTheStoredDocumentShape:
+    """save_document stores {"tiptap": doc, "version": 2}, not the doc.
+
+    Reading `content` off that wrapper finds nothing, so every
+    character-addressed tool answered as though the article were empty. A
+    blank article makes that indistinguishable from correct, which is why
+    it survived a whole run: only once there was text did
+    find_in_document start reporting "not in the body" for every
+    substring, including "the", and replace_part refuse spans against a
+    body it measured as 0 characters. The model spent ten calls on it.
+    """
+
+    STORED = {"version": 2, "tiptap": {"type": "doc", "content": [
+        _p("Alpha one."), _p("Beta two.")]}}
+
+    def test_the_text_is_found_through_the_wrapper(self):
+        assert doc_edit.body_text(self.STORED) == "Alpha one.\n\nBeta two."
+
+    def test_find_works_through_the_wrapper(self):
+        assert doc_edit.find(self.STORED, "Beta")["start"] == 12
+
+    def test_offsets_are_the_same_wrapped_or_not(self):
+        assert doc_edit.block_spans(self.STORED) == doc_edit.block_spans(DOC), (
+            "a coordinate space that depends on how the caller happened to "
+            "wrap the document is not a coordinate space"
+        )
+
+    def test_an_edit_comes_back_stored_shaped(self):
+        out = doc_edit.replace_span(self.STORED, 0, 5, "Omega")
+        assert out["version"] == 2 and "tiptap" in out, (
+            "handing the editor a bare doc where it stored a wrapper would "
+            "replace the wrapper itself"
+        )
+        assert doc_edit.body_text(out) == "Omega one.\n\nBeta two."
+
+    def test_block_index_is_the_same_wrapped_or_not(self):
+        assert (doc_edit.block_index_at(self.STORED, 4)
+                == doc_edit.block_index_at(DOC, 4))

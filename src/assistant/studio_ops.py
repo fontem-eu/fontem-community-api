@@ -37,6 +37,36 @@ _RESULT_CHARS = 7_500
 _QUERY_PREVIEW_CHARS = 400
 
 
+#: How many projects one list call may return. See list_projects.
+MAX_PROJECTS_LISTED = 25
+
+
+#: How much of an exception to pass on. A driver error carries the whole
+#: failing statement, and a SELECT in the model's context is tokens spent
+#: teaching it nothing.
+_MAX_ERROR_CHARS = 300
+
+
+def _readable_error(exc: Exception, tool: str) -> dict:
+    """One tool failure, as something a model can act on.
+
+    Passing `f"{type(exc).__name__}: {exc}"` straight through was fine for
+    the service's own not-found and permission errors, which say what to
+    fix. It was not fine for a driver error: passing a project NAME where
+    an id belongs — the easy mistake, because create_project answers with
+    both and the name is the readable one — came back as a DBAPIError
+    carrying the entire SELECT, and never said "use the id".
+    """
+    text = str(exc)
+    out = {"error": f"{type(exc).__name__}: {text[:_MAX_ERROR_CHARS]}",
+           "tool": tool}
+    if "invalid UUID" in text or "InvalidTextRepresentation" in text:
+        out["error"] = "that id is not a project id"
+        out["hint"] = ("studio_list_projects and studio_create_project both "
+                       "return {id, name}. Pass the id, not the name.")
+    return out
+
+
 class StudioOps:
     """The Studio surface, bound to one user for one turn."""
 
@@ -130,8 +160,26 @@ class StudioOps:
 
     # ── operations ─────────────────────────────────────────────
     async def list_projects(self, **_) -> dict:
+        """The user's projects, newest first, BOUNDED.
+
+        This used to return every project. On an account with 3,930 of
+        them — which is what a shared account looks like after a few
+        months of test runs — the result was large enough on its own to
+        blow a 32k context: one call, 316,559 tokens, turn over. The repo
+        orders by updated_at desc, so a cap keeps what a model is
+        plausibly working on and drops the archaeology.
+        """
         projects = await self._svc.list_projects(self._user)
-        return {"projects": [self._project_dict(p, deep=False) for p in projects]}
+        shown = projects[:MAX_PROJECTS_LISTED]
+        out: dict = {"projects": [self._project_dict(p, deep=False)
+                                  for p in shown]}
+        if len(projects) > len(shown):
+            out["note"] = (
+                f"showing the {len(shown)} most recently updated of "
+                f"{len(projects)}. If the one you want is older, create a "
+                f"new project rather than hunting for it."
+            )
+        return out
 
     async def get_project(self, project_id: str = "", query_id: str = "", **_) -> dict:
         project = await self._svc.get_project(self._user, project_id)
@@ -338,7 +386,4 @@ class StudioOps:
         except Exception as exc:  # pylint: disable=broad-except
             # Includes the service's own permission and not-found errors,
             # which are exactly what the model needs to see.
-            return json.dumps({
-                "error": f"{type(exc).__name__}: {exc}",
-                "tool": name,
-            }, default=str)
+            return json.dumps(_readable_error(exc, name), default=str)
