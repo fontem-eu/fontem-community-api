@@ -482,6 +482,44 @@ def _turn_tools(nav_routes: list, has_editor: bool) -> list[dict]:
     return tools
 
 
+#: Hybrid-search `type` -> the collection and id field the assistant's
+#: consumers expect. `eu_lobbying` and `lobbyist` both land in lobbyists:
+#: the search store types the register, the tool surface types the thing.
+_SEARCH_COLLECTIONS = {
+    "company": ("companies", "gmr_id"),
+    "authority": ("authorities", "authority_id"),
+    "person": ("persons", "person_id"),
+    "lobbyist": ("lobbyists", "tr_id"),
+    "eu_lobbying": ("lobbyists", "tr_id"),
+}
+
+
+def _group_hybrid_results(payload: dict) -> dict:
+    """`/search/results` rows regrouped into the shape the tools expect.
+
+    The hybrid store answers one flat ranked list of
+    ``{type, id, title, subtitle, country, ...}``; every consumer here --
+    `_capture_names`, the status line, the model's own reading -- expects
+    ``{companies: [...], authorities: [...], ...}`` with `name` and a
+    per-kind id field. Rank order is preserved inside each collection.
+    """
+    grouped: dict = {k: [] for k in ("companies", "authorities",
+                                     "persons", "lobbyists")}
+    for row in payload.get("results") or []:
+        if not isinstance(row, dict):
+            continue
+        mapped = _SEARCH_COLLECTIONS.get(row.get("type") or "")
+        if not mapped:
+            continue                     # contracts, disclosures: not entities
+        collection, id_field = mapped
+        grouped[collection].append({
+            id_field: row.get("id"),
+            "name": row.get("title"),
+            "country": row.get("country") or row.get("subtitle"),
+        })
+    return grouped
+
+
 @dataclass(frozen=True)
 class ToolTurnContext:
     """Per-turn extras the tool closures need, bundled.
@@ -1002,25 +1040,65 @@ class ToolRuntime:
         _record_call(traced, call_id, name, args, capped, started, len(raw))
         return capped, len(raw)
 
+    async def _search_entities(self, client: httpx.AsyncClient, args: dict) -> str:
+        """Find entities by name, through the hybrid search store.
+
+        `/search` matches substrings against the stored name, so it only
+        finds an entity if you already spell it the way the register does.
+        Asked to write about a Bulgarian nuclear plant, a model searched
+        "Kozloduy NPP" and got nothing five times over -- the graph holds
+        `„АЕЦ Козлодуй“ ЕАД`, in Cyrillic -- and recovered the ids only by
+        dropping to raw Cypher. `/search/results`, which the UI has used all
+        along, is lexical + vector with RRF fusion and answers that same
+        query with the right authority.
+
+        Falls back to `/search` when the hybrid store cannot answer. It is
+        the weaker endpoint, but a degraded search beats a dead tool, and
+        the store is not up in every environment yet.
+        """
+        params = {"q": args.get("query", ""), "limit": args.get("limit", 5)}
+        try:
+            r = await client.get(f"{self._gmr_api_url}/search/results",
+                                 params=params)
+            r.raise_for_status()
+            body = r.json()
+            if not isinstance(body, dict):
+                # A 200 carrying something other than an object is a broken
+                # upstream, not an empty result -- fall back rather than
+                # report "nothing found" for a search that never ran.
+                raise ValueError("hybrid search returned a non-object body")
+            return json.dumps(_group_hybrid_results(body))
+        except (httpx.HTTPError, ValueError, TypeError, KeyError):
+            r = await client.get(f"{self._gmr_api_url}/search", params=params)
+            return r.text
+
+    async def _investigate_from_args(
+        self, client: httpx.AsyncClient, args: dict,
+    ) -> str:
+        """`investigate_entity` with the tool's argument names unpacked.
+
+        The canonical getter composes profile + contracts + graph in one
+        response, dispatching by label internally; this only adapts the
+        call shape so it can sit in `_COMPOSED_TOOLS` beside the others.
+        """
+        return await self._investigate(
+            client, args.get("entity_id", ""),
+            depth=int(args.get("depth", 1) or 1),
+            contract_limit=int(args.get("contract_limit", 20) or 20),
+        )
+
     async def execute_tool(
         self, client: httpx.AsyncClient, name: str, args: dict,
     ) -> str:
         """Dispatch a tool call to the GMR API and return its body as text."""
         try:
-            if name == "mcp__gmr__search_entities":
-                r = await client.get(
-                    f"{self._gmr_api_url}/search",
-                    params={"q": args.get("query", ""), "limit": args.get("limit", 5)},
-                )
-            elif name == "mcp__gmr__investigate_entity":
-                # New canonical getter — composes profile + contracts +
-                # graph in one response, dispatching by label internally.
-                return await self._investigate(
-                    client, args.get("entity_id", ""),
-                    depth=int(args.get("depth", 1) or 1),
-                    contract_limit=int(args.get("contract_limit", 20) or 20),
-                )
-            elif name == "mcp__gmr__find_paths":
+            # The tools that COMPOSE a response rather than proxy one
+            # endpoint, dispatched together so the chain below stays a
+            # single shape: call an endpoint, hand back its body.
+            composed = _COMPOSED_TOOLS.get(name)
+            if composed:
+                return await getattr(self, composed)(client, args)
+            if name == "mcp__gmr__find_paths":
                 r = await client.get(
                     f"{self._gmr_api_url}/graph/paths/find",
                     params={
@@ -1298,3 +1376,12 @@ def from_env() -> "ToolRuntime":
     return ToolRuntime(
         gmr_api_url=os.environ.get("GMR_API_INTERNAL", _DEFAULT_GMR_API),
     )
+
+
+#: Tools answered by composing several calls, rather than by proxying one
+#: endpoint. Keyed here so `execute_tool`'s chain has one shape and one
+#: return for all of them.
+_COMPOSED_TOOLS = {
+    "mcp__gmr__search_entities": "_search_entities",
+    "mcp__gmr__investigate_entity": "_investigate_from_args",
+}
