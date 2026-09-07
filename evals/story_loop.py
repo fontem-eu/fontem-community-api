@@ -152,6 +152,8 @@ class Loop:
         #: Index into `calls` where each follow-up turn began,
         #: so the report can show which turn did what.
         self.turn_boundaries: list[int] = []
+        #: How far into `calls` the applier has already gone.
+        self.applied_through: int = 0
 
     async def _api(self, method: str, path: str, **kw):
         return await self._http.request(
@@ -279,9 +281,20 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
     nobody notices is how a run looks better than it was.
     """
     applied = []
-    tiptap = article_doc(await loop.read_document(report_id)) \
-        or {"type": "doc", "content": []}
-    for call in loop.calls:
+    # Only calls made SINCE the last apply. This walked the whole list
+    # every time, so turn 1's proposals were re-applied after turn 2 --
+    # the article got its charts inserted twice, the counts came out
+    # "proposed: 10, applied: 11", and the second save collided with the
+    # first on the revision check.
+    new_calls = loop.calls[loop.applied_through:]
+    loop.applied_through = len(loop.calls)
+    article = await loop.read_document(report_id)
+    tiptap = article_doc(article) or {"type": "doc", "content": []}
+    # The save is concurrency-checked: "a save that does not name its
+    # baseline is refused rather than guessed at". Applying between turns
+    # without naming one earned a 409 and lost the turn's edits.
+    base = article.get("head_revision")
+    for call in new_calls:
         try:
             result = json.loads(call.get("result") or "{}")
         except (ValueError, TypeError):
@@ -317,7 +330,7 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
             tiptap = {**tiptap, "content": blocks}
             applied.append(f"{tool}@{at}")
     if applied:
-        await loop.save_document(report_id, tiptap)
+        await loop.save_document(report_id, tiptap, base_revision=base)
     return applied
 
 
