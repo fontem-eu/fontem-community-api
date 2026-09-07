@@ -103,11 +103,23 @@ class DocOps:
             "body_text": text,
             "body_text_length": len(text),
             "revision": head.id if head else None,
+            # Every edit verb PROPOSES; the user accepts the card in
+            # their editor. So the text a model just wrote is legitimately
+            # absent from here, and saying only "no saved text yet" invites
+            # the reading that the write failed. One run proposed a whole
+            # body, searched it for a marker it had just written, got
+            # "not in the body", re-read the document, found it still
+            # empty -- and proposed the entire body a second time.
             "note": (
-                "This is the user's last SAVED draft. Their editor buffer "
-                "may contain newer unsaved text."
-                if head else
-                "This article has no saved text yet — anything proposed "
-                "here is its first draft."
+                ("This is the user's last SAVED draft. Their editor buffer "
+                 "may contain newer unsaved text."
+                 if head else
+                 "This article has no saved text yet — anything proposed "
+                 "here is its first draft.")
+                + " Edits you propose do NOT appear here: they are shown "
+                  "to the user as cards to accept, and this endpoint "
+                  "returns only saved text. Do not re-propose something "
+                  "you have already proposed this turn — it is pending, "
+                  "not lost."
             ),
         })
