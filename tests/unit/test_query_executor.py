@@ -108,3 +108,49 @@ def test_a_non_json_response_is_reported_plainly(stub):
     stub(lambda _r: httpx.Response(200, text="<html>gateway</html>"))
     result = _run(HttpQueryExecutor(base_url="http://fontem-api").run("sql", "SELECT 1"))
     assert "non-JSON" in result.error
+
+
+# ── outage vs. bad query ──────────────────────────────────────
+#
+# A failed run means two very different things, and the catalogue acts
+# destructively on one of them: validate_query DEMOTES a published query
+# that stops validating. So "the store was down" must never arrive
+# looking like "this query is wrong".
+
+
+def test_an_unreachable_proxy_is_flagged_as_a_store_outage(stub):
+    def handler(_request):
+        raise httpx.ConnectError("connection refused")
+
+    stub(handler)
+    res = _run(HttpQueryExecutor("http://api").run("cypher", "MATCH (n) RETURN n"))
+    assert res.store_unreachable is True
+    assert "could not reach the query proxy" in res.error
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_gateway_statuses_are_store_outages(stub, status):
+    """502/503/504 are the proxy saying the store behind it is gone or
+    too slow. fontem-api answers 503 for a Neo4j
+    ServiceUnavailable/SessionExpired; before that it answered 400 and an
+    outage was indistinguishable from a malformed query."""
+    stub(lambda _r: httpx.Response(status, json={"detail": "store down"}))
+    res = _run(HttpQueryExecutor("http://api").run("cypher", "MATCH (n) RETURN n"))
+    assert res.store_unreachable is True
+
+
+@pytest.mark.parametrize("status", [400, 422])
+def test_client_errors_are_not_store_outages(stub, status):
+    """The carve-out must stay narrow, or a genuinely broken query would
+    stay published forever."""
+    stub(lambda _r: httpx.Response(status, json={"detail": "Invalid input 'RETRUN'"}))
+    res = _run(HttpQueryExecutor("http://api").run("cypher", "MATCH (n) RETRUN n"))
+    assert res.store_unreachable is False
+    assert "RETRUN" in res.error
+
+
+def test_a_successful_run_is_not_an_outage(stub):
+    stub(lambda _r: httpx.Response(200, json={"columns": ["n"], "rows": [[1]]}))
+    res = _run(HttpQueryExecutor("http://api").run("cypher", "MATCH (n) RETURN n"))
+    assert res.store_unreachable is False
+    assert res.error is None

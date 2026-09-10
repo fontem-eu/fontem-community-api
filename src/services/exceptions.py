@@ -34,3 +34,23 @@ class InvalidInput(Exception):
     def __init__(self, message: str = "Invalid input") -> None:
         self.message = message
         super().__init__(message)
+
+
+class StoreUnavailable(Exception):
+    """A dependency the operation needed could not be reached.
+
+    Distinct from InvalidInput on purpose. The caller did nothing wrong
+    and there is nothing for them to fix; the right answer is 503 and a
+    retry, not 400 and an edit.
+
+    It exists because the alternative is worse than an unhelpful error
+    message: validate_query DEMOTES a published query that fails to
+    validate, and that demotion is persisted. Treating an outage as a
+    failed validation un-published three briefings on a single Neo4j
+    OOMKill and left the public landing feed empty after the store
+    recovered.
+    """
+
+    def __init__(self, message: str = "Store unavailable") -> None:
+        self.message = message
+        super().__init__(message)

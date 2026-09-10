@@ -329,3 +329,75 @@ def test_a_query_with_extra_binds_can_be_validated(client, admin, services):
     assert sent["percentile"] == 0.95
     assert sent["reference_since"] == "2025-08-14T00:00:00+00:00"
     assert set(sent) >= {"nuts", "since"}
+
+
+# ── an outage must not un-publish ───────────────────────────────
+#
+# validate_query demotes a published query that stops validating, and
+# the demotion is persisted. On 2026-09-10 a Neo4j OOMKill made every
+# run fail for about a minute; the scheduled re-validation recorded
+# contract_ok=false and dropped three published queries to draft. The
+# briefing they backed disappeared from GET /briefings (which lists only
+# groups with a published query), the public landing feed rendered no
+# briefings section, and five e2e tests failed two hours later. Nothing
+# healed when Neo4j came back, because a demotion is a stored fact.
+
+
+def test_a_store_outage_does_not_demote_a_published_query(client, admin, services):
+    """The regression. An unreachable store produced no verdict about
+    this query, so the published one must stand."""
+    query_id = _create(client).json()["id"]
+    services["query_executor"].push(ok_result(), ok_result())
+    client.post(f"/admin/named-queries/{query_id}/validate", headers=make_headers(ADMIN))
+    client.patch(f"/admin/named-queries/{query_id}", json={"status": "published"},
+                 headers=make_headers(ADMIN))
+
+    services["query_executor"].push(
+        ExecResult(error="Cypher store unavailable: connection refused",
+                   store_unreachable=True))
+    resp = client.post(f"/admin/named-queries/{query_id}/validate",
+                       headers=make_headers(ADMIN))
+    assert resp.status_code == 503, resp.text
+    assert resp.headers.get("Retry-After")
+
+    after = client.get(f"/admin/named-queries/{query_id}",
+                       headers=make_headers(ADMIN)).json()
+    assert after["status"] == "published", "an outage un-published the query"
+    assert after["contract_ok"] is True, "an outage overwrote a real verdict"
+
+
+def test_a_store_outage_leaves_the_briefing_listed(client, admin, services):
+    """The symptom that actually reached readers: a group is listed only
+    while it has a published query, so demoting one empties the feed."""
+    query_id = _create(client).json()["id"]
+    services["query_executor"].push(ok_result(), ok_result())
+    client.post(f"/admin/named-queries/{query_id}/validate", headers=make_headers(ADMIN))
+    client.patch(f"/admin/named-queries/{query_id}", json={"status": "published"},
+                 headers=make_headers(ADMIN))
+    listed_before = [b["slug"] for b in client.get("/briefings").json()]
+
+    services["query_executor"].push(
+        ExecResult(error="could not reach the query proxy", store_unreachable=True))
+    client.post(f"/admin/named-queries/{query_id}/validate", headers=make_headers(ADMIN))
+
+    assert [b["slug"] for b in client.get("/briefings").json()] == listed_before
+
+
+def test_a_real_contract_failure_still_demotes(client, admin, services):
+    """The carve-out stays narrow: a query the store answered and
+    rejected must still stop being offered, or a broken query would be
+    served to subscribers forever."""
+    query_id = _create(client).json()["id"]
+    services["query_executor"].push(ok_result(), ok_result())
+    client.post(f"/admin/named-queries/{query_id}/validate", headers=make_headers(ADMIN))
+    client.patch(f"/admin/named-queries/{query_id}", json={"status": "published"},
+                 headers=make_headers(ADMIN))
+
+    services["query_executor"].push(ExecResult(error="SQL error: no such table"))
+    resp = client.post(f"/admin/named-queries/{query_id}/validate",
+                       headers=make_headers(ADMIN))
+    assert resp.status_code == 200, resp.text
+    after = client.get(f"/admin/named-queries/{query_id}",
+                       headers=make_headers(ADMIN)).json()
+    assert after["status"] == "draft"
+    assert after["contract_ok"] is False
