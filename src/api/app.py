@@ -23,7 +23,13 @@ from src.api.routers import (
 )
 from src.assistant import mock_llm
 from src.assistant import router as assistant_router
-from src.services.exceptions import Conflict, InvalidInput, NotFound, PermissionDenied
+from src.services.exceptions import (
+    Conflict,
+    InvalidInput,
+    NotFound,
+    PermissionDenied,
+    StoreUnavailable,
+)
 
 
 # Route prefixes for the dual-mount rename window. /data-stories
@@ -276,6 +282,18 @@ def build_app(database_url: str | None = None) -> FastAPI:
         # raises (per-user flower cap, etc.). Routers no longer need a
         # per-route try/except: the service raises, this handler maps.
         return JSONResponse(status_code=400, content={"detail": exc.message})
+
+    @application.exception_handler(StoreUnavailable)
+    async def store_unavailable_handler(
+        request: Request, exc: StoreUnavailable,
+    ) -> JSONResponse:
+        # 503, not 400: the caller did nothing wrong and there is nothing
+        # for them to fix. Retry-After tells a scheduled re-validation to
+        # come back rather than record a verdict it never obtained.
+        return JSONResponse(
+            status_code=503, content={"detail": exc.message},
+            headers={"Retry-After": "60"},
+        )
 
     @application.exception_handler(DBAPIError)
     async def dbapi_error_handler(request: Request, exc: DBAPIError) -> JSONResponse:
