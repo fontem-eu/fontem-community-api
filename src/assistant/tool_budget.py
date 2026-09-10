@@ -19,6 +19,7 @@ stayed invisible until a browser drove the real path.
 """
 from __future__ import annotations
 
+import json
 import time
 
 #: Ceiling on a single tool result before it enters the conversation.
@@ -100,6 +101,35 @@ def new_turn_budget(total: int) -> list:
     than guessing.
     """
     return [total, total, time.monotonic()]
+
+
+def attach_pacing(result: str, note: str) -> str:
+    """Add the pacing note to a result without breaking it.
+
+    The note used to be concatenated onto the result string. For the tools
+    that answer with JSON — most of them — that produced
+    ``{...}\n\n[turn so far: ...]``, which is not JSON any more. Anything
+    that parses a tool result then fails on a well-formed payload: the
+    scripted agent ASSIST-23 drives read a complete investigate_entity
+    result, could not parse it, and reported "no contract count" for a
+    company whose count was sitting in the object.
+
+    A JSON object carries the note as a field instead, so the result stays
+    parseable and the model still learns where the turn stands. Prose, and
+    the rare non-object JSON, keep the appended form — there is nowhere to
+    put a field, and text was never the thing that broke.
+    """
+    if not note:
+        return result
+    if result.lstrip().startswith("{"):
+        try:
+            data = json.loads(result)
+        except ValueError:
+            return result + note
+        if isinstance(data, dict):
+            data["turn_status"] = note.strip().strip("[]")
+            return json.dumps(data)
+    return result + note
 
 
 def pacing_note(budget: list, calls_made: int) -> str:

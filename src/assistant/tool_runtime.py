@@ -928,8 +928,9 @@ class ToolRuntime:
                 # one line covers them all — including the ones that answer
                 # with an error, which are exactly when a model most needs
                 # to know how much turn is left.
-                return out + tool_budget.pacing_note(
-                    budget, _calls_so_far(traced)), raw_len
+                return tool_budget.attach_pacing(
+                    out, tool_budget.pacing_note(
+                        budget, _calls_so_far(traced))), raw_len
             except asyncio.TimeoutError:
                 out = json.dumps({
                     "error": (f"{name} timed out after "
