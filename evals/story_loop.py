@@ -367,6 +367,14 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
     return applied
 
 
+#: Verbs whose arguments are the thing being evaluated, not context for it.
+PROPOSAL_VERBS = (
+    "mcp__gmr__replace_body", "mcp__gmr__replace_part",
+    "mcp__gmr__set_title", "mcp__gmr__set_abstract",
+    "mcp__gmr__insert_studio_plot", "mcp__gmr__insert_widget",
+)
+
+
 def report(loop: Loop, meta: dict, applied: list[str], article, projects,
            pre_existing: set | None = None) -> str:
     out = [f"# Assistant story loop — {meta['started']}", ""]
@@ -392,7 +400,15 @@ def report(loop: Loop, meta: dict, applied: list[str], article, projects,
             out.append("")
             out.append(f"--- turn {loop.turn_boundaries.index(i - 1) + 2} ---")
             out.append("")
-        args = json.dumps(c.get("args") or {})[:400]
+        # Proposal args are printed WHOLE. A 400-character cap is right for
+        # a query result and wrong for the edit itself: iteration 7 saved
+        # literal `[[chart 1: ...]]` text into an article and the trace
+        # could not say which replace_body produced it, because every one
+        # of them was cut off mid-prose. What the model proposed IS the
+        # artifact under review.
+        raw_args = c.get("args") or {}
+        full = c["tool"] in PROPOSAL_VERBS
+        args = json.dumps(raw_args) if full else json.dumps(raw_args)[:400]
         res = (c.get("result") or "")[:400].replace("\n", " ")
         out.append(f"{i:>3}. `{c['tool']}`  {args}")
         out.append(f"     -> {res}")
