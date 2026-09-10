@@ -40,9 +40,13 @@ DOC_TOOLS: list[dict] = [
             "name": "mcp__gmr__read_document",
             "description": (
                 "Reads the report this conversation is about: title, "
-                "abstract and body (TipTap document JSON; the prose is in "
-                "the `text` fields). Returns the last SAVED version — the "
-                "user's editor buffer may be newer. Call this BEFORE "
+                "abstract, and the body as PLAIN TEXT (`body_text`) — the "
+                "one representation, and the coordinate space every edit "
+                "verb measures in. A chart appears in it as a "
+                "`[[chart N: label]]` marker, which IS the chart: keep the "
+                "marker to keep the chart, move it to move the chart, leave "
+                "it out to remove the chart. Returns the last SAVED version "
+                "— the user's editor buffer may be newer. Call this BEFORE "
                 "proposing any edit; you cannot revise what you have not "
                 "read."
             ),
@@ -87,7 +91,12 @@ DOC_TOOLS: list[dict] = [
                 "Proposes a replacement for the WHOLE article body, as "
                 "HTML. One card, one review: read the document first, "
                 "produce the complete revised text, and propose it in a "
-                "single call — not paragraph by paragraph."
+                "single call — not paragraph by paragraph. Carry every "
+                "`[[chart N: ...]]` marker from body_text into the HTML you "
+                "send, or those charts are removed: HTML cannot express a "
+                "chart, and the marker is the only way to say one is there. "
+                "To change a passage rather than the whole article, prefer "
+                "replace_part."
             ),
             "parameters": {
                 "type": "object",

@@ -1,8 +1,8 @@
 """DocOps against real rows, through the real service, with real permissions.
 
 The unit tests mock ReportService; these do not. What only this layer can
-prove: the report the tool reads is the one Postgres holds, the sections
-arrive in order with their stored content, and the permission model is the
+prove: the report the tool reads is the one Postgres holds, its body
+arrives in order with the stored content, and the permission model is the
 service's own — another user's DocOps gets a refusal string, not data,
 because the tool inherits STORIES_READ instead of implementing anything.
 
@@ -68,7 +68,7 @@ def test_read_document_returns_what_postgres_holds(client, user_id):
     assert "error" not in body, body.get("error")
     assert body["title"] == "RU spending draft"
     assert body["abstract"] == "Before and after sanctions."
-    assert "12,874,355.33" in body["sections"]
+    assert "12,874,355.33" in body["body_text"]
     assert "SAVED" in body["note"]
 
 
@@ -116,6 +116,6 @@ def test_the_agent_reads_the_latest_saved_document(client, user_id):
     client.post(f"/reports/{report['id']}/reviews/{mr['id']}/publish",
                 headers=h)
 
-    body = _read(client, user_id, report["id"])["sections"]
+    body = _read(client, user_id, report["id"])["body_text"]
     assert "third" in body
     assert "first" not in body and "second" not in body

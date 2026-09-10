@@ -43,11 +43,54 @@ is the honest reading of "replace this passage".
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 #: What joins two blocks in the coordinate space. A blank line, because
 #: that is what a reader sees and what the model will count.
 SEPARATOR = "\n\n"
+
+
+#: How a chart appears in the text the model reads and writes.
+#:
+#: A widget node has no `content`, so it used to contribute NOTHING to
+#: body_text: the model read its own article and saw a blank gap where its
+#: chart was. Then it rewrote the body as HTML -- which cannot express a
+#: widget's data_params -- and the chart was silently dropped. It is not a
+#: mistake the model could avoid; the chart did not exist in anything it
+#: could see or say.
+#:
+#: The number is what resolves the marker back to a widget, and it is the
+#: 1-based position of that widget in the document AS READ. That is enough,
+#: because the only cycle that matters is one read followed by one rewrite.
+#: The label after it is for the model's benefit and is never parsed --
+#: nothing else in a stored widget names it (there is no plot id and no
+#: title in the node), so the source name it chose when building the plot
+#: is the one human handle available.
+#:
+#: The model reached for exactly this on its own once, writing
+#: `[[SECTOR_CHART]]` into a draft and then searching for it.
+MARKER_RE = re.compile(r"\[\[chart (\d+)(?::[^\]]*)?\]\]")
+
+
+def marker_for(index: int, block: dict) -> str:
+    """The text that stands in for one widget, 1-based `index`."""
+    attrs = block.get("attrs") or {}
+    label = attrs.get("widget_type") or "chart"
+    sources = (attrs.get("data_params") or {}).get("sources") or []
+    if sources and isinstance(sources[0], dict) and sources[0].get("name"):
+        label = str(sources[0]["name"])
+    return f"[[chart {index}: {label}]]"
+
+
+def _widget_markers(blocks: list[dict]) -> dict[int, str]:
+    """Marker text for each block index that holds a widget."""
+    out, seen = {}, 0
+    for i, block in enumerate(blocks):
+        if block.get("type") == "widget":
+            seen += 1
+            out[i] = marker_for(seen, block)
+    return out
 
 
 def _text_of(node: Any) -> str:
@@ -94,21 +137,31 @@ def _top_blocks(doc: Any) -> list[dict]:
     return []
 
 
+def _rendered(blocks: list[dict]) -> list[str]:
+    """Each block as it appears in body_text -- widgets as their marker."""
+    markers = _widget_markers(blocks)
+    return [markers.get(i) or _text_of(b) for i, b in enumerate(blocks)]
+
+
 def block_spans(doc: Any) -> list[tuple[int, int]]:
     """(start, end) of each top-level block, in body_text coordinates."""
     spans, cursor = [], 0
-    for i, block in enumerate(_top_blocks(doc)):
+    for i, text in enumerate(_rendered(_top_blocks(doc))):
         if i:
             cursor += len(SEPARATOR)
-        text = _text_of(block)
         spans.append((cursor, cursor + len(text)))
         cursor += len(text)
     return spans
 
 
 def body_text(doc: Any) -> str:
-    """The article as the model addresses it."""
-    return SEPARATOR.join(_text_of(b) for b in _top_blocks(doc))
+    """The article as the model addresses it, charts included.
+
+    A chart is a `[[chart N: label]]` marker rather than a blank gap, so
+    the model can see where its charts are, keep them through a rewrite,
+    move them, or delete one on purpose. See MARKER_RE.
+    """
+    return SEPARATOR.join(_rendered(_top_blocks(doc)))
 
 
 def find(doc: Any, needle: str) -> dict:
@@ -188,6 +241,48 @@ def _splice_in_block(block: dict, start: int, end: int, new_text: str) -> dict:
     return {**block, "content": out}
 
 
+def _chart_cut_by(blocks: list[dict], spans: list[tuple[int, int]],
+                  touched: list[int], start: int, end: int) -> dict | None:
+    """Refuse a span that would splice half a chart marker.
+
+    A chart is atomic. Its marker is the whole of its block's text, so a
+    span starting or ending INSIDE one leaves `[[chart 1: by_c` in the
+    article -- text that renders as nothing and restores as nothing. A span
+    that CONTAINS the marker whole is allowed: "replace this passage, chart
+    and all" is a thing the model may mean, and is how a chart is deleted.
+    """
+    for i in touched:
+        if blocks[i].get("type") != "widget":
+            continue
+        block_start, block_end = spans[i]
+        if start > block_start or end < block_end:
+            return {"error": (
+                f"span {start}..{end} cuts through the chart at "
+                f"{block_start}..{block_end}. A chart is atomic: quote a "
+                f"span that excludes it, or one that covers its whole "
+                f"marker to replace the chart with what you send.")}
+    return None
+
+
+def _one_block_replaced(block: dict, span: tuple[int, int],
+                        start: int, end: int, new_text: str) -> list[dict]:
+    """The blocks that replace a single touched block.
+
+    A widget here is a chart whose whole marker the span covers -- a
+    partial cut was refused already -- so it becomes the replacement text,
+    or nothing at all when that text is empty. Deleting a chart on purpose
+    is a thing markers made expressible; before them there was no way to
+    say it.
+    """
+    if block.get("type") == "widget":
+        return _paragraphs(new_text)
+    spliced = _splice_in_block(block, start - span[0], end - span[0], new_text)
+    # A block emptied by the edit goes; leaving it renders a stray blank
+    # paragraph the user then has to delete by hand.
+    keep = _text_of(spliced) or spliced.get("type") != "paragraph"
+    return [spliced] if keep else []
+
+
 def replace_span(doc: Any, start: int, end: int, new_text: str) -> dict:
     """The document with start..end of body_text replaced.
 
@@ -217,20 +312,17 @@ def replace_span(doc: Any, start: int, end: int, new_text: str) -> dict:
         rebuilt = blocks[:after] + _paragraphs(new_text) + blocks[after:]
         return _as_doc(doc, rebuilt)
 
+    cut = _chart_cut_by(blocks, spans, touched, start, end)
+    if cut:
+        return cut
+
     first, last = touched[0], touched[-1]
     if first == last:
-        block_start = spans[first][0]
-        spliced = _splice_in_block(
-            blocks[first], start - block_start, end - block_start, new_text)
-        # A block emptied by the edit goes; leaving it renders a stray
-        # blank paragraph the user then has to delete by hand.
-        keep = _text_of(spliced) or spliced.get("type") != "paragraph"
-        rebuilt = (blocks[:first] + ([spliced] if keep else [])
-                   + blocks[last + 1:])
-        return _as_doc(doc, rebuilt)
-
-    rebuilt = blocks[:first] + _paragraphs(new_text) + blocks[last + 1:]
-    return _as_doc(doc, rebuilt)
+        middle = _one_block_replaced(blocks[first], spans[first],
+                                     start, end, new_text)
+    else:
+        middle = _paragraphs(new_text)
+    return _as_doc(doc, blocks[:first] + middle + blocks[last + 1:])
 
 
 def block_index_at(doc: Any, char: int) -> int:
@@ -302,3 +394,66 @@ def block_after_anchor(doc: Any, anchor: str) -> int | None:
         if needle in _normalised(_text_of(block)):
             return i + 1
     return None
+
+
+def widgets_of(doc: Any) -> list[dict]:
+    """Every widget node in the document, in the order body_text numbers them."""
+    return [b for b in _top_blocks(doc) if b.get("type") == "widget"]
+
+
+def _split_on_markers(block: dict, widgets: list[dict]) -> list[dict]:
+    """One incoming text block, with its markers turned back into widgets.
+
+    A marker normally arrives as a paragraph of its own, because that is how
+    body_text rendered it. It is split out of surrounding prose anyway: a
+    model that writes the marker mid-sentence should get its chart, not a
+    paragraph with `[[chart 1: ...]]` printed in it.
+
+    A marker naming a chart that does not exist is dropped rather than left
+    as literal text. It means the model asked for a chart the document has
+    not got, and printing the brackets into a published article is the one
+    outcome nobody wants.
+    """
+    text = _text_of(block)
+    if not MARKER_RE.search(text):
+        return [block]
+    out: list[dict] = []
+    cursor = 0
+    for match in MARKER_RE.finditer(text):
+        before = text[cursor:match.start()].strip()
+        if before:
+            out.append({"type": "paragraph",
+                        "content": [{"type": "text", "text": before}]})
+        index = int(match.group(1)) - 1
+        if 0 <= index < len(widgets):
+            out.append(widgets[index])
+        cursor = match.end()
+    tail = text[cursor:].strip()
+    if tail:
+        out.append({"type": "paragraph", "content": [{"type": "text", "text": tail}]})
+    return out
+
+
+def restore_widgets(blocks: list[dict], previous: Any) -> list[dict]:
+    """Put the charts back into a body the model rewrote as text.
+
+    `replace_body` speaks HTML, and HTML cannot carry a widget's
+    data_params -- so before markers existed, every whole-body rewrite
+    silently deleted the charts already in the article. Iteration 6 lost
+    one that way: three charts made, two in the article.
+
+    The nodes come from the document being replaced, not from a re-fetch:
+    the widget the marker names is right there, and reusing it verbatim
+    keeps the chart identical rather than merely equivalent.
+
+    A marker the model dropped stays dropped. That is the other half of
+    what markers buy -- deleting a chart on purpose, which it could not
+    express at all before.
+    """
+    widgets = widgets_of(previous)
+    if not widgets:
+        return blocks
+    out: list[dict] = []
+    for block in blocks:
+        out.extend(_split_on_markers(block, widgets))
+    return out
