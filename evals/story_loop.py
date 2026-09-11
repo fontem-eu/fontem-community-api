@@ -346,6 +346,12 @@ async def apply_proposals(loop: Loop, report_id: str) -> list[str]:
         elif tool == "mcp__gmr__insert_studio_plot":
             node = {"type": "widget", "attrs": {
                 "widget_type": "pipeline", "schema_version": 1,
+                # The plot's own name, so the chart can say what it is when
+                # the model reads the article back. Without it a marker
+                # falls back to the source query's name, and a project that
+                # runs several charts off one base query -- the good way to
+                # build one -- labels every chart identically.
+                "title": result.get("plot_name"),
                 "data_params": result.get("data_params"),
                 "ui_params": result.get("ui_params")}}
             blocks = list(tiptap.get("content") or [])

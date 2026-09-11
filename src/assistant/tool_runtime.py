@@ -1198,6 +1198,14 @@ class ToolRuntime:
             "plot_name": recipe["name"],
             "data_params": recipe["data_params"],
             "ui_params": recipe["ui_params"],
+            # How to refer to this chart in prose, NOW, without waiting for
+            # the user to accept the card. A model placing several charts
+            # in one turn cannot quote a number for them -- they are not in
+            # the saved document yet, so read_document cannot count them --
+            # and one that wrote the body first ended up describing a chart
+            # it never managed to insert. The label resolves on its own,
+            # so this marker works before and after the card is accepted.
+            "marker": f"[[chart: {recipe['name']}]]",
         })
 
     async def _validate_widget(
