@@ -11,6 +11,7 @@ minimum that makes a query safe to put on a schedule and render as a feed:
   title      plain language               -> RSS <title>
   link       absolute URL to the record   -> RSS <link>
   summary    optional                     -> RSS <description>
+  facets     optional, a map              -> the card's structured row
 
 ``rank_value`` is what makes a feed *notable* rather than merely *recent*.
 A subscriber asks for a volume — "about ten a week for my region" — and the
@@ -55,7 +56,10 @@ from src.domain.named_query import ContractCheck, LANGS, NamedQuery
 # The three axes a feed filters and orders on are nuts, rank_value and
 # item_time; item_id, title and link are what RSS needs to render an item.
 REQUIRED_COLUMNS = ("item_id", "item_time", "nuts", "rank_value", "title", "link")
-OPTIONAL_COLUMNS = ("summary",)
+# `facets` is a map of structured detail for the card — who, how much, to
+# whom, and any integrity flags — emitted alongside the prose `title` rather
+# than instead of it: Atom readers get the sentence, the card gets the parts.
+OPTIONAL_COLUMNS = ("summary", "facets")
 
 # The two standard binds. Named without punctuation here; the per-engine
 # placeholder syntax is applied by _bind_pattern.

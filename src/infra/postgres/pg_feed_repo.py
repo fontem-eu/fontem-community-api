@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+
 from uuid import uuid4
 
+import sqlalchemy as sa
+
 from sqlalchemy import delete, select, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +28,7 @@ from src.repositories.feed_repository import FeedRepository
 # which would only match exact codes.
 _RANK_SQL = text("""
 SELECT id, query_id, item_id, item_time, nuts, rank_value, title, link, summary,
-       first_seen_at
+       facets, first_seen_at
 FROM (
   SELECT fi.*,
          row_number() OVER (
@@ -62,6 +66,7 @@ class PgFeedRepository(FeedRepository):
             item_time=row.item_time, nuts=list(row.nuts or []),
             rank_value=float(row.rank_value) if row.rank_value is not None else None,
             title=row.title, link=row.link, summary=row.summary,
+            facets=dict(row.facets or {}),
             first_seen_at=row.first_seen_at,
         )
 
@@ -79,18 +84,58 @@ class PgFeedRepository(FeedRepository):
             "title": item.title,
             "link": item.link,
             "summary": item.summary,
+            # None, not {} — an empty object would claim the query emitted
+            # facets and found nothing, which is a different fact.
+            "facets": item.facets or None,
             "first_seen_at": now,
         } for item in items]
 
-        # DO NOTHING, deliberately. An item we have already seen keeps its
-        # original first_seen_at — that column is the system's only ingestion
+        # Insert stays DO NOTHING: an item we have already seen keeps its
+        # original first_seen_at, which is the system's only ingestion
         # timestamp, and one that moves on every re-scan is not a timestamp.
+        # rowcount therefore still means "newly discovered", which is what
+        # FeedRun.items_new reports.
         stmt = pg_insert(FeedItemModel).values(payload).on_conflict_do_nothing(
             constraint="feed_items_query_item_unique",
         )
         result = await self._session.execute(stmt)
+        inserted = int(result.rowcount or 0)
+
+        # Then fill facets in, and only where there are none.
+        #
+        # Without this, a query that grows a facets map would leave every
+        # row it has already emitted with NULL for ever, and their cards
+        # would stay unstructured until each item aged out — on a weekly
+        # feed, weeks of a half-applied change. This touches nothing else:
+        # first_seen_at is not in the SET, and the NULL test means an item
+        # that already has facets is never rewritten, so a query that
+        # starts emitting worse facets cannot overwrite better ones.
+        #
+        # Deliberately not counted as new. A filled-in facet is not a
+        # discovery, and items_new is what a human reads to see what a scan
+        # found.
+        with_facets = [p for p in payload if p["facets"] is not None]
+        if with_facets:
+            await self._session.execute(
+                # `.__table__`, not the mapped class: handing the ORM a
+                # list of parameter dicts puts it on its bulk-update-by-
+                # primary-key path, which wants an id per row and refuses
+                # a WHERE of its own. This is a plain Core executemany.
+                sa.update(FeedItemModel.__table__)
+                .where(
+                    FeedItemModel.__table__.c.query_id == sa.bindparam("b_query_id"),
+                    FeedItemModel.__table__.c.item_id == sa.bindparam("b_item_id"),
+                    FeedItemModel.__table__.c.facets.is_(None),
+                )
+                # Typed explicitly: an untyped bindparam hands asyncpg a dict
+                # with no JSONB adapter behind it.
+                .values(facets=sa.bindparam("b_facets", type_=JSONB)),
+                [{"b_query_id": p["query_id"], "b_item_id": p["item_id"],
+                  "b_facets": p["facets"]} for p in with_facets],
+            )
+
         await self._session.commit()
-        return int(result.rowcount or 0)
+        return inserted
 
     async def rank_items(
         self, group_id: str, nuts: list[str], volume_per_week: int, weeks: int,

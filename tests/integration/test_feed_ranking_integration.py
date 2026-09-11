@@ -186,3 +186,84 @@ def test_a_null_rank_value_sorts_last_but_is_not_dropped(repo):
     ]))
     got = [i.item_id for i in run(repository.rank_items(GROUP_ID, ["AT"], 50, 4))]
     assert "unranked" in got and "ranked" in got
+
+
+class TestFacetsBackfill:
+    """Filling facets into rows that predate them, against real Postgres.
+
+    The insert is ON CONFLICT DO NOTHING so `first_seen_at` cannot move.
+    That alone would leave every already-emitted row without facets for
+    ever, so a second statement fills them — and only where there are
+    none. The three properties below are what make that safe.
+    """
+
+    def test_a_row_without_facets_gains_them_on_the_next_scan(self, repo):
+        run, repository, _ = repo
+        before = _item("facet-1", 1, ["PT"], 10.0)
+        run(repository.upsert_items([before]))
+
+        after = _item("facet-1", 1, ["PT"], 10.0)
+        after.facets = {"buyer": "IP", "red_flags": 1}
+        run(repository.upsert_items([after]))
+
+        items = run(repository.rank_items(GROUP_ID, ["PT"], 50, 4))
+        got = next(i for i in items if i.item_id == "facet-1")
+        assert got.facets == {"buyer": "IP", "red_flags": 1}
+
+    def test_first_seen_at_does_not_move(self, repo):
+        """The whole reason the insert is DO NOTHING."""
+        run, repository, session = repo
+        first = _item("facet-2", 1, ["PT"], 10.0)
+        first.facets = {"buyer": "A"}
+        run(repository.upsert_items([first]))
+        original = run(session.execute(sa.text(
+            "SELECT first_seen_at FROM feed_items WHERE item_id='facet-2'"))).scalar_one()
+
+        again = _item("facet-2", 1, ["PT"], 10.0)
+        again.facets = {"buyer": "B"}
+        run(repository.upsert_items([again]))
+        later = run(session.execute(sa.text(
+            "SELECT first_seen_at FROM feed_items WHERE item_id='facet-2'"))).scalar_one()
+        assert later == original
+
+    def test_existing_facets_are_never_overwritten(self, repo):
+        """A query that starts emitting worse facets must not clobber
+        better ones — the fill is for NULLs, not for updates."""
+        run, repository, _ = repo
+        good = _item("facet-3", 1, ["PT"], 10.0)
+        good.facets = {"buyer": "the real buyer"}
+        run(repository.upsert_items([good]))
+
+        worse = _item("facet-3", 1, ["PT"], 10.0)
+        worse.facets = {"buyer": "?"}
+        run(repository.upsert_items([worse]))
+
+        items = run(repository.rank_items(GROUP_ID, ["PT"], 50, 4))
+        got = next(i for i in items if i.item_id == "facet-3")
+        assert got.facets == {"buyer": "the real buyer"}
+
+    def test_a_fill_is_not_counted_as_a_discovery(self, repo):
+        """items_new is what a human reads to see what a scan found."""
+        run, repository, _ = repo
+        plain = _item("facet-4", 1, ["PT"], 10.0)
+        assert run(repository.upsert_items([plain])) == 1
+
+        filled = _item("facet-4", 1, ["PT"], 10.0)
+        filled.facets = {"buyer": "IP"}
+        assert run(repository.upsert_items([filled])) == 0
+
+    def test_absent_facets_are_sql_null_not_json_null(self, repo):
+        """The distinction Python cannot see.
+
+        SQLAlchemy's JSONB maps a Python None to the JSON value `null`
+        unless the column says `none_as_null`. Both read back as None, so
+        the application cannot tell them apart — but `facets IS NULL` is
+        false for JSON null, and the fill above then matches nothing at
+        all, for ever, with no error anywhere.
+        """
+        run, repository, session = repo
+        run(repository.upsert_items([_item("facet-5", 1, ["PT"], 10.0)]))
+        is_null, kind = run(session.execute(sa.text(
+            "SELECT facets IS NULL, jsonb_typeof(facets) "
+            "FROM feed_items WHERE item_id='facet-5'"))).one()
+        assert is_null is True, f"stored as JSON {kind!r}, not SQL NULL"

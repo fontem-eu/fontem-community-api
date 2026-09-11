@@ -1184,6 +1184,15 @@ class FeedItemModel(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
     link: Mapped[str] = mapped_column(Text, nullable=False, default="")
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: Structured detail for the card. Nullable, and `none_as_null` is not
+    #: optional here: without it SQLAlchemy stores a Python None as the JSON
+    #: value `null` rather than SQL NULL. Both read back as None in Python,
+    #: so the difference is invisible from the application — but `facets IS
+    #: NULL` is then false, and the fill in `upsert_items` silently matches
+    #: nothing.
+    facets: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True,
+    )
     first_seen_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=_utcnow,
     )

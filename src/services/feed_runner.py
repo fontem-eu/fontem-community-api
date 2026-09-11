@@ -180,6 +180,7 @@ class FeedRunner:
                          query.slug, cols)
             return
         summary_at = cols.index("summary") if "summary" in cols else None
+        facets_at = cols.index("facets") if "facets" in cols else None
 
         for row in result.rows or []:
             item_time = _as_datetime(row[idx["item_time"]])
@@ -194,7 +195,33 @@ class FeedRunner:
                 title=str(row[idx["title"]] or "")[:1000],
                 link=str(row[idx["link"]] or "")[:2000],
                 summary=str(row[summary_at] or "")[:4000] if summary_at is not None else "",
+                facets=_as_facets(row[facets_at]) if facets_at is not None else {},
             )
+
+
+#: A cap on the facets map, so a query cannot push unbounded text into
+#: every row. Generous next to the parts a card actually draws (a buyer, a
+#: few supplier names, a handful of numbers) and small enough that a runaway
+#: query is rejected rather than materialised a thousand times over.
+_MAX_FACETS_CHARS = 2_000
+
+
+def _as_facets(value) -> dict:
+    """The query's facets map, or {} for anything that is not one.
+
+    A query is curated but still authored by hand, so this is lenient on
+    purpose: a scalar, a null or an oversized blob costs the card its
+    structured row and nothing else. The prose title is always there to
+    fall back to, which is why none of these cases is worth failing the
+    whole item over.
+    """
+    if not isinstance(value, dict):
+        return {}
+    out = {k: v for k, v in value.items() if v is not None}
+    if len(str(out)) > _MAX_FACETS_CHARS:
+        logger.warning("facets map over {} chars; dropped", _MAX_FACETS_CHARS)
+        return {}
+    return out
 
 
 def _as_datetime(value) -> datetime | None:
