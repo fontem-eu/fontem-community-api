@@ -46,6 +46,20 @@ class FeedItem:  # pylint: disable=too-many-instance-attributes
     title: str = ""
     link: str = ""
     summary: str = ""
+    #: Structured detail the card renders instead of re-parsing `title`.
+    #:
+    #: `title` is a sentence a query composed ("A awarded X EUR to B and 1
+    #: other"). It reads fine in an Atom reader and badly on a card, where
+    #: the useful parts — who, how much, to whom, and whether the award
+    #: carries integrity flags — each want their own place in the layout.
+    #: Splitting a sentence back apart in the browser would be guesswork
+    #: and would break the moment a query is translated, so the query emits
+    #: the parts and this carries them.
+    #:
+    #: Optional by design: rows written before a query grew facets keep
+    #: none, and upsert is DO NOTHING, so they never gain them. Anything
+    #: reading this must render without it.
+    facets: dict = field(default_factory=dict)
     first_seen_at: datetime | None = None
 
 
