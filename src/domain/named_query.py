@@ -70,7 +70,10 @@ class ContractCheck:
 
 
 @dataclass
-class ContractReport:
+class ContractReport:  # pylint: disable=too-many-instance-attributes
+    # A report is a value bag by design: every field is one thing the
+    # reviewer needs to see, and splitting them across two objects would
+    # only move the same eight values behind an extra hop.
     """The stored outcome of validating a named query against the contract.
 
     Carries the cost signal (``duration_ms`` / ``row_count``) alongside the
@@ -85,6 +88,11 @@ class ContractReport:
     duration_ms: int = 0
     error: str | None = None
     checked_at: datetime | None = None
+    #: The run never reached the store, so `subscribable` here is an
+    #: artefact of the outage rather than a judgement about the query.
+    #: Not persisted with the report -- it describes this attempt, not
+    #: the query -- and callers must not act on the verdict when set.
+    store_unreachable: bool = False
 
     def failures(self) -> list[ContractCheck]:
         return [c for c in self.checks if not c.passed and not c.waived]

@@ -41,6 +41,11 @@ class ExecResult:
     truncated: bool = False
     duration_ms: int = 0
     error: str | None = None
+    #: The run never reached the store, so its failure says nothing about
+    #: the query. Callers that act on a failed run -- notably the
+    #: catalogue, which DEMOTES a published query that stops validating
+    #: -- must treat this as "no verdict", not as "not subscribable".
+    store_unreachable: bool = False
 
 
 class QueryExecutor(Protocol):
@@ -73,11 +78,20 @@ class HttpQueryExecutor:
                 resp = await client.post(f"{self._base}{path}", json=payload)
         except httpx.HTTPError as exc:
             elapsed = int((time.monotonic() - started) * 1000)
-            return ExecResult(duration_ms=elapsed, error=f"could not reach the query proxy: {exc}")
+            return ExecResult(duration_ms=elapsed, store_unreachable=True,
+                              error=f"could not reach the query proxy: {exc}")
         elapsed = int((time.monotonic() - started) * 1000)
 
         if resp.status_code >= 400:
-            return ExecResult(duration_ms=elapsed, error=_detail(resp))
+            # 502/503/504 are the proxy saying the store behind it is gone
+            # or too slow, not that the query is wrong. fontem-api answers
+            # 503 for a Neo4j ServiceUnavailable/SessionExpired
+            # (fontem-api#436); before that it answered 400 and an outage
+            # was indistinguishable from a malformed query.
+            return ExecResult(
+                duration_ms=elapsed, error=_detail(resp),
+                store_unreachable=resp.status_code in (502, 503, 504),
+            )
         try:
             body = resp.json()
         except ValueError:

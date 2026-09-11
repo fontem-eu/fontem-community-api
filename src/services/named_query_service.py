@@ -34,7 +34,12 @@ from src.domain.named_query import (
 from src.repositories.named_query_repository import NamedQueryRepository
 from src.services import feed_contract
 from src.services.authz import Action, AuthorizationService
-from src.services.exceptions import Conflict, InvalidInput, NotFound
+from src.services.exceptions import (
+    Conflict,
+    InvalidInput,
+    NotFound,
+    StoreUnavailable,
+)
 from src.services.query_executor import QueryExecutor
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -200,6 +205,20 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
             raise NotFound(f"Named query {query_id} not found")
 
         report = await self._build_report(query)
+        if report.store_unreachable:
+            # The run never reached the store, so it produced no verdict
+            # about this query -- keep the last real one and change
+            # nothing. Writing contract_ok=False here would demote a
+            # perfectly good published query on an outage, and the
+            # demotion is persisted, so it does not heal when the store
+            # comes back. One Neo4j OOMKill un-published three briefings
+            # and emptied the public landing feed exactly that way; the
+            # only symptom was five e2e failures two hours later.
+            raise StoreUnavailable(
+                "The query store is unreachable, so this query could not "
+                "be validated. Its previous verdict is unchanged; try "
+                "again once the store is back."
+            )
         query.contract_report = report
         query.contract_ok = report.subscribable
         query.validated_at = report.checked_at
@@ -240,6 +259,7 @@ class NamedQueryService:  # pylint: disable=too-many-public-methods
             duration_ms=first.duration_ms,
             error=first.error,
             checked_at=datetime.now(timezone.utc),
+            store_unreachable=first.store_unreachable,
         )
 
     async def preview(
