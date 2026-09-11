@@ -45,7 +45,10 @@ DOC_TOOLS: list[dict] = [
                 "verb measures in. A chart appears in it as a "
                 "`[[chart N: label]]` marker, which IS the chart: keep the "
                 "marker to keep the chart, move it to move the chart, leave "
-                "it out to remove the chart. Returns the last SAVED version "
+                "it out to remove the chart. The label names that chart, so "
+                "two charts built over the same query still read "
+                "differently — check it before assuming which chart is "
+                "which. Returns the last SAVED version "
                 "— the user's editor buffer may be newer. Call this BEFORE "
                 "proposing any edit; you cannot revise what you have not "
                 "read."
@@ -172,7 +175,10 @@ DOC_TOOLS: list[dict] = [
                 "when a reader opens the article, so it follows the data "
                 "rather than freezing a picture of it. Validated server-side: "
                 "the plot must exist, belong to you, and have a chart "
-                "configured. Renders as an Apply/Reject card."
+                "configured. Renders as an Apply/Reject card. The result "
+                "carries a `marker` for this chart: put THAT in any "
+                "replace_body you write in the same turn, because the chart "
+                "is not in the saved document yet and has no number to quote."
             ),
             "parameters": {
                 "type": "object",

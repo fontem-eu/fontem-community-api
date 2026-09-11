@@ -70,17 +70,61 @@ SEPARATOR = "\n\n"
 #:
 #: The model reached for exactly this on its own once, writing
 #: `[[SECTOR_CHART]]` into a draft and then searching for it.
-MARKER_RE = re.compile(r"\[\[chart (\d+)(?::[^\]]*)?\]\]")
+#: The number is optional. A model writing prose about a chart it is
+#: inserting in the SAME turn has no number to quote -- the chart is not in
+#: the saved document yet -- so `[[chart: <label>]]` resolves by label
+#: instead. It reached for exactly that on its own, writing
+#: `[[chart: €M by country]]` in a draft, and the numbered form was the only
+#: one that worked.
+#: No `\s*` before the label: `\s` is a subset of `[^\]]`, so the two
+#: compete for the same leading spaces and a long run of them with no
+#: closing bracket costs polynomial time to fail (SonarQube python:S5852).
+#: The label is stripped in code instead, which it already was.
+MARKER_RE = re.compile(r"\[\[chart ?(\d+)?(?::([^\]]*))?\]\]")
+
+
+def label_for(block: dict) -> str:
+    """What to call this chart, in the words most likely to identify it.
+
+    Ordered by how much it actually distinguishes one chart from another:
+
+    1. The plot's own name, recorded on the widget when it was inserted.
+       "Number of EU contracts awarded to Israeli companies, by buyer
+       country" cannot be mistaken for anything else.
+    2. Its axes. `contracts by buyer_country` and
+       `millions_eur by buyer_country` are different charts and read as
+       different charts, which is the whole job.
+    3. The source query's name -- the old behaviour, and the reason this
+       function exists. A well-built project runs several charts off ONE
+       base query, so every marker in a three-chart article read
+       `[[chart N: il_contracts]]`. That labelled nothing.
+
+    The cost of (3) was not merely a wasted word. Asked to place four
+    charts, a model carried a belief from earlier in the conversation about
+    which chart the article already held, read a marker that was compatible
+    with every chart in the project, and took it as confirmation. It
+    inserted a duplicate of the chart already there and never inserted the
+    one it thought was there -- leaving prose that describes a chart the
+    article does not contain. A label that names the axes would have
+    contradicted it outright.
+    """
+    attrs = block.get("attrs") or {}
+    title = attrs.get("title")
+    if title:
+        return str(title)
+    ui = attrs.get("ui_params") or {}
+    x, y = ui.get("x"), ui.get("y")
+    if x and y:
+        return f"{y} by {x}"
+    sources = (attrs.get("data_params") or {}).get("sources") or []
+    if sources and isinstance(sources[0], dict) and sources[0].get("name"):
+        return str(sources[0]["name"])
+    return str(attrs.get("widget_type") or "chart")
 
 
 def marker_for(index: int, block: dict) -> str:
     """The text that stands in for one widget, 1-based `index`."""
-    attrs = block.get("attrs") or {}
-    label = attrs.get("widget_type") or "chart"
-    sources = (attrs.get("data_params") or {}).get("sources") or []
-    if sources and isinstance(sources[0], dict) and sources[0].get("name"):
-        label = str(sources[0]["name"])
-    return f"[[chart {index}: {label}]]"
+    return f"[[chart {index}: {label_for(block)}]]"
 
 
 def _widget_markers(blocks: list[dict]) -> dict[int, str]:
@@ -424,14 +468,44 @@ def _split_on_markers(block: dict, widgets: list[dict]) -> list[dict]:
         if before:
             out.append({"type": "paragraph",
                         "content": [{"type": "text", "text": before}]})
-        index = int(match.group(1)) - 1
-        if 0 <= index < len(widgets):
-            out.append(widgets[index])
+        widget = _widget_named(match, widgets)
+        if widget is not None:
+            out.append(widget)
         cursor = match.end()
     tail = text[cursor:].strip()
     if tail:
         out.append({"type": "paragraph", "content": [{"type": "text", "text": tail}]})
     return out
+
+
+def _widget_named(match, widgets: list[dict]) -> dict | None:
+    """The widget a marker refers to, by number or by label.
+
+    The number is the position of that chart in the document as read, and
+    it is what a model quotes back from body_text. The LABEL is what it has
+    when the chart is not in the document yet -- it cannot count a chart it
+    is inserting in the same turn, and it should not have to wait a round
+    trip to describe one.
+
+    Number first, because a numbered marker was read from a real document
+    and says exactly which chart. Label second, matched the way anchors
+    are, so spacing and case do not decide whether a chart survives.
+    """
+    number, label = match.group(1), (match.group(2) or "").strip()
+    if number:
+        index = int(number) - 1
+        if 0 <= index < len(widgets):
+            return widgets[index]
+        # A number past the end is a chart this document has not got. Fall
+        # through to the label rather than dropping outright: the model may
+        # have numbered a chart it is inserting this turn.
+    if not label:
+        return None
+    wanted = _normalised(label)
+    for widget in widgets:
+        if _normalised(label_for(widget)) == wanted:
+            return widget
+    return None
 
 
 def restore_widgets(blocks: list[dict], previous: Any) -> list[dict]:
