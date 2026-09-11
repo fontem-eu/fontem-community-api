@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from importlib import import_module
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -283,7 +284,6 @@ class TestMigration024:
             "('44444444-4444-4444-4444-444444444444','public-contracts','P','cypher','published',"
             " 'MATCH (c:Contract) RETURN c.k AS item_id')")))
         run(session.commit())
-        from importlib import import_module
         m = import_module("migrations.versions.024_named_queries_emit_facets")
         run(session.execute(sa.text(
             "UPDATE named_queries SET query = :q WHERE slug = 'public-contracts' "
@@ -304,7 +304,6 @@ class TestMigration024:
             "('55555555-5555-5555-5555-555555555555','eu-lobbying','L','cypher','published', :q)"),
             {"q": edited}))
         run(session.commit())
-        from importlib import import_module
         m = import_module("migrations.versions.024_named_queries_emit_facets")
         run(session.execute(sa.text(
             "UPDATE named_queries SET query = :q WHERE slug = 'eu-lobbying' "
