@@ -408,6 +408,20 @@ class PydanticAIProxyClient:
                 else self._delta_text(ev))
         if not text:
             return []
+        if self._is_thinking(ev, kind):
+            # Reasoning, not the answer. A ThinkingPart carries the SAME
+            # fields as a TextPart -- `content`, `content_delta` -- so the
+            # extraction above reads both alike, and until this branch
+            # every word of a reasoning model's working-out went out as an
+            # answer `chunk`. In production that stored 118k characters of
+            # "The user wants me to..." as one assistant message, ran it
+            # straight into the reply ("OK let me tell the user.All three
+            # cards live."), and replayed the whole of it as history on the
+            # next turn. Its own event keeps it out of all three.
+            #
+            # Not counted in text_len: a turn that only reasoned produced no
+            # answer, and the truncated status below is right to say so.
+            return [_sse("thinking", {"text": text})]
         state["text_len"] += len(text)
         out = [_sse("chunk", {"text": text})]
         if not state["streaming"]:
@@ -416,6 +430,21 @@ class PydanticAIProxyClient:
                 "phase": "streaming", "detail": "Writing response...",
                 "elapsed": round(time.time() - start, 1)}))
         return out
+
+    @staticmethod
+    def _is_thinking(ev, kind: str) -> bool:
+        """Whether this part (or delta) is reasoning rather than answer.
+
+        Read from pydantic-ai's own discriminator -- `part_kind` on a part,
+        `part_delta_kind` on a delta, "thinking" for both -- rather than by
+        importing the classes, because this module imports pydantic-ai
+        lazily and a missing install must stay a clean
+        PydanticAIUnavailable, not an ImportError at load.
+        """
+        obj = getattr(ev, "part" if kind == "part_start" else "delta", None)
+        marker = (getattr(obj, "part_kind", None)
+                  or getattr(obj, "part_delta_kind", None))
+        return marker == "thinking"
 
     @staticmethod
     def _delta_text(ev) -> str:

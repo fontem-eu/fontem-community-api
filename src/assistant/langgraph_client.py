@@ -384,26 +384,55 @@ class LangGraphProxyClient:
             events.append(_sse("status", status))
         return events, announced
 
+    #: Content-block types that are reasoning, not answer. LangChain carries
+    #: a reasoning model's working-out either here or in
+    #: additional_kwargs["reasoning_content"], depending on the provider.
+    _REASONING_BLOCKS = ("thinking", "reasoning")
+
     @staticmethod
     def _text_of(msg) -> str:
-        """Plain text from a message, whether it is a string or content blocks."""
+        """The ANSWER in a message, whether a string or content blocks.
+
+        Only text blocks count. This used to join the `text` of every
+        block, so a reasoning block that happened to carry a `text` key was
+        streamed as answer -- the same leak the pydantic-ai engine had,
+        where a model's working-out was stored as its reply and replayed as
+        history on the next turn.
+        """
         if getattr(msg, "tool_call_chunks", None):
             return ""
         text = getattr(msg, "content", "") or ""
         if isinstance(text, list):
-            return "".join(b.get("text", "") for b in text
-                           if isinstance(b, dict))
+            return "".join(
+                b.get("text", "") for b in text
+                if isinstance(b, dict)
+                and b.get("type", "text") not in LangGraphProxyClient._REASONING_BLOCKS)
         return text
+
+    @staticmethod
+    def _reasoning_of(msg) -> str:
+        """The reasoning in a message, from wherever this provider put it."""
+        kwargs = getattr(msg, "additional_kwargs", None) or {}
+        out = [kwargs.get("reasoning_content") or ""]
+        content = getattr(msg, "content", None)
+        if isinstance(content, list):
+            for b in content:
+                if (isinstance(b, dict)
+                        and b.get("type") in LangGraphProxyClient._REASONING_BLOCKS):
+                    out.append(b.get("thinking") or b.get("reasoning")
+                               or b.get("text") or "")
+        return "".join(x for x in out if isinstance(x, str))
 
     def _on_message(self, chunk, state: dict, start: float) -> list[str]:
         """SSE events for one streamed message chunk. Empty for the chunks
         that carry no prose, which is most of them — tool-call fragments
         arrive on the same stream."""
         msg, _meta = chunk
+        reasoning = self._reasoning_of(msg)
         text = self._text_of(msg)
+        out = [_sse("thinking", {"text": reasoning})] if reasoning else []
         if not text:
-            return []
-        out = []
+            return out
         if not state["streaming"]:
             state["streaming"] = True
             out.append(_sse("status", {"phase": "streaming",
