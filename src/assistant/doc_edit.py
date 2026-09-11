@@ -76,7 +76,11 @@ SEPARATOR = "\n\n"
 #: instead. It reached for exactly that on its own, writing
 #: `[[chart: €M by country]]` in a draft, and the numbered form was the only
 #: one that worked.
-MARKER_RE = re.compile(r"\[\[chart ?(\d+)?(?::\s*([^\]]*))?\]\]")
+#: No `\s*` before the label: `\s` is a subset of `[^\]]`, so the two
+#: compete for the same leading spaces and a long run of them with no
+#: closing bracket costs polynomial time to fail (SonarQube python:S5852).
+#: The label is stripped in code instead, which it already was.
+MARKER_RE = re.compile(r"\[\[chart ?(\d+)?(?::([^\]]*))?\]\]")
 
 
 def label_for(block: dict) -> str:
