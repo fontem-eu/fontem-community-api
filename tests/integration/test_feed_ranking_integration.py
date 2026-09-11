@@ -267,3 +267,49 @@ class TestFacetsBackfill:
             "SELECT facets IS NULL, jsonb_typeof(facets) "
             "FROM feed_items WHERE item_id='facet-5'"))).one()
         assert is_null is True, f"stored as JSON {kind!r}, not SQL NULL"
+
+
+class TestMigration024:
+    """The catalogue queries emit facets, applied through the migrate job.
+
+    The rows were authored in the admin UI, so this is the first migration
+    that rewrites them. Two properties keep it safe to run on every deploy.
+    """
+
+    def test_a_sentence_only_query_is_upgraded_by_slug(self, repo):
+        run, _, session = repo
+        run(session.execute(sa.text(
+            "INSERT INTO named_queries (id, slug, name, lang, status, query) VALUES "
+            "('44444444-4444-4444-4444-444444444444','public-contracts','P','cypher','published',"
+            " 'MATCH (c:Contract) RETURN c.k AS item_id')")))
+        run(session.commit())
+        from importlib import import_module
+        m = import_module("migrations.versions.024_named_queries_emit_facets")
+        run(session.execute(sa.text(
+            "UPDATE named_queries SET query = :q WHERE slug = 'public-contracts' "
+            "AND query NOT LIKE '%AS facets%'"), {"q": m.QUERIES["public-contracts"]}))
+        run(session.commit())
+        got = run(session.execute(sa.text(
+            "SELECT query FROM named_queries WHERE slug='public-contracts'"))).scalar_one()
+        assert "AS facets" in got
+        assert "integrity_red_flags" in got
+
+    def test_a_query_already_emitting_facets_is_left_alone(self, repo):
+        """An admin edit made after this ships must not be reverted on the
+        next deploy — idempotence is the guard, not a version flag."""
+        run, _, session = repo
+        edited = "MATCH (c:Contract) RETURN c.k AS item_id, {kind:'x'} AS facets  // admin edit"
+        run(session.execute(sa.text(
+            "INSERT INTO named_queries (id, slug, name, lang, status, query) VALUES "
+            "('55555555-5555-5555-5555-555555555555','eu-lobbying','L','cypher','published', :q)"),
+            {"q": edited}))
+        run(session.commit())
+        from importlib import import_module
+        m = import_module("migrations.versions.024_named_queries_emit_facets")
+        run(session.execute(sa.text(
+            "UPDATE named_queries SET query = :q WHERE slug = 'eu-lobbying' "
+            "AND query NOT LIKE '%AS facets%'"), {"q": m.QUERIES["eu-lobbying"]}))
+        run(session.commit())
+        got = run(session.execute(sa.text(
+            "SELECT query FROM named_queries WHERE slug='eu-lobbying'"))).scalar_one()
+        assert got == edited
