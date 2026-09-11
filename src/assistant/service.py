@@ -144,6 +144,29 @@ def _cap(value: object, limit: int) -> str:
     return value if len(value) <= limit else value[:limit]
 
 
+#: One stored reasoning block, bounded. It is display-only -- history is
+#: built from content, not extras -- so this caps a row, not what the model
+#: can think. Generous because a reasoning model's working-out runs long:
+#: one production turn produced 118k characters of it.
+MAX_REASONING_CHARS = 32_000
+
+
+def _reasoning_extras(reasoning: str) -> dict | None:
+    """`{"reasoning": ...}` for a row, or None when there was none.
+
+    None rather than an empty key so a row that followed no reasoning looks
+    exactly as it did before this existed.
+    """
+    text = (reasoning or "").strip()
+    if not text:
+        return None
+    if len(text) > MAX_REASONING_CHARS:
+        dropped = len(text) - MAX_REASONING_CHARS
+        text = (text[:MAX_REASONING_CHARS]
+                + f"\n\n[... {dropped} further characters of reasoning not kept ...]")
+    return {"reasoning": text}
+
+
 def _document_under_edit(req: ChatRequest) -> str | None:
     """Which article the assistant's document tools act on.
 
@@ -326,6 +349,12 @@ class AssistantService:
 
         # Stream through the proxy, accumulating text for the assistant row.
         assistant_buf: list[str] = []
+        # Reasoning since the last thing the model DID. It is stored on the
+        # row it led to -- the tool call it motivated, or the answer -- so a
+        # reloaded conversation shows each block where it happened rather
+        # than all of them bunched above the reply. No new role, and so no
+        # migration: the CHECK constraint on role lives only in the database.
+        reasoning_buf: list[str] = []
         real_usage: TokenUsage | None = None
         errored = False
         # Which model actually answered. Stored on the assistant row, because
@@ -451,6 +480,14 @@ class AssistantService:
                     text = _extract_chunk_text(data)
                     if text:
                         assistant_buf.append(text)
+                elif event == "thinking":
+                    # Deliberately NOT assistant_buf. That buffer becomes the
+                    # stored content, and stored content is replayed as history
+                    # next turn: reasoning kept there cost a later turn 118k
+                    # characters of the model's own working-out as context.
+                    text = _extract_chunk_text(data)
+                    if text:
+                        reasoning_buf.append(text)
                 elif event == "tool_result":
                     # One row per tool call: what was called, with which
                     # arguments, and what came back. The result is capped at
@@ -459,7 +496,10 @@ class AssistantService:
                     # The id is the one minted where the call ran, so an
                     # activity entry can point straight at this row.
                     async with turn_lock:
-                        await self._persist_tool_call(conv.id, req.user_id, data)
+                        await self._persist_tool_call(
+                            conv.id, req.user_id, data,
+                            reasoning="".join(reasoning_buf))
+                    reasoning_buf.clear()
                 elif event == "error":
                     errored = True
                 else:
@@ -503,6 +543,9 @@ class AssistantService:
                 tokens_in=None,
                 tokens_out=tokens_out,
                 model=answered_by,
+                # The reasoning that led to the answer, kept beside it rather
+                # than inside it.
+                extras=_reasoning_extras("".join(reasoning_buf)),
             )
 
             # Replace the estimate with what the model actually counted.
@@ -692,7 +735,8 @@ class AssistantService:
         )
 
     async def _persist_tool_call(
-        self, conversation_id: str, user_id: str, data: str
+        self, conversation_id: str, user_id: str, data: str,
+        reasoning: str = "",
     ) -> None:
         """Record one tool call from its `tool_result` event.
 
@@ -733,6 +777,9 @@ class AssistantService:
                 # result on its way into the model, so one row cannot be
                 # unbounded either.
                 "result": _cap(payload.get("result"), tool_budget.MAX_TOOL_RESULT_CHARS),
+                # The reasoning that led to this call, so a reload can show
+                # it where it happened.
+                **(_reasoning_extras(reasoning) or {}),
             },
             message_id=payload.get("call_id") or None,
         )
