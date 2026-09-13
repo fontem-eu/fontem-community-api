@@ -29,6 +29,7 @@ from src.repositories.named_query_repository import NamedQueryRepository
 from src.repositories.feed_repository import FeedRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.activity_repository import ActivityRepository
+from src.repositories.user_directory_repository import UserDirectoryRepository
 from src.repositories.user_profile_repository import UserProfileRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
@@ -43,6 +44,7 @@ from src.services.issue_service import IssueService
 from src.services.activity_service import ActivityService
 from src.services.profile_service import ProfileService
 from src.services.moderation_service import ModerationService
+from src.services.user_directory_service import UserDirectoryService
 from src.services.permission_service import PermissionService
 from src.services.authz import AuthorizationService
 from src.services.group_service import GroupService
@@ -240,6 +242,14 @@ class InMemoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def moderation_service(self) -> ModerationService:
         return self._svc["mod_svc"]
+
+    @provide(scope=Scope.REQUEST)
+    def user_directory_repo(self) -> UserDirectoryRepository:
+        return self._svc["user_directory_repo"]
+
+    @provide(scope=Scope.REQUEST)
+    def user_directory_service(self) -> UserDirectoryService:
+        return self._svc["user_directory_svc"]
 
     @provide(scope=Scope.REQUEST)
     def tag_follow_repo(self) -> TagFollowRepository:

@@ -32,6 +32,7 @@ class PgUserRepository(UserRepository):
             failed_login_attempts=getattr(row, 'failed_login_attempts', 0) or 0,
             locked_until=getattr(row, 'locked_until', None),
             email_verified_at=getattr(row, 'email_verified_at', None),
+            last_login_at=getattr(row, 'last_login_at', None),
         )
 
     async def get_by_id(self, user_id: str) -> User | None:
@@ -191,5 +192,13 @@ class PgUserRepository(UserRepository):
             update(UserModel)
             .where(UserModel.id == user_id)
             .values(failed_login_attempts=0, locked_until=None)
+        )
+        await self._session.commit()
+
+    async def record_login(self, user_id: str, when: datetime) -> None:
+        await self._session.execute(
+            update(UserModel)
+            .where(UserModel.id == user_id)
+            .values(last_login_at=when)
         )
         await self._session.commit()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from src.domain.moderation import Sanction
 from src.domain.user import User
@@ -56,3 +57,12 @@ class UserRepository(ABC):
     @abstractmethod
     async def clear_failed_logins(self, user_id: str) -> None:
         """Reset failed-login counter and clear any lock for the given user."""
+
+    @abstractmethod
+    async def record_login(self, user_id: str, when: datetime) -> None:
+        """Stamp ``last_login_at``.
+
+        Called once per successful sign-in, from the single seam every login
+        path shares. A token refresh is not a sign-in and must not call it —
+        that is what a session's rotation time already records.
+        """

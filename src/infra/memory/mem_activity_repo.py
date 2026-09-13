@@ -19,6 +19,10 @@ class InMemoryActivityRepository(ActivityRepository):
         self._events.append(deepcopy(event))
         return deepcopy(event)
 
+    def all_events(self) -> list[ActivityEvent]:
+        """Every recorded event, copied. In-memory only; see InMemoryUserRepository.all_users."""
+        return [deepcopy(event) for event in self._events]
+
     async def list_for_actor(self, actor_id: str, limit: int, offset: int) -> list[ActivityEvent]:
         rows = [deepcopy(e) for e in self._events if e.actor_id == actor_id]
         rows.sort(

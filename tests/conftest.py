@@ -65,6 +65,8 @@ from src.infra.memory.mem_refresh_token_repo import InMemoryRefreshTokenReposito
 from src.infra.memory.mem_auth_token_repo import InMemoryAuthTokenRepository
 from src.infra.memory.mem_tag_follow_repo import InMemoryTagFollowRepository
 from src.infra.memory.mem_user_repo import InMemoryUserRepository
+from src.infra.memory.mem_user_directory_repo import InMemoryUserDirectoryRepository
+from src.services.user_directory_service import UserDirectoryService
 from src.infra.memory.mem_user_profile_repo import InMemoryUserProfileRepository
 from src.services.issue_service import IssueService
 from src.services.activity_service import ActivityService
@@ -170,6 +172,8 @@ def services():
     report_svc = ReportService(report_repo, perm_svc, authz_svc, inheritance, user_repo, group_repo, activity_svc)
     issue_svc = IssueService(issue_repo, user_repo, authz_svc, activity_svc)
     mod_svc = ModerationService(mod_repo, user_repo, authz_svc)
+    user_directory_repo = InMemoryUserDirectoryRepository(user_repo, activity_repo, refresh_token_repo)
+    user_directory_svc = UserDirectoryService(user_directory_repo, authz_svc)
     tag_svc = TagService(report_repo, tag_follow_repo, perm_svc, authz_svc)
     flower_svc = FlowerService(flower_repo, report_repo, authz_svc)
     refresh_token_svc = RefreshTokenService(refresh_token_repo)
@@ -215,6 +219,8 @@ def services():
         "report_svc": report_svc,
         "issue_svc": issue_svc,
         "mod_svc": mod_svc,
+        "user_directory_repo": user_directory_repo,
+        "user_directory_svc": user_directory_svc,
         "tag_svc": tag_svc,
         "flower_svc": flower_svc,
         "refresh_token_svc": refresh_token_svc,

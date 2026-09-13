@@ -34,6 +34,19 @@ class InMemoryUserRepository(UserRepository):
         self._users[user.id] = deepcopy(user)
         return deepcopy(user)
 
+    def all_users(self) -> list[User]:
+        """Every stored user, copied.
+
+        In-memory only, and not on the repository ABC: the directory's memory
+        implementation reads through this instead of reaching into ``_users``.
+        """
+        return [deepcopy(user) for user in self._users.values()]
+
+    async def record_login(self, user_id: str, when: datetime) -> None:
+        user = self._users.get(user_id)
+        if user:
+            user.last_login_at = when
+
     async def get_roles(self, user_id: str) -> list[str]:
         return list(self._roles.get(user_id, []))
 
