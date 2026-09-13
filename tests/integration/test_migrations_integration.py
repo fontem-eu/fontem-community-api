@@ -339,3 +339,10 @@ def test_022_renames_021s_tables_rather_than_stranding_them():
     assert "kind" in columns
     # The comment's foreign key moved with it.
     assert "review_id" in comment_columns and "mr_id" not in comment_columns
+
+
+def test_upgrade_to_head_adds_last_login_at_to_users(inspector):
+    columns = {column["name"]: column for column in inspector.get_columns("users")}
+    assert "last_login_at" in columns, "users.last_login_at missing after upgrade"
+    # Nullable on purpose: there is no history to backfill it from.
+    assert columns["last_login_at"]["nullable"] is True

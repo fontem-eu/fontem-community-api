@@ -24,6 +24,10 @@ class InMemoryRefreshTokenRepository(RefreshTokenRepository):
     def __init__(self) -> None:
         self._families: dict[str, RefreshTokenFamily] = {}
 
+    def all_families(self) -> list[RefreshTokenFamily]:
+        """Every stored family, copied. In-memory only; see InMemoryUserRepository.all_users."""
+        return [replace(family) for family in self._families.values()]
+
     async def create_family(
         self, family: RefreshTokenFamily,
     ) -> RefreshTokenFamily:

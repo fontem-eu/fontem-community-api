@@ -130,3 +130,9 @@ class Action(StrEnum):
     FEEDS_MANAGE_QUERIES = "feeds:manage_queries"
     FEEDS_MANAGE_GROUPS = "feeds:manage_groups"
     FEEDS_READ_CATALOG = "feeds:read_catalog"
+
+    # ── Administration ────────────────────────────────────────
+    # Platform-wide views of accounts. Each is its own action and admin
+    # only: what they expose — every user's email, sign-ins and activity —
+    # is nobody's to see by virtue of a broader role such as moderator.
+    ADMIN_USERS_LIST = "admin:users_list"

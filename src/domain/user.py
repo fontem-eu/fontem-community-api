@@ -22,3 +22,6 @@ class User:  # pylint: disable=too-many-instance-attributes
     # link. "Required" verification (2026-06-13 decision) gates every
     # participation action on this being set — see authz policy.
     email_verified_at: datetime | None = None
+    # Stamped by every successful sign-in (auth._issue_session). NULL for an
+    # account that has not signed in since migration 026 recorded it.
+    last_login_at: datetime | None = None

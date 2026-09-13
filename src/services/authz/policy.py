@@ -239,6 +239,10 @@ _SUSPEND_ALLOWED: frozenset[str] = frozenset({
 # grouping) waits for a confirmed email. Grandfathered + OAuth accounts
 # are already verified so this never bites them.
 _VERIFIED_REQUIRED: frozenset[str] = frozenset({
+    # Not participation, but gated the same way: an account whose email is
+    # unconfirmed has not shown it is who it claims to be, and the directory
+    # hands over everyone else's address.
+    Action.ADMIN_USERS_LIST,
     Action.STORIES_CREATE,
     Action.STORIES_EDIT,
     Action.STORIES_EDIT_META,
@@ -634,6 +638,11 @@ POLICY: dict[Action, Callable[[Principal, ResourceRef | None], Decision]] = {
     Action.FEEDS_MANAGE_QUERIES: _trust_at_least_factory("admin"),
     Action.FEEDS_MANAGE_GROUPS: _trust_at_least_factory("admin"),
     Action.FEEDS_READ_CATALOG: _public_read,
+
+    # Administration — admin trust level or an explicit admin role. Not
+    # moderator: the directory is every account's email and sign-in
+    # history, and moderating content does not need it.
+    Action.ADMIN_USERS_LIST: _trust_at_least_factory("admin"),
 }
 
 

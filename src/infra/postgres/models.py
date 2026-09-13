@@ -53,6 +53,11 @@ class UserModel(Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )
+    # Stamped by every successful sign-in (auth._issue_session); see
+    # migration 026 for why this is its own column and has no backfill.
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
 
     roles: Mapped[list[UserRoleModel]] = relationship(
         "UserRoleModel", back_populates="user", cascade="all, delete-orphan"

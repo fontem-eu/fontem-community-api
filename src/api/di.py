@@ -45,6 +45,7 @@ from src.infra.postgres.pg_feed_repo import PgFeedRepository
 from src.infra.postgres.pg_resource_grant_repo import PgResourceGrantRepository
 from src.infra.postgres.pg_issue_repo import PgIssueRepository
 from src.infra.postgres.pg_activity_repo import PgActivityRepository
+from src.infra.postgres.pg_user_directory_repo import PgUserDirectoryRepository
 from src.infra.postgres.pg_user_profile_repo import PgUserProfileRepository
 from src.infra.postgres.pg_moderation_repo import PgModerationRepository
 from src.infra.postgres.pg_permission_repo import PgPermissionRepository
@@ -64,6 +65,7 @@ from src.repositories.feed_repository import FeedRepository
 from src.repositories.resource_grant_repository import ResourceGrantRepository
 from src.repositories.issue_repository import IssueRepository
 from src.repositories.activity_repository import ActivityRepository
+from src.repositories.user_directory_repository import UserDirectoryRepository
 from src.repositories.user_profile_repository import UserProfileRepository
 from src.repositories.moderation_repository import ModerationRepository
 from src.repositories.permission_repository import PermissionRepository
@@ -88,6 +90,7 @@ from src.services.issue_service import IssueService
 from src.services.activity_service import ActivityService
 from src.services.profile_service import ProfileService
 from src.services.moderation_service import ModerationService
+from src.services.user_directory_service import UserDirectoryService
 from src.services.access_inheritance import AccessInheritance
 from src.services.permission_service import PermissionService
 from src.services.refresh_token_service import RefreshTokenService
@@ -233,6 +236,10 @@ class RepositoryProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def activity_repo(self, session: AsyncSession) -> ActivityRepository:
         return PgActivityRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def user_directory_repo(self, session: AsyncSession) -> UserDirectoryRepository:
+        return PgUserDirectoryRepository(session)
 
     @provide(scope=Scope.REQUEST)
     def user_profile_repo(self, session: AsyncSession) -> UserProfileRepository:
@@ -478,6 +485,14 @@ class ServiceProvider(Provider):
         authz: AuthorizationService,
     ) -> ModerationService:
         return ModerationService(mod=mod, users=users, authz=authz)
+
+    @provide(scope=Scope.REQUEST)
+    def user_directory_service(
+        self,
+        directory: UserDirectoryRepository,
+        authz: AuthorizationService,
+    ) -> UserDirectoryService:
+        return UserDirectoryService(directory=directory, authz=authz)
 
     @provide(scope=Scope.REQUEST)
     def tag_service(

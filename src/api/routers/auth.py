@@ -290,6 +290,11 @@ async def _issue_session(  # pylint: disable=too-many-arguments,too-many-positio
         (issued.family.expires_at - datetime.now(timezone.utc)).total_seconds(),
     )
     _set_refresh_cookie(response, issued.plaintext, ttl_seconds=ttl_seconds)
+    # Every sign-in passes through here, so this is where a login is
+    # recorded — after the session exists, so a failure above records none.
+    # /auth/refresh never comes here: a silent refresh is not a sign-in, and
+    # the session's rotation time is what reflects it.
+    await user_repo.record_login(user.id, datetime.now(timezone.utc))
     return _to_token_response(
         user, _mint_access_jwt(user, await user_repo.get_roles(user.id)), storage)
 
