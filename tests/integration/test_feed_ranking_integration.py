@@ -190,12 +190,11 @@ def test_a_null_rank_value_sorts_last_but_is_not_dropped(repo):
 
 
 class TestFacetsBackfill:
-    """Filling facets into rows that predate them, against real Postgres.
+    """Facets on rows that already exist, against real Postgres.
 
-    The insert is ON CONFLICT DO NOTHING so `first_seen_at` cannot move.
-    That alone would leave every already-emitted row without facets for
-    ever, so a second statement fills them — and only where there are
-    none. The three properties below are what make that safe.
+    The insert is ON CONFLICT DO NOTHING so `first_seen_at` cannot move; a
+    second statement then brings existing rows up to date with the query,
+    facets included. The properties below are what make that safe.
     """
 
     def test_a_row_without_facets_gains_them_on_the_next_scan(self, repo):
@@ -227,20 +226,33 @@ class TestFacetsBackfill:
             "SELECT first_seen_at FROM feed_items WHERE item_id='facet-2'"))).scalar_one()
         assert later == original
 
-    def test_existing_facets_are_never_overwritten(self, repo):
-        """A query that starts emitting worse facets must not clobber
-        better ones — the fill is for NULLs, not for updates."""
+    def test_changed_facets_replace_the_stale_ones(self, repo):
+        """Facets describe the contract as it is now — its value, its flags —
+        so a re-scan that reads different ones has the newer facts."""
         run, repository, _ = repo
-        good = _item("facet-3", 1, ["PT"], 10.0)
-        good.facets = {"buyer": "the real buyer"}
-        run(repository.upsert_items([good]))
+        stale = _item("facet-3", 1, ["PT"], 10.0)
+        stale.facets = {"buyer": "A", "value_eur": 100}
+        run(repository.upsert_items([stale]))
 
-        worse = _item("facet-3", 1, ["PT"], 10.0)
-        worse.facets = {"buyer": "?"}
-        run(repository.upsert_items([worse]))
+        restated = _item("facet-3", 1, ["PT"], 10.0)
+        restated.facets = {"buyer": "A", "value_eur": 150}
+        run(repository.upsert_items([restated]))
 
         items = run(repository.rank_items(GROUP_ID, ["PT"], 50, 4))
         got = next(i for i in items if i.item_id == "facet-3")
+        assert got.facets == {"buyer": "A", "value_eur": 150}
+
+    def test_facets_the_query_did_not_emit_are_kept(self, repo):
+        """No facets on a re-scan is an absence, not an instruction to erase."""
+        run, repository, _ = repo
+        rich = _item("facet-6", 1, ["PT"], 10.0)
+        rich.facets = {"buyer": "the real buyer"}
+        run(repository.upsert_items([rich]))
+
+        run(repository.upsert_items([_item("facet-6", 1, ["PT"], 10.0)]))
+
+        items = run(repository.rank_items(GROUP_ID, ["PT"], 50, 4))
+        got = next(i for i in items if i.item_id == "facet-6")
         assert got.facets == {"buyer": "the real buyer"}
 
     def test_a_fill_is_not_counted_as_a_discovery(self, repo):
@@ -268,6 +280,75 @@ class TestFacetsBackfill:
             "SELECT facets IS NULL, jsonb_typeof(facets) "
             "FROM feed_items WHERE item_id='facet-5'"))).one()
         assert is_null is True, f"stored as JSON {kind!r}, not SQL NULL"
+
+
+class TestRowsFollowTheQuery:
+    """A stored row takes the query's current values, and a clean re-read
+    removes what the query no longer returns — against real Postgres."""
+
+    def test_a_moved_link_is_refreshed_and_first_seen_at_stays(self, repo):
+        run, repository, session = repo
+        first = _item("follow-1", 2, ["DE"], 10.0)
+        first.link = "https://dargle.eu/contract/old-notice"
+        assert run(repository.upsert_items([first])) == 1
+        stamp = run(session.execute(sa.text(
+            "SELECT first_seen_at FROM feed_items WHERE item_id='follow-1'"))).scalar_one()
+
+        moved = _item("follow-1", 1, ["DE", "DE1"], 12.5)
+        moved.link = "https://dargle.eu/contract/new-notice"
+        moved.title = "restated"
+        assert run(repository.upsert_items([moved])) == 0
+
+        row = run(session.execute(sa.text(
+            "SELECT link, title, rank_value, nuts, item_time, first_seen_at "
+            "FROM feed_items WHERE item_id='follow-1'"))).one()
+        assert row.link == "https://dargle.eu/contract/new-notice"
+        assert row.title == "restated"
+        assert float(row.rank_value) == 12.5
+        assert row.nuts == ["DE", "DE1"]
+        assert row.item_time == moved.item_time
+        assert row.first_seen_at == stamp
+
+    def test_an_unchanged_rescan_writes_nothing(self, repo):
+        """Every write moves xmin; re-scanning an unchanged window must not."""
+        run, repository, session = repo
+        item = _item("follow-2", 1, ["DE"], 3.3)
+        item.facets = {"buyer": "A"}
+        run(repository.upsert_items([item]))
+        xmin = "SELECT xmin::text FROM feed_items WHERE item_id='follow-2'"
+        before = run(session.execute(sa.text(xmin))).scalar_one()
+
+        run(repository.upsert_items([item]))
+        assert run(session.execute(sa.text(xmin))).scalar_one() == before
+
+    def test_prune_removes_only_unreturned_rows_of_that_query_in_the_window(self, repo):
+        run, repository, session = repo
+        run(repository.upsert_items([
+            _item("prune-kept", 1, ["FR"], 1.0),
+            _item("prune-gone", 1, ["FR"], 1.0),
+            _item("prune-old", 30, ["FR"], 1.0),
+            _item("prune-draft", 1, ["FR"], 1.0, query_id=DRAFT_ID),
+        ]))
+        present = set(run(session.execute(sa.text(
+            "SELECT item_id FROM feed_items WHERE query_id = :q"), {"q": QUERY_ID})).scalars())
+
+        # Neither prune-gone nor prune-old is kept; only the one inside the
+        # window may go, and the draft query's row is not this query's.
+        keep = present - {"prune-gone", "prune-old"}
+        assert run(repository.prune_items(QUERY_ID, NOW - timedelta(days=7), keep)) == 1
+
+        left = set(run(session.execute(sa.text(
+            "SELECT item_id FROM feed_items WHERE item_id LIKE 'prune-%'"))).scalars())
+        assert left == {"prune-kept", "prune-old", "prune-draft"}
+
+    def test_a_keep_set_past_the_bind_parameter_limit(self, repo):
+        """asyncpg allows 32,767 bind parameters; a busy window keeps more ids."""
+        run, repository, session = repo
+        run(repository.upsert_items([_item("prune-big", 1, ["IT"], 1.0)]))
+        present = set(run(session.execute(sa.text(
+            "SELECT item_id FROM feed_items WHERE query_id = :q"), {"q": QUERY_ID})).scalars())
+        keep = present | {f"absent-{i}" for i in range(40_000)}
+        assert run(repository.prune_items(QUERY_ID, NOW - timedelta(days=7), keep)) == 0
 
 
 class TestMigration024:

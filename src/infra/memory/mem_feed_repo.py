@@ -35,13 +35,32 @@ class InMemoryFeedRepository(FeedRepository):
         for item in items:
             key = (item.query_id, item.item_id)
             if key in self._items:
-                continue          # first_seen_at must not move
+                # Follow the query. first_seen_at must not move, and facets
+                # the query did not emit keep what is stored.
+                stored = self._items[key]
+                stored.item_time = item.item_time
+                stored.nuts = list(item.nuts or [])
+                stored.rank_value = item.rank_value
+                stored.title = item.title
+                stored.link = item.link
+                stored.summary = item.summary
+                if item.facets:
+                    stored.facets = deepcopy(item.facets)
+                continue
             stored = deepcopy(item)
             stored.id = stored.id or str(uuid4())
             stored.first_seen_at = now
             self._items[key] = stored
             new += 1
         return new
+
+    async def prune_items(self, query_id: str, since: datetime, keep: set[str]) -> int:
+        gone = [key for key, item in self._items.items()
+                if item.query_id == query_id and item.item_time >= since
+                and item.item_id not in keep]
+        for key in gone:
+            del self._items[key]
+        return len(gone)
 
     async def rank_items(
         self, group_id: str, nuts: list[str], volume_per_week: int, weeks: int,

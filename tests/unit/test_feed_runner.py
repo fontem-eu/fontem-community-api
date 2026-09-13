@@ -174,3 +174,75 @@ def test_run_all_keeps_going_when_one_query_explodes(setup):
     executor.default = _result(1)
     runs = _run(runner.run_all())
     assert len(runs) == 2          # both published; the draft is not run
+
+
+def test_a_changed_row_follows_the_query_and_first_seen_at_stays(setup):
+    """A republished notice moves the contract's link. A copy that never
+    updates goes on linking to the old notice, which 404s (BRIEF-LINK-5)."""
+    _, feed, executor, query, runner = setup
+    executor.default = _result(1)
+    _run(runner.run_query(query, now=NOW))
+    before = feed.all_items()[0]
+
+    moved = [["c0", "2026-08-14T00:00:00+00:00", "PT17", 2000, "Restated", "https://x/new", ""]]
+    executor.default = ExecResult(columns=CONTRACT_COLUMNS + ["summary"],
+                                  rows=moved, row_count=1)
+    run = _run(runner.run_query(query, now=NOW))
+
+    after = feed.all_items()[0]
+    assert run.items_new == 0
+    assert (after.link, after.title, after.rank_value) == ("https://x/new", "Restated", 2000)
+    assert after.first_seen_at == before.first_seen_at
+
+
+def test_an_item_the_query_no_longer_returns_comes_off_the_feed(setup):
+    _, feed, executor, query, runner = setup
+    executor.default = _result(3)
+    _run(runner.run_query(query, now=NOW))
+
+    executor.default = _result(2)          # c2 is no longer returned
+    _run(runner.run_query(query, now=NOW))
+    assert sorted(i.item_id for i in feed.all_items()) == ["c0", "c1"]
+
+
+def test_an_item_older_than_the_window_is_kept(setup):
+    """The run did not re-read that day, so its absence says nothing."""
+    _, feed, executor, query, runner = setup
+    executor.default = _result(1, prefix="old", when="2026-07-01T00:00:00+00:00")
+    _run(runner.run_query(query, now=NOW))
+
+    executor.default = _result(1)
+    _run(runner.run_query(query, now=NOW))
+    assert {i.item_id for i in feed.all_items()} == {"old0", "c0"}
+
+
+def test_nothing_is_removed_when_a_partition_failed(setup):
+    _, feed, executor, query, runner = setup
+    executor.default = _result(3)
+    _run(runner.run_query(query, now=NOW))
+
+    executor.push(ExecResult(error="Cypher error: transient"))
+    executor.default = _result(1)
+    _run(runner.run_query(query, now=NOW))
+    assert len(feed.all_items()) == 3
+
+
+def test_nothing_is_removed_when_a_partition_was_truncated(setup):
+    _, feed, executor, query, runner = setup
+    executor.default = _result(3, prefix="kept")
+    _run(runner.run_query(query, now=NOW))
+
+    executor.default = _result(PROXY_ROW_CAP, truncated=True)
+    _run(runner.run_query(query, now=NOW))
+    assert {"kept0", "kept1", "kept2"} <= {i.item_id for i in feed.all_items()}
+
+
+def test_an_empty_read_removes_nothing(setup):
+    """An empty answer is likelier an outage upstream than a query that emptied."""
+    _, feed, executor, query, runner = setup
+    executor.default = _result(2)
+    _run(runner.run_query(query, now=NOW))
+
+    executor.default = _result(0)
+    _run(runner.run_query(query, now=NOW))
+    assert len(feed.all_items()) == 2
