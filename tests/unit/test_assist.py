@@ -109,6 +109,59 @@ class TestAssistRouter:
         keys = [c["conversation_key"] for c in listed.json()["conversations"]]
         assert "report:abc" in keys
 
+    def test_the_conversation_list_pages_newest_first(self, client, services):
+        # The list was unbounded: 690 rows for the account the e2e suite
+        # shares. It is a page now, with a cursor to the next one.
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1")
+        )
+        h = make_headers("user-1")
+        created = [
+            client.post("/assist/conversations", json={"title": f"Chat {i}"},
+                        headers=h).json()["conversation_key"]
+            for i in range(5)
+        ]
+
+        pages, before = [], ""
+        while True:
+            resp = client.get("/assist/conversations",
+                              params={"limit": 2, "before": before}, headers=h)
+            assert resp.status_code == 200
+            body = resp.json()
+            pages.append([c["conversation_key"] for c in body["conversations"]])
+            if not body["has_more"]:
+                assert body["next_before"] == ""
+                break
+            assert body["next_before"]
+            before = body["next_before"]
+
+        assert [len(p) for p in pages] == [2, 2, 1]
+        seen = [k for p in pages for k in p]
+        assert len(seen) == len(set(seen)) == 5          # no row twice, none lost
+        assert set(seen) == set(created)
+        stamps = [c["updated_at"] for c in client.get(
+            "/assist/conversations", params={"limit": 5}, headers=h,
+        ).json()["conversations"]]
+        assert stamps == sorted(stamps, reverse=True)       # newest activity first
+
+    def test_the_conversation_list_page_is_bounded(self, client, services):
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1")
+        )
+        h = make_headers("user-1")
+        for i in range(3):
+            client.post("/assist/conversations", json={"title": f"Chat {i}"}, headers=h)
+        # Without parameters: the first page, which here is everything.
+        body = client.get("/assist/conversations", headers=h).json()
+        assert len(body["conversations"]) == 3 and body["has_more"] is False
+        # A limit below one is raised to one, not answered with nothing.
+        assert len(client.get("/assist/conversations", params={"limit": 0},
+                              headers=h).json()["conversations"]) == 1
+        # A cursor that is not one of ours starts over at the newest page.
+        garbled = client.get("/assist/conversations",
+                             params={"before": "not-a-cursor"}, headers=h).json()
+        assert len(garbled["conversations"]) == 3
+
     def test_chat_stream_serves_signed_out_visitors(self, client, fake_assistant):
         # This used to assert 401. The contract changed deliberately: the
         # assistant's first job on a public platform is helping a visitor

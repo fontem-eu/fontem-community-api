@@ -346,3 +346,34 @@ def test_upgrade_to_head_adds_last_login_at_to_users(inspector):
     assert "last_login_at" in columns, "users.last_login_at missing after upgrade"
     # Nullable on purpose: there is no history to backfill it from.
     assert columns["last_login_at"]["nullable"] is True
+
+
+def _switcher_index(engine):
+    return {
+        i["name"]: i for i in sa.inspect(engine).get_indexes("assist_conversations")
+    }.get("ix_assist_conv_user_updated")
+
+
+def test_027_indexes_the_switcher_page_order_where_the_table_exists():
+    """The production path. A fresh `upgrade head` has no assist_conversations
+    to index (008 drops it, see _db_at_018_with_conversations), so the index is
+    only ever built on a database that already carries the table."""
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url, engine = _db_at_018_with_conversations(
+            pg, extra="summary TEXT, summary_through TEXT,",
+        )
+        _alembic(url, "upgrade", "head")
+        index = _switcher_index(engine)
+        _alembic(url, "downgrade", "-1")
+        dropped = _switcher_index(engine)
+        # Guarded: a repeat, or a hand-applied index, must not fail the deploy.
+        _alembic(url, "upgrade", "head")
+        _alembic(url, "stamp", "026")
+        _alembic(url, "upgrade", "head")
+        again = _switcher_index(engine)
+        engine.dispose()
+
+    assert index is not None
+    assert index["column_names"] == ["user_id", "updated_at", "id"]
+    assert dropped is None
+    assert again is not None

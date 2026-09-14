@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -47,6 +48,11 @@ class AssistConversationModel(Base):
         UniqueConstraint(
             "user_id", "conversation_key",
             name="uq_assist_conv_user_key",
+        ),
+        # The switcher's page order (migration 027).
+        Index(
+            "ix_assist_conv_user_updated",
+            "user_id", text("updated_at DESC"), text("id DESC"),
         ),
     )
 

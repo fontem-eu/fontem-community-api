@@ -152,9 +152,14 @@ class ConversationSummary(BaseModel):
 
 
 class ConversationListResponse(BaseModel):
+    """One page of the switcher, newest activity first."""
+
     model_config = ConfigDict(extra="allow")
 
     conversations: list[ConversationSummary]
+    has_more: bool = False
+    #: Pass as `before` for the next page; empty when there is none.
+    next_before: str = ""
 
 
 class ConversationResponse(BaseModel):
@@ -418,6 +423,14 @@ DEFAULT_PAGE_SIZE = 30
 #: limit=100000 — that is the behaviour this endpoint exists to replace.
 MAX_PAGE_SIZE = 100
 
+#: Conversations per switcher page. The newest activity comes first, so the
+#: chat someone is looking for is nearly always on this page.
+DEFAULT_LIST_PAGE_SIZE = 50
+
+#: Enough for a long list at once, not the whole history by setting a huge
+#: limit — the unbounded list is what this replaces.
+MAX_LIST_PAGE_SIZE = 200
+
 
 def _encode_cursor(msg: dict) -> str:
     """Opaque cursor for one message row: its (created_at, id) key."""
@@ -574,17 +587,32 @@ async def list_conversations(
     *,
     service: FromDishka[AssistantService],
     user: Annotated[User, Depends(get_current_user)],
+    before: str = "",
+    limit: int = DEFAULT_LIST_PAGE_SIZE,
 ) -> dict:
-    """Every conversation the user has, newest activity first.
+    """The user's conversations, newest activity first, a page at a time.
 
     Report chats and the global chat are listed too, not just standalone
     ones. Hiding them made a prompt sent from a report page vanish into a
     chat no list would ever show again.
+
+    `before` is the `next_before` from a previous response. Omit it for the
+    newest page. The list used to be unbounded: 690 rows for an account that
+    had simply used the assistant a lot.
     """
+    limit = max(1, min(limit, MAX_LIST_PAGE_SIZE))
     # pylint: disable=protected-access
-    rows = await service._repo.list_conversations(user.id)
+    rows = await service._repo.list_conversations(
+        user.id, limit=limit, before=_decode_cursor(before),
+    )
     # pylint: enable=protected-access
+    has_more = len(rows) == limit
     return {
+        "has_more": has_more,
+        "next_before": (
+            f"{rows[-1].updated_at.isoformat()}|{rows[-1].id}"
+            if has_more and rows else ""
+        ),
         "conversations": [
             {
                 "conversation_key": c.conversation_key,

@@ -167,18 +167,36 @@ class PgAssistRepository(AssistRepository):
         rows = (await self._session.execute(stmt)).scalars().all()
         return [_to_msg_dc(r) for r in rows]
 
-    async def list_conversations(self, user_id: str) -> list[AssistConversation]:
+    async def list_conversations(
+        self,
+        user_id: str,
+        *,
+        limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[AssistConversation]:
         """Every conversation, newest activity first, with counts and a snippet.
 
         One query for the conversations and one for the per-conversation
         aggregates, rather than a query per row: a switcher that costs N+1
         round trips gets slower exactly as it becomes more useful.
         """
-        convs = (await self._session.execute(
-            select(AssistConversationModel)
-            .where(AssistConversationModel.user_id == user_id)
-            .order_by(AssistConversationModel.updated_at.desc())
-        )).scalars().all()
+        stmt = select(AssistConversationModel).where(
+            AssistConversationModel.user_id == user_id
+        )
+        if before is not None:
+            # Row-wise, like page_messages: the pair is the key, so the page
+            # boundary stays exact when conversations share a timestamp.
+            stmt = stmt.where(
+                tuple_(AssistConversationModel.updated_at, AssistConversationModel.id)
+                < before
+            )
+        stmt = stmt.order_by(
+            AssistConversationModel.updated_at.desc(),
+            AssistConversationModel.id.desc(),
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        convs = (await self._session.execute(stmt)).scalars().all()
         if not convs:
             return []
 

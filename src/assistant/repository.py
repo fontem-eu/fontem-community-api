@@ -131,12 +131,21 @@ class AssistRepository(ABC):
         ...
 
     @abstractmethod
-    async def list_conversations(self, user_id: str) -> list[AssistConversation]:
-        """Every conversation this user has, newest activity first.
+    async def list_conversations(
+        self,
+        user_id: str,
+        *,
+        limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[AssistConversation]:
+        """This user's conversations, newest activity first.
 
         Carries the counts and the last line so a switcher can be drawn from
         one call. Fetching each conversation to render a list of them is how
         a sidebar becomes slower than the thing it indexes.
+
+        With `limit`, one page: the `limit` newest conversations whose
+        (updated_at, id) key sorts before `before`. Without it, all of them.
         """
 
     @abstractmethod
@@ -290,7 +299,13 @@ class InMemoryAssistRepository(AssistRepository):
             if m.conversation_id == conversation_id
         ]
 
-    async def list_conversations(self, user_id: str) -> list[AssistConversation]:
+    async def list_conversations(
+        self,
+        user_id: str,
+        *,
+        limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[AssistConversation]:
         out = []
         for conv in self._conversations.values():
             if conv.user_id != user_id:
@@ -306,7 +321,10 @@ class InMemoryAssistRepository(AssistRepository):
             spoken = [m for m in msgs if m.role in ("user", "assistant")]
             conv.last_snippet = spoken[-1].content[:120] if spoken else ""
             out.append(conv)
-        return sorted(out, key=lambda c: c.updated_at, reverse=True)
+        out.sort(key=lambda c: (c.updated_at, c.id), reverse=True)
+        if before is not None:
+            out = [c for c in out if (c.updated_at, c.id) < before]
+        return out[:limit] if limit is not None else out
 
     async def rename_conversation(
         self, user_id: str, conversation_key: str, title: str

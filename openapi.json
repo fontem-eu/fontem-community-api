@@ -353,6 +353,7 @@
    },
    "ConversationListResponse": {
     "additionalProperties": true,
+    "description": "One page of the switcher, newest activity first.",
     "properties": {
      "conversations": {
       "items": {
@@ -360,6 +361,16 @@
       },
       "title": "Conversations",
       "type": "array"
+     },
+     "has_more": {
+      "default": false,
+      "title": "Has More",
+      "type": "boolean"
+     },
+     "next_before": {
+      "default": "",
+      "title": "Next Before",
+      "type": "string"
      }
     },
     "required": [
@@ -3992,9 +4003,29 @@
     ]
    },
    "get": {
-    "description": "Every conversation the user has, newest activity first.\n\nReport chats and the global chat are listed too, not just standalone\nones. Hiding them made a prompt sent from a report page vanish into a\nchat no list would ever show again.",
+    "description": "The user's conversations, newest activity first, a page at a time.\n\nReport chats and the global chat are listed too, not just standalone\nones. Hiding them made a prompt sent from a report page vanish into a\nchat no list would ever show again.\n\n`before` is the `next_before` from a previous response. Omit it for the\nnewest page. The list used to be unbounded: 690 rows for an account that\nhad simply used the assistant a lot.",
     "operationId": "list_conversations_assist_conversations_get",
     "parameters": [
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Before",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
      {
       "in": "query",
       "name": "lang",
