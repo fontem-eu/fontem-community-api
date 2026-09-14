@@ -8,7 +8,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 
 from sqlalchemy import delete, select, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,41 +101,66 @@ class PgFeedRepository(FeedRepository):
         result = await self._session.execute(stmt)
         inserted = int(result.rowcount or 0)
 
-        # Then fill facets in, and only where there are none.
+        # Then bring the rows we already had up to date with the query.
         #
-        # Without this, a query that grows a facets map would leave every
-        # row it has already emitted with NULL for ever, and their cards
-        # would stay unstructured until each item aged out — on a weekly
-        # feed, weeks of a half-applied change. This touches nothing else:
-        # first_seen_at is not in the SET, and the NULL test means an item
-        # that already has facets is never rewritten, so a query that
-        # starts emitting worse facets cannot overwrite better ones.
+        # A row is a copy of what the query returned, and the insert above
+        # leaves a copy alone once it exists. Contracts do not stay still:
+        # a republished notice moves the contract's ted_notice_id, so the
+        # stored link 404s; a modification restates the value; a corrected
+        # date moves the item. Every column the query produces follows it
+        # here — except first_seen_at, which is not in the SET, and facets
+        # the query did not emit, which keep what is stored (COALESCE).
         #
-        # Deliberately not counted as new. A filled-in facet is not a
-        # discovery, and items_new is what a human reads to see what a scan
-        # found.
-        with_facets = [p for p in payload if p["facets"] is not None]
-        if with_facets:
-            await self._session.execute(
-                # `.__table__`, not the mapped class: handing the ORM a
-                # list of parameter dicts puts it on its bulk-update-by-
-                # primary-key path, which wants an id per row and refuses
-                # a WHERE of its own. This is a plain Core executemany.
-                sa.update(FeedItemModel.__table__)
-                .where(
-                    FeedItemModel.__table__.c.query_id == sa.bindparam("b_query_id"),
-                    FeedItemModel.__table__.c.item_id == sa.bindparam("b_item_id"),
-                    FeedItemModel.__table__.c.facets.is_(None),
-                )
-                # Typed explicitly: an untyped bindparam hands asyncpg a dict
-                # with no JSONB adapter behind it.
-                .values(facets=sa.bindparam("b_facets", type_=JSONB)),
-                [{"b_query_id": p["query_id"], "b_item_id": p["item_id"],
-                  "b_facets": p["facets"]} for p in with_facets],
+        # Only rows that differ are written, so re-scanning an unchanged
+        # window touches nothing. Deliberately not counted as new: a
+        # refreshed row is not a discovery, and items_new is what a human
+        # reads to see what a scan found.
+        table = FeedItemModel.__table__
+        col = table.c
+        # Typed from the columns: an untyped bindparam hands asyncpg a dict
+        # or list with no adapter behind it, and the facets column's own
+        # type is what stores a Python None as SQL NULL, not JSON null.
+        fields = {
+            name: sa.bindparam(f"b_{name}", type_=col[name].type)
+            for name in ("item_time", "nuts", "rank_value", "title", "link", "summary")
+        }
+        # sa.func is generated at runtime, so pylint sees a call with no return.
+        # pylint: disable-next=assignment-from-no-return
+        facets = sa.func.coalesce(sa.bindparam("b_facets", type_=col.facets.type), col.facets)
+        await self._session.execute(
+            # `.__table__`, not the mapped class: handing the ORM a list of
+            # parameter dicts puts it on its bulk-update-by-primary-key
+            # path, which wants an id per row and refuses a WHERE of its
+            # own. This is a plain Core executemany.
+            sa.update(table)
+            .where(
+                col.query_id == sa.bindparam("b_query_id"),
+                col.item_id == sa.bindparam("b_item_id"),
+                sa.or_(
+                    *(col[name].is_distinct_from(param) for name, param in fields.items()),
+                    col.facets.is_distinct_from(facets),
+                ),
             )
+            .values(**fields, facets=facets),
+            [{f"b_{key}": p[key] for key in (
+                "query_id", "item_id", "item_time", "nuts", "rank_value",
+                "title", "link", "summary", "facets")} for p in payload],
+        )
 
         await self._session.commit()
         return inserted
+
+    async def prune_items(self, query_id: str, since: datetime, keep: set[str]) -> int:
+        # One array parameter rather than an IN list: a busy window keeps
+        # tens of thousands of ids, past asyncpg's 32,767 bind parameters.
+        result = await self._session.execute(
+            text("DELETE FROM feed_items WHERE query_id = :query_id "
+                 "AND item_time >= :since AND NOT (item_id = ANY(:keep))")
+            .bindparams(sa.bindparam("keep", type_=ARRAY(sa.Text))),
+            {"query_id": query_id, "since": since, "keep": sorted(keep)},
+        )
+        await self._session.commit()
+        return int(result.rowcount or 0)
 
     async def rank_items(
         self, group_id: str, nuts: list[str], volume_per_week: int, weeks: int,

@@ -100,11 +100,11 @@ class FeedRunner:
         seen = new = truncated = 0
         partitions = 0
         error: str | None = None
+        seen_ids: set[str] = set()
 
         try:
             for day in self._days(now):
-                results = await self._fetch_day(query, day)
-                for partition, result in results:
+                for partition, result in await self._fetch_day(query, day):
                     partitions += 1
                     if result.error:
                         # One partition failing is not the run failing: the
@@ -113,13 +113,14 @@ class FeedRunner:
                                        partition.label, query.slug, result.error)
                         error = error or result.error
                         continue
-                    if result.truncated or result.row_count >= PROXY_ROW_CAP:
+                    if self._is_capped(result):
                         truncated += 1
                         logger.warning(
                             "partition {} of {} still truncated after splitting — "
                             "rows were dropped", partition.label, query.slug)
                     items = list(self._to_items(query, result))
                     seen += len(items)
+                    seen_ids.update(item.item_id for item in items)
                     new += await self._feed.upsert_items(items)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             error = str(exc)[:500]
@@ -130,12 +131,44 @@ class FeedRunner:
         run.truncated_partitions = truncated
         run.status = "error" if error and seen == 0 else "ok"
         run.error_message = error
+        await self._prune(run, query, now, seen_ids)
         run.finished_at = datetime.now(timezone.utc)
         return await self._feed.finish_run(run)
 
     def _days(self, now: datetime) -> list[datetime]:
         start = now - timedelta(days=self._lag_days)
         return [start + timedelta(days=i) for i in range(self._lag_days + 1)]
+
+    def _window_start(self, now: datetime) -> datetime:
+        """The earliest item_time every run re-reads in full.
+
+        The first day asks for everything after the midnight before it (see
+        ``_execute``), so from that day's own midnight on, an item missing
+        from the results is one the query no longer returns.
+        """
+        return self._days(now)[0].replace(hour=0, minute=0, second=0, microsecond=0)
+
+    async def _prune(self, run: FeedRun, query: NamedQuery, now: datetime,
+                     keep: set[str]) -> None:
+        """Take off the cards what a clean re-read no longer returns.
+
+        A clean re-read of the window is the one moment we know what the query
+        returns there, so it is when an item it no longer returns — a contract
+        whose notice was superseded, merged into another, or withdrawn — comes
+        off. Only then: a failed or truncated partition means rows we did not
+        see, and an empty read is likelier an outage upstream than a query that
+        emptied, so neither deletes. A failure to prune is recorded on the run.
+        """
+        if run.error_message or run.truncated_partitions or not keep:
+            return
+        try:
+            pruned = await self._feed.prune_items(query.id, self._window_start(now), keep)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            run.error_message = str(exc)[:500]
+            return
+        if pruned:
+            logger.info("{}: removed {} item(s) the query no longer returns",
+                        query.slug, pruned)
 
     async def _fetch_day(self, query: NamedQuery, day: datetime):
         """A whole day if it fits, otherwise the same day country by country.
