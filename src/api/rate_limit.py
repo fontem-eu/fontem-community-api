@@ -11,6 +11,8 @@ Tests disable this limiter via ``limiter.enabled = False`` in
 """
 from __future__ import annotations
 
+import os
+
 from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -48,6 +50,19 @@ def _client_ip(request: Request) -> str:
 
 limiter = Limiter(key_func=_client_ip)
 
+#: Multiplies every per-IP limit in this service. 1 in production, where the
+#: limits are sized for a crowd of real users. testing, staging and dast set
+#: it very high through the chart (`rateLimitMultiplier`): their traffic is
+#: one e2e suite from one address, and hitting a limit there only ever meant
+#: a flaky gate, never a stopped abuser.
+RATE_LIMIT_MULTIPLIER = max(1, int(os.environ.get("RATE_LIMIT_MULTIPLIER", "1") or "1"))
+
+
+def scaled(limit: str) -> str:
+    """``"10/minute"`` times RATE_LIMIT_MULTIPLIER, in slowapi's syntax."""
+    count, _, period = limit.partition("/")
+    return f"{int(count) * RATE_LIMIT_MULTIPLIER}/{period}"
+
 #: What one IP may spend on the signed-out assistant per hour.
 #:
 #: Deliberately not a `@limiter.limit` decorator on the handler. That
@@ -78,5 +93,5 @@ def anonymous_assist_allowed(request: Request) -> bool:
     # start, for a value that is only read on an anonymous request.
     from limits import parse  # pylint: disable=import-outside-toplevel
     return limiter.limiter.hit(
-        parse(ANONYMOUS_ASSIST_LIMIT), "anon-assist", _client_ip(request),
+        parse(scaled(ANONYMOUS_ASSIST_LIMIT)), "anon-assist", _client_ip(request),
     )

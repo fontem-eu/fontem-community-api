@@ -156,6 +156,11 @@ spec:
                   optional: true
             - name: MAIL_SUPPRESS
               value: {{ .Values.mailSuppress | default "true" | quote }}
+            # Scales every per-IP slowapi limit (src/api/rate_limit.py).
+            # 1 in prod; non-prod envs set it high so the e2e suite, one
+            # client behind one address, never trips a limit.
+            - name: RATE_LIMIT_MULTIPLIER
+              value: {{ .Values.rateLimitMultiplier | default "1" | quote }}
             - name: MAIL_FROM
               value: {{ .Values.mailFrom | default "noreply@fontem.eu" | quote }}
             - name: MAIL_FROM_NAME

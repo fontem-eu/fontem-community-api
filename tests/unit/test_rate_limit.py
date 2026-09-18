@@ -12,6 +12,7 @@ remote address only when that header is absent.
 # pylint: disable=missing-function-docstring
 from types import SimpleNamespace
 
+from src.api import rate_limit
 from src.api.rate_limit import _client_ip
 
 
@@ -61,3 +62,12 @@ class TestClientIp:
     def test_xff_only_commas_falls_through(self):
         req = _request(headers={"x-forwarded-for": " , , "}, host="10.42.3.55")
         assert _client_ip(req) == "10.42.3.55"
+
+
+def test_scaled_multiplies_every_limit(monkeypatch):
+    """Non-prod envs raise every per-IP limit with one knob; prod stays at 1."""
+    monkeypatch.setattr(rate_limit, "RATE_LIMIT_MULTIPLIER", 1)
+    assert rate_limit.scaled("10/minute") == "10/minute"
+    monkeypatch.setattr(rate_limit, "RATE_LIMIT_MULTIPLIER", 1000)
+    assert rate_limit.scaled("3/minute") == "3000/minute"
+    assert rate_limit.scaled("20/hour") == "20000/hour"

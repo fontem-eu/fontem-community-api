@@ -28,6 +28,44 @@ class TestInvestigationsAPI:
         assert got.status_code == 200
         assert got.json()["membership"]["role"] == "owner"
 
+    def test_list_is_newest_activity_first_and_pages_without_overlap(self, client, services):
+        """One query returns every row with the caller's role, ordered by
+        (updated_at, id) descending, and limit/before walk it in pages."""
+        asyncio.get_event_loop().run_until_complete(self._setup(services, "user-1", "user-2"))
+        h = make_headers("user-1")
+        for i in range(5):
+            assert client.post("/investigations", json={"name": f"inv-{i}"}, headers=h).status_code == 201
+        # someone else's investigation must never appear
+        client.post("/investigations", json={"name": "not mine"}, headers=make_headers("user-2"))
+
+        full = client.get("/investigations", headers=h).json()
+        assert [i["name"] for i in full if i["name"] == "not mine"] == []
+        assert len(full) == 5
+        keys = [(i["updated_at"], i["id"]) for i in full]
+        assert keys == sorted(keys, reverse=True)
+        assert all(i["membership"]["role"] == "owner" for i in full)
+
+        pages, before = [], ""
+        while True:
+            params = {"limit": 2, **({"before": before} if before else {})}
+            page = client.get("/investigations", params=params, headers=h).json()
+            pages.append(page)
+            if len(page) < 2:
+                break
+            before = f'{page[-1]["updated_at"]}|{page[-1]["id"]}'
+        assert [len(p) for p in pages] == [2, 2, 1]
+        assert [i["id"] for p in pages for i in p] == [i["id"] for i in full]
+
+    def test_list_page_bounds(self, client, services):
+        asyncio.get_event_loop().run_until_complete(self._setup(services, "user-1"))
+        h = make_headers("user-1")
+        client.post("/investigations", json={"name": "a"}, headers=h)
+        assert client.get("/investigations", params={"limit": 0}, headers=h).status_code == 422
+        assert client.get("/investigations", params={"limit": 501}, headers=h).status_code == 422
+        # a garbled cursor is the first page, not an error
+        garbled = client.get("/investigations", params={"limit": 5, "before": "not-a-cursor"}, headers=h)
+        assert garbled.status_code == 200 and len(garbled.json()) == 1
+
     def test_nonmember_get_forbidden(self, client, services):
         asyncio.get_event_loop().run_until_complete(self._setup(services, "user-1", "user-2"))
         inv = client.post("/investigations", json={"name": "X"}, headers=make_headers("user-1")).json()

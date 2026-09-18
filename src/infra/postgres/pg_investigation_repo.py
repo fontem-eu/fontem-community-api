@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.investigation import Investigation, InvestigationMember
@@ -90,6 +90,31 @@ class PgInvestigationRepository(InvestigationRepository):
             .where(InvestigationMemberModel.user_id == user_id)
         )
         return [self._to_domain(r) for r in result.scalars().all()]
+
+    async def list_for_user_with_membership(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[tuple[Investigation, InvestigationMember]]:
+        # One query for the rows and the caller's role on each. The list
+        # endpoint used to fetch the membership per investigation, which was
+        # 5,300 round trips (7.9 s) for the e2e account on testing.
+        stmt = (
+            select(InvestigationModel, InvestigationMemberModel)
+            .join(
+                InvestigationMemberModel,
+                InvestigationMemberModel.investigation_id == InvestigationModel.id,
+            )
+            .where(InvestigationMemberModel.user_id == user_id)
+        )
+        if before is not None:
+            stmt = stmt.where(
+                tuple_(InvestigationModel.updated_at, InvestigationModel.id) < before
+            )
+        stmt = stmt.order_by(InvestigationModel.updated_at.desc(), InvestigationModel.id.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self._session.execute(stmt)
+        return [(self._to_domain(inv), self._member_to_domain(mem)) for inv, mem in result.all()]
 
     async def upsert_member(self, member: InvestigationMember) -> None:
         existing = await self.get_member(member.investigation_id, member.user_id)

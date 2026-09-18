@@ -792,7 +792,12 @@ class InvestigationModel(Base):
 
 class InvestigationMemberModel(Base):
     __tablename__ = "investigation_members"
-    __table_args__ = (PrimaryKeyConstraint("investigation_id", "user_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("investigation_id", "user_id"),
+        # "My investigations" filters on user_id; the primary key leads with
+        # investigation_id and cannot serve it.
+        Index("ix_investigation_members_user", "user_id"),
+    )
 
     investigation_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),

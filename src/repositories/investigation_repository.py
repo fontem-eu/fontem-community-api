@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from src.domain.investigation import Investigation, InvestigationMember
 
@@ -20,6 +21,15 @@ class InvestigationRepository(ABC):
 
     @abstractmethod
     async def list_for_user(self, user_id: str) -> list[Investigation]: ...
+
+    @abstractmethod
+    async def list_for_user_with_membership(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[tuple[Investigation, InvestigationMember]]:
+        """The user's investigations with their own membership, newest
+        activity first ((updated_at, id) descending). ``before`` is a keyset
+        cursor: only rows strictly older than it are returned."""
 
     # ── membership ──
     @abstractmethod

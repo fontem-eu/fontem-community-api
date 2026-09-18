@@ -45,6 +45,21 @@ class InMemoryInvestigationRepository(InvestigationRepository):
                 out.append(deepcopy(self._inv[inv_id]))
         return out
 
+    async def list_for_user_with_membership(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[tuple[Investigation, InvestigationMember]]:
+        epoch = datetime.min.replace(tzinfo=timezone.utc)
+        rows = [
+            (deepcopy(self._inv[inv_id]), deepcopy(members[user_id]))
+            for inv_id, members in self._members.items()
+            if user_id in members and inv_id in self._inv
+        ]
+        rows.sort(key=lambda r: (r[0].updated_at or epoch, r[0].id or ""), reverse=True)
+        if before is not None:
+            rows = [r for r in rows if (r[0].updated_at or epoch, r[0].id or "") < before]
+        return rows[:limit] if limit is not None else rows
+
     async def upsert_member(self, member: InvestigationMember) -> None:
         self._members.setdefault(member.investigation_id, {})[member.user_id] = deepcopy(member)
 

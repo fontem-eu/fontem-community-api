@@ -377,3 +377,33 @@ def test_027_indexes_the_switcher_page_order_where_the_table_exists():
     assert index["column_names"] == ["user_id", "updated_at", "id"]
     assert dropped is None
     assert again is not None
+
+
+def test_028_indexes_investigation_members_by_user():
+    """Deployed databases carry investigation_members (001 creates it and no
+    migration drops it), so a plain upgrade builds the index; downgrade and a
+    repeated run are both clean."""
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url = pg.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
+        engine = sa.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        _alembic(url, "upgrade", "head")
+        def index():
+            if not sa.inspect(engine).has_table("investigation_members"):
+                return "no-table"
+            return {i["name"]: i for i in sa.inspect(engine).get_indexes("investigation_members")}.get(
+                "ix_investigation_members_user")
+        built = index()
+        _alembic(url, "downgrade", "-1")
+        dropped = index()
+        _alembic(url, "upgrade", "head")
+        _alembic(url, "stamp", "027")
+        _alembic(url, "upgrade", "head")
+        again = index()
+        engine.dispose()
+    if built == "no-table":
+        pytest.skip("fresh build has no investigation_members table")
+    assert built is not None and built["column_names"] == ["user_id"]
+    assert dropped is None
+    assert again is not None

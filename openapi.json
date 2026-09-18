@@ -11120,9 +11120,37 @@
   },
   "/investigations": {
    "get": {
-    "description": "Every investigation the caller belongs to, with their membership\n(capability flags) so the UI can show their role.",
+    "description": "The investigations the caller belongs to, with their membership\n(capability flags) so the UI can show their role. Newest activity first.\n\nWithout ``limit`` it returns all of them, as it always has. With it, a\npage of that size; pass ``before=<updated_at>|<id>`` of the last row to\nget the next page. A page shorter than ``limit`` is the last one.",
     "operationId": "list_investigations_investigations_get",
     "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maximum": 500,
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Limit"
+      }
+     },
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Before",
+       "type": "string"
+      }
+     },
      {
       "in": "query",
       "name": "lang",

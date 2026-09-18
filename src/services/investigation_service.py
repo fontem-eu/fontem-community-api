@@ -8,6 +8,8 @@ the pure policy can't see), each with its own test.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from src.domain.investigation import Investigation, InvestigationMember
 from src.domain.investigation_roles import is_role
 from src.repositories.dossier_repository import DossierRepository
@@ -106,6 +108,12 @@ class InvestigationService:
 
     async def list_mine(self, user_id: str) -> list[Investigation]:
         return await self._inv.list_for_user(user_id)
+
+    async def list_mine_with_membership(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[tuple[Investigation, InvestigationMember]]:
+        return await self._inv.list_for_user_with_membership(user_id, limit=limit, before=before)
 
     async def my_membership(
         self, user_id: str, investigation_id: str,

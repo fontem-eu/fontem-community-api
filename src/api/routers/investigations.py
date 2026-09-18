@@ -9,6 +9,7 @@ InvalidInput -> 400) via the app-level handlers.
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
@@ -69,20 +70,41 @@ async def create_investigation(
     return asdict(inv)
 
 
+#: Largest page a caller may ask for.
+MAX_LIST_PAGE_SIZE = 500
+
+
+def _decode_before(raw: str) -> tuple[datetime, str] | None:
+    """Parse an ``<updated_at iso>|<id>`` cursor; None when unusable, so a
+    garbled cursor returns the newest page rather than an error."""
+    stamp, _, inv_id = raw.partition("|")
+    if not stamp or not inv_id:
+        return None
+    try:
+        return datetime.fromisoformat(stamp), inv_id
+    except ValueError:
+        return None
+
+
 @router.get("")
 @inject
 async def list_investigations(
     *,
     svc: FromDishka[InvestigationService],
     user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int | None, Query(ge=1, le=MAX_LIST_PAGE_SIZE)] = None,
+    before: str = "",
 ) -> list[dict]:
-    """Every investigation the caller belongs to, with their membership
-    (capability flags) so the UI can show their role."""
-    out: list[dict] = []
-    for inv in await svc.list_mine(user.id):
-        member = await svc.my_membership(user.id, inv.id)  # type: ignore[arg-type]
-        out.append(_with_membership(asdict(inv), member))
-    return out
+    """The investigations the caller belongs to, with their membership
+    (capability flags) so the UI can show their role. Newest activity first.
+
+    Without ``limit`` it returns all of them, as it always has. With it, a
+    page of that size; pass ``before=<updated_at>|<id>`` of the last row to
+    get the next page. A page shorter than ``limit`` is the last one."""
+    rows = await svc.list_mine_with_membership(
+        user.id, limit=limit, before=_decode_before(before) if before else None,
+    )
+    return [_with_membership(asdict(inv), member) for inv, member in rows]
 
 
 @router.get("/{investigation_id}")

@@ -51,7 +51,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from src.api.auth import JWT_ALGORITHM, JWT_SECRET, get_current_user
 from src.api.openapi_responses import AUTH_RESPONSES
-from src.api.rate_limit import limiter
+from src.api.rate_limit import limiter, scaled
 from src.domain.user import User
 from src.repositories.user_repository import UserRepository
 from src.services.refresh_token_service import (
@@ -372,7 +372,7 @@ async def _verify_google_token(credential: str) -> dict:
         },
     },
 )
-@limiter.limit("10/minute")
+@limiter.limit(scaled("10/minute"))
 @inject
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def google_login(
@@ -471,7 +471,7 @@ _DUMMY_PASSWORD_HASH = bcrypt.hashpw(
         409: {"description": "Email already registered to another account."},
     },
 )
-@limiter.limit("3/minute")
+@limiter.limit(scaled("3/minute"))
 @inject
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def register(
@@ -538,7 +538,7 @@ async def register(
 # egress IP over five and returned 429s that read as product bugs. Ten still
 # bounds credential stuffing hard (the per-account lockout below is the real
 # brute-force control); it just stops the gate failing for arithmetic.
-@limiter.limit("10/minute")
+@limiter.limit(scaled("10/minute"))
 @inject
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def login(
@@ -604,7 +604,7 @@ async def login(
         },
     },
 )
-@limiter.limit("30/minute")
+@limiter.limit(scaled("30/minute"))
 @inject
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def refresh(
@@ -740,7 +740,7 @@ class SimpleOk(BaseModel):
         400: {"description": "Token missing, expired, already used, or invalid."},
     },
 )
-@limiter.limit("10/minute")
+@limiter.limit(scaled("10/minute"))
 @inject
 async def verify_email(
     request: Request,  # pylint: disable=unused-argument
@@ -764,7 +764,7 @@ async def verify_email(
 
 
 @router.post("/resend-verification")
-@limiter.limit("3/minute")
+@limiter.limit(scaled("3/minute"))
 @inject
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def resend_verification(
@@ -787,7 +787,7 @@ async def resend_verification(
 
 
 @router.post("/forgot")
-@limiter.limit("3/minute")
+@limiter.limit(scaled("3/minute"))
 @inject
 async def forgot_password(
     request: Request,  # pylint: disable=unused-argument
@@ -811,7 +811,7 @@ async def forgot_password(
         400: {"description": "Reset token missing, expired, already used, or invalid."},
     },
 )
-@limiter.limit("5/minute")
+@limiter.limit(scaled("5/minute"))
 @inject
 async def reset_password(
     request: Request,  # pylint: disable=unused-argument
