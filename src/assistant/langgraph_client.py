@@ -274,8 +274,9 @@ class LangGraphProxyClient:
         has_editor = bool(payload.get("has_editor"))
         anonymous = bool(payload.get("anonymous"))
         # The query open in the Data Studio editor, when the service bound
-        # one — see the matching line in pydantic_ai_client.
-        studio_editor = None if anonymous else payload.get("studio_editor")
+        # one: the Studio's own editing surface, gating propose_query the
+        # way has_editor gates the document verbs.
+        studio_editor = engine_tools.studio_editor_for(payload, anonymous=anonymous)
 
         # Cheap preconditions before the expensive import: a turn that
         # cannot run should say why in the terms the operator can act on,

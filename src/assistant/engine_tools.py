@@ -161,6 +161,16 @@ def compact_for(payload: dict) -> bool:
     return model.context_tokens < schema_context.SCHEMA_MIN_CONTEXT_TOKENS
 
 
+def studio_editor_for(payload: dict, *, anonymous: bool) -> dict | None:
+    """The open Studio query the service bound to this turn, or None.
+
+    Always None for a signed-out visitor: the service never binds one for
+    them, and an engine must not offer a proposal into an editor nobody
+    is signed in to review it under. Both engines ask this one question.
+    """
+    return None if anonymous else payload.get("studio_editor")
+
+
 # Each argument is one gate on the surface, and every engine names each
 # one at its call site. Bundling them would hide which gates a caller
 # passes -- the same way `doc` was once dropped by an engine unnoticed.

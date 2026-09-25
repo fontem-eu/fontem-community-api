@@ -272,7 +272,7 @@ class PydanticAIProxyClient:
         # The query open in the Data Studio editor, when the service bound
         # one: the Studio's own editing surface, gating propose_query the
         # way has_editor gates the document verbs.
-        studio_editor = None if anonymous else payload.get("studio_editor")
+        studio_editor = engine_tools.studio_editor_for(payload, anonymous=anonymous)
 
         yield _sse("status", {"phase": "connecting",
                               "detail": "Starting assistant...", "elapsed": 0})

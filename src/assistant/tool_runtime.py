@@ -1056,36 +1056,9 @@ class ToolRuntime:
         if (name in studio_tools.STUDIO_ACTIONS
                 or name in (studio_tools.PROPOSE_QUERY_TOOL_NAME,
                             "mcp__gmr__insert_studio_plot")):
-            if name == studio_tools.PROPOSE_QUERY_TOOL_NAME:
-                out = await self._propose_query(client, args, studio_editor)
-            elif _targets_open_query_text(name, args, studio_editor):
-                # A write-through to the text under the user's cursor. The
-                # editor holds a draft the server has never seen, so a save
-                # here would both overwrite it and skip the review the
-                # proposal exists for. Name and language changes pass: they
-                # do not touch what the user is typing.
-                out = json.dumps({
-                    "error": "this query is open in the user's editor; "
-                             "propose the change with "
-                             "mcp__gmr__studio_propose_query so the user "
-                             "can review it",
-                })
-            # Server-side, as the asking user. The service checks access on
-            # every call, so this cannot reach a project the user could not
-            # open themselves.
-            elif studio is None:
-                out = json.dumps({
-                    "error": "the Data Studio is not available for this turn",
-                })
-            elif name == "mcp__gmr__insert_studio_plot":
-                out = _with_at_block(
-                    await self._validate_studio_plot(studio, args), at_block)
-            else:
-                # The turn's own client and the API it already talks to,
-                # handed over so a Studio write can be checked against the
-                # same engines the user's Run button uses before it is saved.
-                out = await studio.execute(name, args, client=client,
-                                           api_url=self._gmr_api_url)
+            out = await self._answer_studio(
+                client, name, args, studio=studio,
+                studio_editor=studio_editor, at_block=at_block)
             _record_call(traced, call_id, name, args, out, started, 0)
             return out, 0
 
@@ -1234,6 +1207,50 @@ class ToolRuntime:
             return json.dumps({"proposed": True,
                                "action": PROPOSAL_TOOL_ACTIONS[name]})
         return await self._validate_widget(client, args)
+
+    async def _answer_studio(self, client, name: str, args: dict, *,
+                             studio, studio_editor: dict | None,
+                             at_block) -> str:
+        """One answer for everything that needs the turn's bound Studio.
+
+        Kept out of _dispatch_inner so that function stays a table of
+        contents: which surface answers which name. The order here is the
+        decision — the open query's proposal and the guard on rewriting it
+        come BEFORE the Studio ops, because both are about the query under
+        the user's cursor rather than about the project, and neither needs
+        a bound Studio to be answered.
+        """
+        if name == studio_tools.PROPOSE_QUERY_TOOL_NAME:
+            out = await self._propose_query(client, args, studio_editor)
+        elif _targets_open_query_text(name, args, studio_editor):
+            # A write-through to the text under the user's cursor. The
+            # editor holds a draft the server has never seen, so a save
+            # here would both overwrite it and skip the review the
+            # proposal exists for. Name and language changes pass: they
+            # do not touch what the user is typing.
+            out = json.dumps({
+                "error": "this query is open in the user's editor; "
+                         "propose the change with "
+                         "mcp__gmr__studio_propose_query so the user "
+                         "can review it",
+            })
+        # Server-side, as the asking user. The service checks access on
+        # every call, so this cannot reach a project the user could not
+        # open themselves.
+        elif studio is None:
+            out = json.dumps({
+                "error": "the Data Studio is not available for this turn",
+            })
+        elif name == "mcp__gmr__insert_studio_plot":
+            out = _with_at_block(
+                await self._validate_studio_plot(studio, args), at_block)
+        else:
+            # The turn's own client and the API it already talks to,
+            # handed over so a Studio write can be checked against the
+            # same engines the user's Run button uses before it is saved.
+            out = await studio.execute(name, args, client=client,
+                                       api_url=self._gmr_api_url)
+        return out
 
     async def _propose_query(self, client, args: dict,
                              studio_editor: dict | None) -> str:
