@@ -22,6 +22,10 @@ of those is a 400 the model cannot diagnose from the error alone.
 """
 from __future__ import annotations
 
+# Re-exported, not redefined: a proposal is refused at the same length the
+# service would refuse the save, or the user is shown a diff they cannot
+# then accept.
+from src.services.data_project_service import MAX_QUERY_CHARS  # noqa: F401  pylint: disable=unused-import
 from src.services.studio_validation import CHART_TYPES as VALIDATOR_CHART_TYPES
 
 #: Query engines a source can use. Each runs through a read-only,
@@ -335,3 +339,52 @@ STUDIO_TOOLS: list[dict] = [
 #: The tool names the executor dispatches on. Nothing in the browser needs
 #: to recognise these any more — they run server-side.
 STUDIO_ACTIONS = tuple(t["function"]["name"] for t in STUDIO_TOOLS)
+
+
+#: The one Studio verb that is NOT in STUDIO_TOOLS: a proposal, executed
+#: by the browser after the user has seen it, where everything above is a
+#: write executed here. It exists because the open query is the one thing
+#: the user is looking at while they talk to the assistant — a change
+#: written straight through would land under their cursor unannounced,
+#: and a draft they had not saved would be overwritten by it.
+PROPOSE_QUERY_TOOL_NAME = "mcp__gmr__studio_propose_query"
+
+PROPOSE_QUERY_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": PROPOSE_QUERY_TOOL_NAME,
+        "description": (
+            "Proposes new text for the query the user has OPEN in the Data "
+            "Studio editor. The user sees your text as a diff against theirs "
+            "and accepts or rejects the whole change. Never assume it was "
+            "applied. Send the COMPLETE new query, not a fragment. The text "
+            "is checked against the engine first; if it does not work you "
+            "get the error back and nothing is shown to the user."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "The open project's id, from the Data Studio section.",
+                },
+                "query_id": {
+                    "type": "string",
+                    "description": "The open query's id, from the Data Studio section.",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "The complete new text of the query.",
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": (
+                        "One sentence for the user saying what changed and "
+                        "why (at most 500 characters)."
+                    ),
+                },
+            },
+            "required": ["project_id", "query_id", "query", "explanation"],
+        },
+    },
+}

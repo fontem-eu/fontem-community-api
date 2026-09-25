@@ -161,9 +161,24 @@ def compact_for(payload: dict) -> bool:
     return model.context_tokens < schema_context.SCHEMA_MIN_CONTEXT_TOKENS
 
 
+def studio_editor_for(payload: dict, *, anonymous: bool) -> dict | None:
+    """The open Studio query the service bound to this turn, or None.
+
+    Always None for a signed-out visitor: the service never binds one for
+    them, and an engine must not offer a proposal into an editor nobody
+    is signed in to review it under. Both engines ask this one question.
+    """
+    return None if anonymous else payload.get("studio_editor")
+
+
+# Each argument is one gate on the surface, and every engine names each
+# one at its call site. Bundling them would hide which gates a caller
+# passes -- the same way `doc` was once dropped by an engine unnoticed.
+# pylint: disable-next=too-many-arguments
 def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
                     nav_routes: list, *, anonymous: bool = False,
-                    compact: bool = False) -> list[dict]:
+                    compact: bool = False,
+                    studio_editor: bool = False) -> list[dict]:
     """Tool schemas for one turn, in the order the model should see them.
 
     The Studio tools are unconditional. They run server-side against the
@@ -181,6 +196,13 @@ def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
     rather than a set of subtractions on purpose: a tool added later is
     withheld from signed-out callers until someone decides otherwise, which
     is the direction an unauthenticated surface should fail in.
+
+    `studio_editor` is the Studio's own has_editor: the user has a query
+    open, so there is a surface to propose new text into. Gated like the
+    document tools and for the same reason — a proposal with nowhere to
+    land is a tool call that can only fail. Offered at both tiers: it is
+    the ONLY way to change the open query, and a small model without it
+    would reach for update_query and be refused.
     """
     if anonymous:
         # No site map, no tools: navigate is meaningless without routes to
@@ -196,6 +218,8 @@ def turn_tool_specs(gen_tools: list[dict], has_editor: bool,
               if not compact
               or t["function"]["name"] in COMPACT_STUDIO]
     specs = specs + studio
+    if studio_editor:
+        specs.append(studio_tools.PROPOSE_QUERY_TOOL)
     if nav_routes:
         specs = [navigation.navigate_tool_schema()] + specs
     docs = [t for t in gen_tools

@@ -449,3 +449,91 @@ class TestMarathonScenario:
         pairs = [("mcp__gmr__search_entities", _search_result([]))]
         step = mock_llm.next_step(_marathon_history(*pairs))
         assert "MOCK-FAIL" in step["text"]
+
+
+PROJECT = "11111111-1111-1111-1111-111111111111"
+QUERY = "22222222-2222-2222-2222-222222222222"
+
+
+def _studio_system(lang="cypher", open_query=True) -> dict:
+    """The system message a Studio turn carries, rendered by the real
+    module so the script reads the labels the platform actually emits."""
+    # pylint: disable-next=import-outside-toplevel
+    from src.assistant import studio_context
+    studio = {"project_id": PROJECT, "project_name": "Procurement",
+              "query": {"id": QUERY, "name": "Q", "lang": lang,
+                        "text": "MATCH (c:Company) RETURN c LIMIT 5"}
+              if open_query else None}
+    return {"role": "system", "content": studio_context.system_context(studio)}
+
+
+def _studio_history(scenario, *pairs, lang="cypher", open_query=True):
+    msgs = [_studio_system(lang, open_query),
+            {"role": "user", "content": f"E2E-SCENARIO: {scenario} count them"}]
+    for i, (name, result) in enumerate(pairs):
+        call_id = f"s{i}"
+        msgs.append({"role": "assistant", "content": None, "tool_calls": [
+            {"id": call_id, "type": "function", "function": {"name": name}}]})
+        msgs.append({"role": "tool", "tool_call_id": call_id, "name": name,
+                     "content": result})
+    return msgs
+
+
+class TestStudioScenarios:
+    """The scripted twin of the query proposal: ids from the prompt, text
+    per language, and the verdict read back from the tool result."""
+
+    def test_it_proposes_for_the_query_the_prompt_names(self):
+        step = mock_llm.next_step(_studio_history("studio"))
+        assert step["tool"] == "mcp__gmr__studio_propose_query"
+        assert step["args"]["project_id"] == PROJECT
+        assert step["args"]["query_id"] == QUERY
+        assert step["args"]["query"] == mock_llm.STUDIO_SAMPLE["cypher"]
+        assert step["args"]["explanation"].startswith("MOCK-PROPOSAL")
+
+    @pytest.mark.parametrize("lang", ["cypher", "sql", "sparql"])
+    def test_the_text_follows_the_open_query_language(self, lang):
+        good = mock_llm.next_step(_studio_history("studio", lang=lang))
+        bad = mock_llm.next_step(_studio_history("studio-bad", lang=lang))
+        assert good["args"]["query"] == mock_llm.STUDIO_SAMPLE[lang]
+        assert bad["args"]["query"] == mock_llm.STUDIO_BAD[lang]
+
+    def test_the_ids_come_from_the_system_message_not_the_user(self):
+        msgs = _studio_history("studio")
+        # The user message carries no ids; strip the system one and the
+        # script has nowhere else to look.
+        without = [m for m in msgs if m.get("role") != "system"]
+        step = mock_llm.next_step(without)
+        assert "tool" not in step
+        assert step["text"] == "MOCK-FAIL: no open query in the system prompt."
+
+    def test_no_open_query_fails_loudly(self):
+        step = mock_llm.next_step(_studio_history("studio", open_query=False))
+        assert step["text"].startswith("MOCK-FAIL: no open query")
+
+    def test_a_proposal_that_went_through_ends_the_good_script(self):
+        step = mock_llm.next_step(_studio_history(
+            "studio", ("mcp__gmr__studio_propose_query",
+                       '{"proposed": true, "action": "propose_query"}')))
+        assert step == {"text": "MOCK-OK: proposed a query."}
+
+    def test_a_refused_proposal_fails_the_good_script_with_the_reason(self):
+        step = mock_llm.next_step(_studio_history(
+            "studio", ("mcp__gmr__studio_propose_query",
+                       '{"error": "the proposal was withdrawn because ..."}')))
+        assert step["text"].startswith("MOCK-FAIL: propose_query errored.")
+        assert "withdrawn" in step["text"]
+
+    def test_the_bad_script_expects_a_refusal(self):
+        step = mock_llm.next_step(_studio_history(
+            "studio-bad", ("mcp__gmr__studio_propose_query",
+                           '{"error": "the proposal was withdrawn because ..."}')))
+        assert step == {"text": "MOCK-OK: the bad proposal was refused as expected."}
+
+    def test_the_bad_script_fails_when_the_bad_query_was_accepted(self):
+        # The platform stopped checking proposals: exactly the regression
+        # this scenario is deployed to catch.
+        step = mock_llm.next_step(_studio_history(
+            "studio-bad", ("mcp__gmr__studio_propose_query",
+                           '{"proposed": true, "action": "propose_query"}')))
+        assert step == {"text": "MOCK-FAIL: the bad query was accepted."}

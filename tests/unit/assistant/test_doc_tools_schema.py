@@ -13,6 +13,7 @@ to — names, parameter names, types, required-ness, and the enum.
 """
 import pytest
 
+from src.assistant import studio_tools
 from src.assistant.doc_tools import (
     DOC_TOOLS,
     PROPOSAL_TOOL_ACTIONS,
@@ -115,9 +116,14 @@ def test_proposal_actions_map_advertised_tools_to_frontend_actions():
         # the server computes the revised body, so what the editor applies
         # is a whole-body swap either way.
         "mcp__gmr__replace_part": "replace_body",
+        # Not a document tool: new text for the query open in the Data
+        # Studio editor, reviewed there as a diff. Last, because the JS
+        # advertised-actions list is pinned to this order.
+        "mcp__gmr__studio_propose_query": "propose_query",
     }
+    advertised = set(_by_name()) | {studio_tools.PROPOSE_QUERY_TOOL_NAME}
     for tool_name in PROPOSAL_TOOL_ACTIONS:
-        assert tool_name in _by_name(), f"{tool_name} is mapped but not advertised"
+        assert tool_name in advertised, f"{tool_name} is mapped but not advertised"
 
 
 def test_read_document_takes_no_parameters():

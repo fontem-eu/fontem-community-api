@@ -64,6 +64,16 @@ def test_the_offered_surface_is_deliberately_small():
     ]
 
 
+def test_an_open_studio_query_adds_exactly_the_proposal_verb():
+    """The Studio's own has_editor: a query open in the editor is a surface
+    to propose new text into, and nothing else about the surface moves."""
+    plain = _names(turn_tool_specs(GENERATED, True, ROUTES))
+    with_query = _names(turn_tool_specs(GENERATED, True, ROUTES,
+                                        studio_editor=True))
+    assert with_query == plain[:-1] + [
+        studio_tools.PROPOSE_QUERY_TOOL_NAME, "get_doc"]
+
+
 def test_the_narrow_generated_endpoints_are_gone():
     """Eleven of these could not between them answer 'which contracts
     involve Israeli companies' while crowding the array."""

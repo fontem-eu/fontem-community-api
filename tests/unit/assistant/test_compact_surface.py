@@ -24,6 +24,13 @@ def test_the_compact_surface_is_at_most_the_width_that_worked():
     # surface must stay at or under the proven width, editor or not.
     assert len(turn_tool_specs([], False, ROUTES, compact=True)) <= 12
     assert len(turn_tool_specs([], True, ROUTES, compact=True)) <= 14
+    # One more with a Studio query open: the only way to change that query
+    # is the proposal verb, and a small model without it reaches for
+    # update_query and is refused.
+    assert len(turn_tool_specs([], False, ROUTES, compact=True,
+                               studio_editor=True)) <= 13
+    assert len(turn_tool_specs([], True, ROUTES, compact=True,
+                               studio_editor=True)) <= 15
 
 
 def test_compact_keeps_every_loop_closable():

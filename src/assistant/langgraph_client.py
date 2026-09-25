@@ -218,6 +218,7 @@ class LangGraphProxyClient:
                         pending_nav=pending_nav, budget=budget,
                         name_cache=name_cache, traced=traced,
                         audit=c.audit, allowed=c.allowed,
+                        studio_editor=c.studio_editor,
                     )
                     return capped
                 if c.turn_lock is not None:
@@ -272,6 +273,10 @@ class LangGraphProxyClient:
         nav_routes = nav.get("routes") or []
         has_editor = bool(payload.get("has_editor"))
         anonymous = bool(payload.get("anonymous"))
+        # The query open in the Data Studio editor, when the service bound
+        # one: the Studio's own editing surface, gating propose_query the
+        # way has_editor gates the document verbs.
+        studio_editor = engine_tools.studio_editor_for(payload, anonymous=anonymous)
 
         # Cheap preconditions before the expensive import: a turn that
         # cannot run should say why in the terms the operator can act on,
@@ -296,7 +301,8 @@ class LangGraphProxyClient:
                 specs = turn_tool_specs(
                         gen_tools, has_editor, nav_routes,
                         anonymous=anonymous,
-                        compact=engine_tools.compact_for(payload))
+                        compact=engine_tools.compact_for(payload),
+                        studio_editor=bool(studio_editor))
                 # Sized by the service to the answering model's context; the
                 # constant is only the floor for payloads that predate the
                 # field (and the anonymous turn, which never sets it).
@@ -317,6 +323,7 @@ class LangGraphProxyClient:
                         allowed=ANONYMOUS_TOOLS if anonymous else None,
                         doc=None if anonymous else payload.get("doc_ops"),
                         turn_lock=payload.get("turn_lock"),
+                        studio_editor=studio_editor,
                     ),
                 )
                 # What the id resolves to on the server, not the id itself.

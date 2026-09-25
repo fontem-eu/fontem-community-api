@@ -53,7 +53,7 @@ from src.assistant.entities import (
     _build_summary, _capture_names, entity_name,
     slim_contract, slim_graph, slim_props,
 )
-from src.services import audit_context
+from src.services import audit_context, studio_validation
 
 
 # ── Tool schemas (OpenAI / Mistral function-calling format) ────────────
@@ -228,6 +228,7 @@ _TOOL_LABELS = {
     "mcp__gmr__set_abstract": "Proposing an abstract",
     "mcp__gmr__replace_body": "Proposing a rewrite",
     "mcp__gmr__insert_widget": "Proposing a widget",
+    "mcp__gmr__studio_propose_query": "Proposing a query",
     "mcp__gmr__query_graph": "Probing the data store",
     "mcp__gmr__calculate": "Calculating",
     # Legacy tools — still implemented for old conversations, but no
@@ -536,6 +537,10 @@ class ToolTurnContext:
     doc: object | None = None
     allowed: frozenset | None = None
     turn_lock: object | None = None
+    #: {project_id, query_id, lang} of the query open in the Data Studio
+    #: editor, or None. The Studio's own `doc`: what propose_query targets
+    #: and what update_query must keep its hands off.
+    studio_editor: dict | None = None
 
 
 #: Hard ceiling on one tool call, whatever it is doing. Two reasons this
@@ -602,6 +607,54 @@ def _record_call(traced: list | None, call_id: str, name: str, args: dict,
         name, args, result, time.time() - started,
         raw_len=raw_len or None, call_id=call_id,
     ))
+
+
+def _proposal_refusal(args: dict, studio_editor: dict | None) -> dict | None:
+    """Why a query proposal cannot be drawn, before the engine is asked.
+
+    Each reason is a sentence the model can act on, and the ids are
+    checked against the OPEN query rather than the project: a diff can only
+    land in the editor that is showing the text it was computed against.
+    """
+    if not studio_editor:
+        return {
+            "error": "no query is open in the Data Studio editor",
+            "hint": "the user has to open a query before its text can be "
+                    "proposed; studio_update_query changes saved queries "
+                    "directly",
+        }
+    project_id = str(args.get("project_id") or "").strip()
+    query_id = str(args.get("query_id") or "").strip()
+    if (project_id != studio_editor.get("project_id")
+            or query_id != studio_editor.get("query_id")):
+        return {
+            "error": "only the open query can be proposed: the editor has "
+                     f"query {studio_editor.get('query_id')!r} of project "
+                     f"{studio_editor.get('project_id')!r}",
+            "hint": "use those ids, or studio_update_query for a query that "
+                    "is not open",
+        }
+    query = str(args.get("query") or "")
+    if not query.strip():
+        return {"error": "the query is empty"}
+    if len(query) > studio_tools.MAX_QUERY_CHARS:
+        return {"error": "the query is too long (max "
+                         f"{studio_tools.MAX_QUERY_CHARS} characters)"}
+    if not str(args.get("explanation") or "").strip():
+        return {"error": "explanation is required"}
+    return None
+
+
+def _targets_open_query_text(name: str, args: dict,
+                             studio_editor: dict | None) -> bool:
+    """Whether a call is update_query rewriting the text under the user's
+    cursor. False when nothing is open, when the call addresses another
+    query, or when it changes only the name or the language."""
+    if name != "mcp__gmr__studio_update_query" or not studio_editor:
+        return False
+    if str(args.get("query_id") or "").strip() != studio_editor.get("query_id"):
+        return False
+    return args.get("query") is not None
 
 
 async def _document_is_readable(doc) -> bool:
@@ -812,7 +865,7 @@ class ToolRuntime:
         budget: list[int], name_cache: dict,
         traced: list | None = None, audit=None,
         allowed: frozenset[str] | None = None,
-        doc=None,
+        doc=None, studio_editor: dict | None = None,
     ) -> tuple[str, int]:
         """Run one tool call. Returns (what the model sees, raw result length).
 
@@ -918,7 +971,7 @@ class ToolRuntime:
                         nav_routes=nav_routes, pending_nav=pending_nav,
                         budget=budget, name_cache=name_cache,
                         traced=traced, call_id=call_id, started=started,
-                        doc=doc,
+                        doc=doc, studio_editor=studio_editor,
                     ),
                     timeout=TOOL_CALL_TIMEOUT_S,
                 )
@@ -945,7 +998,7 @@ class ToolRuntime:
         studio, nav_routes: list, pending_nav: list,
         budget: list[int], name_cache: dict,
         traced: list | None, call_id: str, started: float,
-        doc=None,
+        doc=None, studio_editor: dict | None = None,
     ) -> tuple[str, int]:
         """The dispatch itself, once provenance is in scope."""
         if name == "mcp__gmr__read_document":
@@ -993,24 +1046,19 @@ class ToolRuntime:
         # answered here for the same reason read_document is — the object
         # it needs is bound to the turn, not reachable from execute_tool,
         # whose signature llm_service and several tests already call.
+        #
+        # The open query's proposal sits here too, decided BEFORE the
+        # Studio ops run. The query under the user's cursor is theirs, not
+        # the project's: new text for it is a diff the editor shows, never
+        # a write, so it needs no bound Studio — only to know which query
+        # is open. update_query is turned away from that same query for the
+        # same reason, and both decisions read `studio_editor`.
         if (name in studio_tools.STUDIO_ACTIONS
-                or name == "mcp__gmr__insert_studio_plot"):
-            # Server-side, as the asking user. The service checks access on
-            # every call, so this cannot reach a project the user could not
-            # open themselves.
-            if studio is None:
-                out = json.dumps({
-                    "error": "the Data Studio is not available for this turn",
-                })
-            elif name == "mcp__gmr__insert_studio_plot":
-                out = _with_at_block(
-                    await self._validate_studio_plot(studio, args), at_block)
-            else:
-                # The turn's own client and the API it already talks to,
-                # handed over so a Studio write can be checked against the
-                # same engines the user's Run button uses before it is saved.
-                out = await studio.execute(name, args, client=client,
-                                           api_url=self._gmr_api_url)
+                or name in (studio_tools.PROPOSE_QUERY_TOOL_NAME,
+                            "mcp__gmr__insert_studio_plot")):
+            out = await self._answer_studio(
+                client, name, args, studio=studio,
+                studio_editor=studio_editor, at_block=at_block)
             _record_call(traced, call_id, name, args, out, started, 0)
             return out, 0
 
@@ -1159,6 +1207,93 @@ class ToolRuntime:
             return json.dumps({"proposed": True,
                                "action": PROPOSAL_TOOL_ACTIONS[name]})
         return await self._validate_widget(client, args)
+
+    async def _answer_studio(self, client, name: str, args: dict, *,
+                             studio, studio_editor: dict | None,
+                             at_block) -> str:
+        """One answer for everything that needs the turn's bound Studio.
+
+        Kept out of _dispatch_inner so that function stays a table of
+        contents: which surface answers which name. The order here is the
+        decision — the open query's proposal and the guard on rewriting it
+        come BEFORE the Studio ops, because both are about the query under
+        the user's cursor rather than about the project, and neither needs
+        a bound Studio to be answered.
+        """
+        if name == studio_tools.PROPOSE_QUERY_TOOL_NAME:
+            out = await self._propose_query(client, args, studio_editor)
+        elif _targets_open_query_text(name, args, studio_editor):
+            # A write-through to the text under the user's cursor. The
+            # editor holds a draft the server has never seen, so a save
+            # here would both overwrite it and skip the review the
+            # proposal exists for. Name and language changes pass: they
+            # do not touch what the user is typing.
+            out = json.dumps({
+                "error": "this query is open in the user's editor; "
+                         "propose the change with "
+                         "mcp__gmr__studio_propose_query so the user "
+                         "can review it",
+            })
+        # Server-side, as the asking user. The service checks access on
+        # every call, so this cannot reach a project the user could not
+        # open themselves.
+        elif studio is None:
+            out = json.dumps({
+                "error": "the Data Studio is not available for this turn",
+            })
+        elif name == "mcp__gmr__insert_studio_plot":
+            out = _with_at_block(
+                await self._validate_studio_plot(studio, args), at_block)
+        else:
+            # The turn's own client and the API it already talks to,
+            # handed over so a Studio write can be checked against the
+            # same engines the user's Run button uses before it is saved.
+            out = await studio.execute(name, args, client=client,
+                                       api_url=self._gmr_api_url)
+        return out
+
+    async def _propose_query(self, client, args: dict,
+                             studio_editor: dict | None) -> str:
+        """New text for the open query, checked before it becomes a diff.
+
+        Same standard as add_query: the engine is asked first, and a query
+        it rejects is withdrawn with the engine's own words — the user
+        must not be the one to discover that the proposed fix does not
+        parse. A query that could not be CHECKED is still proposed, with
+        the warning attached, for the reason studio_validation gives: an
+        outage is not a fault in the query. Nothing here writes; the
+        receipt is what the model reads back and the diff is drawn by the
+        editor from the status event.
+        """
+        refusal = _proposal_refusal(args, studio_editor)
+        if refusal:
+            return json.dumps(refusal)
+        query = str(args.get("query") or "")
+        lang = str(studio_editor.get("lang") or "").strip().lower()
+        receipt = {
+            "proposed": True,
+            "action": PROPOSAL_TOOL_ACTIONS[studio_tools.PROPOSE_QUERY_TOOL_NAME],
+            "project_id": studio_editor["project_id"],
+            "query_id": studio_editor["query_id"],
+            "columns": [],
+            "warnings": [],
+        }
+        if client is None:
+            # Unit tests hand in no engine. The same shape as an engine we
+            # could not reach: proposed, and honest about the check.
+            receipt["warnings"].append("the query was not checked")
+            return json.dumps(receipt)
+        verdict = await studio_validation.validate_query(
+            client, self._gmr_api_url, lang, query)
+        if not verdict.ok:
+            return json.dumps({
+                "error": "the proposal was withdrawn because the query does "
+                         "not work: " + "; ".join(verdict.errors),
+                "hint": "fix the query and propose it again",
+            })
+        receipt["columns"] = list(verdict.columns)
+        receipt["warnings"] = list(verdict.warnings)
+        return json.dumps(receipt)
 
     async def _validate_studio_plot(self, studio, args: dict) -> str:
         """Resolve the plot before it becomes a card.

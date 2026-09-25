@@ -857,3 +857,83 @@ class TestTheAssistantEditsTheArticleOnScreen:
         req = ChatRequest(user_id="u1", conversation_key="global",
                           message="m", context_block="")
         assert _document_under_edit(req) is None
+
+
+class TestTheAssistantSeesTheOpenStudioQuery:
+    """The Data Studio view rides with the turn.
+
+    The Studio tools act on saved projects by id; the query the user has
+    OPEN is a draft only the browser has. The client sends it, the prompt
+    describes it, and the payload binds it as the Studio's editing surface
+    so the proposal verb is offered — signed in, with a query open, and
+    not otherwise.
+    """
+
+    STUDIO = {
+        "project_id": "11111111-1111-1111-1111-111111111111",
+        "project_name": "Procurement",
+        "query": {
+            "id": "22222222-2222-2222-2222-222222222222",
+            "name": "Companies", "lang": "cypher",
+            "text": "MATCH (c:Company) RETURN c.name LIMIT 5",
+            "last_error": None, "columns": ["name"],
+        },
+    }
+
+    def _post(self, client, services, **extra):
+        asyncio.get_event_loop().run_until_complete(
+            seed_user(services["user_repo"], "user-1")
+        )
+        body = {"message": "count them instead",
+                "conversation_key": "studio:11111111-1111-1111-1111-111111111111",
+                "context_block": ""}
+        body.update(extra)
+        return client.post("/assist/chat/stream", json=body,
+                           headers=make_headers("user-1"))
+
+    def test_an_open_query_binds_the_editor_and_describes_it(
+        self, client, services, recording,
+    ):
+        assert self._post(client, services, studio=self.STUDIO).status_code == 200
+        proxy, _ = recording
+        payload = proxy.payloads[0]
+        assert payload["studio_editor"] == {
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "query_id": "22222222-2222-2222-2222-222222222222",
+            "lang": "cypher",
+        }
+        assert "## Data Studio" in payload["system"]
+        assert "MATCH (c:Company) RETURN c.name LIMIT 5" in payload["system"]
+        assert "Result columns: name" in payload["system"]
+
+    def test_a_project_with_no_open_query_is_described_but_not_an_editor(
+        self, client, services, recording,
+    ):
+        self._post(client, services, studio={**self.STUDIO, "query": None})
+        proxy, _ = recording
+        assert "studio_editor" not in proxy.payloads[0]
+        assert "## Data Studio" in proxy.payloads[0]["system"]
+        assert "No query is open." in proxy.payloads[0]["system"]
+
+    def test_outside_the_studio_nothing_is_bound_or_described(
+        self, client, services, recording,
+    ):
+        self._post(client, services)
+        proxy, _ = recording
+        assert "studio_editor" not in proxy.payloads[0]
+        assert "## Data Studio" not in proxy.payloads[0]["system"]
+
+    def test_a_signed_out_turn_ignores_it(self, client, recording):
+        # Like has_editor: a proposal needs an account to review it under,
+        # and an unauthenticated body must not open a surface.
+        _anon_post(client, studio=self.STUDIO)
+        proxy, _ = recording
+        assert "studio_editor" not in proxy.payloads[0]
+        assert "## Data Studio" not in proxy.payloads[0]["system"]
+
+    def test_the_body_is_validated(self, client, services, recording):
+        too_long = {**self.STUDIO,
+                    "query": {**self.STUDIO["query"], "text": "x" * 8001}}
+        assert self._post(client, services, studio=too_long).status_code == 422
+        proxy, _ = recording
+        assert proxy.payloads == []

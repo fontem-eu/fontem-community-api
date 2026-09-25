@@ -193,6 +193,7 @@ def build_system_prompt(
     site_map: str = "",
     schema_block: str = "",
     catalogue_block: str = "",
+    studio_block: str = "",
 ) -> str:
     """Stitch the base system prompt, caller context, and history.
 
@@ -202,6 +203,7 @@ def build_system_prompt(
         <site_map>            <- stable across the whole conversation
         <catalogue_block>     <- what the platform holds
         <schema_block>        <- how that data is shaped
+        <studio_block>        <- the open Studio query; changes as they type
 
         Current context:
         <context_block>       <- changes when the user navigates
@@ -237,6 +239,13 @@ def build_system_prompt(
         # Stable for at least the schema cache's TTL, so it sits with the
         # other stable sections, ahead of everything that changes per turn.
         parts.append(schema_block.strip())
+
+    if studio_block:
+        # Volatile: it carries the editor's current draft, which changes
+        # between turns while the user types. It goes after every stable
+        # section for the cache's sake and ahead of the context block
+        # because it is what the context is about.
+        parts.append(studio_block.strip())
 
     if context_block:
         parts.append("Current context:\n" + context_block.rstrip())
