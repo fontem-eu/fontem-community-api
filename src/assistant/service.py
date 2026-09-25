@@ -32,6 +32,7 @@ from src.assistant import (
     schema_context,
     local_models,
     navigation,
+    studio_context,
     summariser,
     tool_budget,
 )
@@ -96,6 +97,11 @@ class ChatRequest:
     #: id from src/assistant/local_models.py, resolved to a served name by
     #: the proxy client — never a filename from the caller.
     local_model_id: str | None = None
+    #: The Data Studio view the user is in, as the client sees it: the
+    #: project and, when one is open, the query editor's CURRENT text.
+    #: The saved copy is reachable through the Studio tools; this is the
+    #: draft, which only the browser has. None outside the Studio.
+    studio: dict | None = None
 
 
 #: How long a signed-out visitor's message may be.
@@ -332,6 +338,7 @@ class AssistantService:
             site_map=navigation.system_context(req.nav),
             schema_block=schema_block,
             catalogue_block=catalogue_block,
+            studio_block=studio_context.system_context(req.studio),
         )
 
         # Persist the user row immediately with an estimate.
@@ -421,6 +428,13 @@ class AssistantService:
             # that creates one.
             from src.assistant.studio_ops import StudioOps
             payload["studio_ops"] = StudioOps(self._projects, req.user_id)
+
+        studio_editor = studio_context.open_query(req.studio)
+        if studio_editor:
+            # The Studio's has_editor. Only when a query is actually open:
+            # the project alone is not a surface to propose into, and a
+            # proposal tool offered without one can only fail.
+            payload["studio_editor"] = studio_editor
 
         # One turn, one DB session, MANY concurrent touchers: a model
         # that fans out tool calls (MiniMax does) runs studio/doc ops in

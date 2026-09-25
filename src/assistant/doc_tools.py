@@ -31,6 +31,12 @@ PROPOSAL_TOOL_ACTIONS = {
     "mcp__gmr__replace_part": "replace_body",
     "mcp__gmr__insert_widget": "insert_widget",
     "mcp__gmr__insert_studio_plot": "insert_studio_plot",
+    # Not an article edit at all: new text for the query open in the Data
+    # Studio editor, reviewed there as a diff. It rides this map because
+    # the engines attach `status.proposal` for every name in it, and the
+    # panel routes on the action. Appended LAST — fontem-web's
+    # ASSISTANT_ADVERTISED_ACTIONS is pinned to this order.
+    "mcp__gmr__studio_propose_query": "propose_query",
 }
 
 DOC_TOOLS: list[dict] = [

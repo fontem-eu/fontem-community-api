@@ -140,6 +140,17 @@
       ],
       "description": "The article the user has open, if any. The assistant's document tools act on THIS \u2014 not on whichever report the selected conversation happens to be about, which is a different thing the moment somebody switches threads.",
       "title": "Report Id"
+     },
+     "studio": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/StudioContextBody"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "The Data Studio project the user is in and, when one is open, the query editor's current text. Present only while a Studio view is registered; with an open query the assistant may propose new text for it, reviewed in the editor as a diff. Ignored on a signed-out turn."
      }
     },
     "required": [
@@ -1766,6 +1777,96 @@
      }
     },
     "title": "SimpleOk",
+    "type": "object"
+   },
+   "StudioContextBody": {
+    "description": "Where in the Data Studio the user is. Sent only from a Studio view.",
+    "properties": {
+     "project_id": {
+      "title": "Project Id",
+      "type": "string"
+     },
+     "project_name": {
+      "default": "",
+      "maxLength": 300,
+      "title": "Project Name",
+      "type": "string"
+     },
+     "query": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/StudioQueryBody"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "project_id"
+    ],
+    "title": "StudioContextBody",
+    "type": "object"
+   },
+   "StudioQueryBody": {
+    "description": "The query open in the Data Studio editor, as the editor has it.\n\n``text`` is the CURRENT draft, not the saved query: the assistant is\nasked to fix what the user is looking at, which stops matching the\nsaved copy the moment they type. ``last_error`` and ``columns`` come\nfrom the editor's last run, so the assistant can be told what failed\nor what came back without running anything itself.",
+    "properties": {
+     "columns": {
+      "anyOf": [
+       {
+        "items": {
+         "maxLength": 200,
+         "type": "string"
+        },
+        "maxItems": 50,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Columns"
+     },
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "lang": {
+      "maxLength": 20,
+      "title": "Lang",
+      "type": "string"
+     },
+     "last_error": {
+      "anyOf": [
+       {
+        "maxLength": 2000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Error"
+     },
+     "name": {
+      "default": "",
+      "maxLength": 300,
+      "title": "Name",
+      "type": "string"
+     },
+     "text": {
+      "default": "",
+      "maxLength": 8000,
+      "title": "Text",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "lang"
+    ],
+    "title": "StudioQueryBody",
     "type": "object"
    },
    "TokenResponse": {

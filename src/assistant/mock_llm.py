@@ -321,11 +321,104 @@ def _edit_step(messages: list[dict]) -> dict:
     return {"text": "MOCK-OK: proposed a rewrite of the draft."}
 
 
+PROPOSE_QUERY = "mcp__gmr__studio_propose_query"
+
+#: What each script proposes, per query language. Working text for the
+#: "studio" scenario; text the engine must refuse for "studio-bad" — a
+#: label typo Cypher plans happily and Neo4j flags as UnknownLabelWarning,
+#: an SQL keyword that does not parse, a SPARQL block never closed.
+STUDIO_SAMPLE = {
+    "cypher": "MATCH (c:Company) RETURN count(c) AS companies",
+    "sql": "SELECT 1 AS one",
+    "sparql": "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o } LIMIT 1",
+}
+STUDIO_BAD = {
+    "cypher": "MATCH (c:Compnay) RETURN c LIMIT 1",
+    "sql": "SELEC 1",
+    "sparql": "SELECT ?x WHERE {",
+}
+
+#: How the open query is read back out of the prompt. These are the
+#: labels studio_context.system_context renders; the mock sees the same
+#: system message a real model does, so the ids come from the platform
+#: rather than from the test.
+_PROJECT_ID = re.compile(r"project_id: ([0-9a-fA-F-]{36})")
+_QUERY_ID = re.compile(r"query_id: ([0-9a-fA-F-]{36})")
+_LANGUAGE = re.compile(r"language: (\w+)")
+
+
+def _system_text(messages: list[dict]) -> str:
+    for msg in messages:
+        if msg.get("role") == "system":
+            content = msg.get("content")
+            if isinstance(content, list):
+                return " ".join(p.get("text", "") for p in content
+                                if isinstance(p, dict))
+            return str(content or "")
+    return ""
+
+
+def _open_query(messages: list[dict]) -> dict | None:
+    """{project_id, query_id, lang} from the Data Studio section, or None."""
+    text = _system_text(messages)
+    project = _PROJECT_ID.search(text)
+    query = _QUERY_ID.search(text)
+    lang = _LANGUAGE.search(text)
+    if not (project and query and lang):
+        return None
+    return {"project_id": project.group(1), "query_id": query.group(1),
+            "lang": lang.group(1).lower()}
+
+
+def _studio_step(messages: list[dict], samples: dict[str, str],
+                 refused_is_success: bool) -> dict:
+    """Propose text for the open query, then report what came back.
+
+    One script body for both scenarios; only the text and the reading of
+    the result differ. Like _edit_step it derives everything from the
+    conversation: the ids from the system prompt, the outcome from the
+    tool result — so a platform that stops offering the open query, or
+    stops checking proposals, fails the e2e with the reason attached.
+    """
+    results = _tool_results(messages)
+    proposed = next((raw for name, raw in results if name == PROPOSE_QUERY),
+                    None)
+    if proposed is None:
+        editor = _open_query(messages)
+        if editor is None:
+            return {"text": "MOCK-FAIL: no open query in the system prompt."}
+        text = samples.get(editor["lang"], samples["cypher"])
+        return {"tool": PROPOSE_QUERY, "args": {
+            "project_id": editor["project_id"],
+            "query_id": editor["query_id"],
+            "query": text,
+            "explanation": "MOCK-PROPOSAL: a count for the e2e",
+        }}
+    refused = '"error"' in proposed
+    if refused_is_success:
+        if refused:
+            return {"text": "MOCK-OK: the bad proposal was refused as expected."}
+        return {"text": "MOCK-FAIL: the bad query was accepted."}
+    if refused:
+        return {"text": "MOCK-FAIL: propose_query errored. " + proposed[:200]}
+    return {"text": "MOCK-OK: proposed a query."}
+
+
+def _studio_good_step(messages: list[dict]) -> dict:
+    return _studio_step(messages, STUDIO_SAMPLE, refused_is_success=False)
+
+
+def _studio_bad_step(messages: list[dict]) -> dict:
+    return _studio_step(messages, STUDIO_BAD, refused_is_success=True)
+
+
 SCRIPTS = {
     "toolchain": _toolchain_step,
     "marathon": _marathon_step,
     "echo": _echo_step,
     "edit": _edit_step,
+    "studio": _studio_good_step,
+    "studio-bad": _studio_bad_step,
 }
 
 
