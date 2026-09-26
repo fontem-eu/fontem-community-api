@@ -13,6 +13,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from src.api.schemas.text import Label
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
@@ -22,12 +23,12 @@ router = APIRouter(prefix="/dossiers", tags=["dossiers"], responses=RESOURCE_RES
 
 
 class CreateDossierRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=300)
+    name: Label = Field(min_length=1, max_length=300)
     investigation_id: str | None = None
 
 
 class UpdateDossierRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=300)
+    name: Label = Field(min_length=1, max_length=300)
 
 
 class AddArticleRequest(BaseModel):
