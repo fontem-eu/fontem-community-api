@@ -8,6 +8,7 @@ import json
 import httpx
 import pytest
 
+from src.services import query_executor
 from src.services.query_executor import HttpQueryExecutor
 
 
@@ -20,6 +21,8 @@ def stub(monkeypatch):
     """Route the executor's httpx client at a handler, and record requests."""
     seen: list[dict] = []
     original = httpx.AsyncClient
+    # Keep the connect-retry path, drop its real sleeps.
+    monkeypatch.setattr(query_executor, "CONNECT_RETRY_DELAYS_S", (0, 0, 0))
 
     def install(handler):
         transport = httpx.MockTransport(lambda request: _record(request, handler, seen))
@@ -154,3 +157,63 @@ def test_a_successful_run_is_not_an_outage(stub):
     res = _run(HttpQueryExecutor("http://api").run("cypher", "MATCH (n) RETURN n"))
     assert res.store_unreachable is False
     assert res.error is None
+
+
+def test_a_rollout_blip_is_retried_until_the_proxy_answers(stub):
+    """Run 14316: a pod stopped listening before the Service stopped routing
+    to it, and the gate's feed refresh failed on "All connection attempts
+    failed". Nothing ran, the proxies are read-only — retry."""
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.ConnectError("All connection attempts failed", request=request)
+        return httpx.Response(200, json={"columns": ["item_id"], "rows": [["a"]], "row_count": 1})
+
+    stub(handler)
+    res = _run(HttpQueryExecutor("http://api").run("cypher", "MATCH (n) RETURN n"))
+    assert res.error is None and res.rows == [["a"]]
+    assert calls["n"] == 3
+
+
+def test_a_dropped_connection_is_retried_too(stub):
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.", request=request)
+        return httpx.Response(200, json={"columns": [], "rows": [], "row_count": 0})
+
+    stub(handler)
+    assert _run(HttpQueryExecutor("http://api").run("sql", "SELECT 1")).error is None
+    assert calls["n"] == 2
+
+
+def test_retries_are_bounded(stub):
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        raise httpx.ConnectError("connection refused", request=request)
+
+    stub(handler)
+    res = _run(HttpQueryExecutor("http://api").run("sql", "SELECT 1"))
+    assert res.store_unreachable is True
+    assert calls["n"] == len(query_executor.CONNECT_RETRY_DELAYS_S) + 1
+
+
+def test_a_read_timeout_is_not_retried(stub):
+    """The query may be running; a second copy doubles the load for a
+    statement the proxy is about to kill anyway."""
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    stub(handler)
+    res = _run(HttpQueryExecutor("http://api").run("sql", "SELECT 1"))
+    assert res.store_unreachable is True
+    assert calls["n"] == 1
