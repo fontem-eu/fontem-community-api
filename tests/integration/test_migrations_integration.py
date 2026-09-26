@@ -364,7 +364,9 @@ def test_027_indexes_the_switcher_page_order_where_the_table_exists():
         )
         _alembic(url, "upgrade", "head")
         index = _switcher_index(engine)
-        _alembic(url, "downgrade", "-1")
+        # To 026 by name, not "-1": "-1" is whatever head is today, and once
+        # 028 landed it stepped back over 028 and left this index standing.
+        _alembic(url, "downgrade", "026")
         dropped = _switcher_index(engine)
         # Guarded: a repeat, or a hand-applied index, must not fail the deploy.
         _alembic(url, "upgrade", "head")
@@ -395,7 +397,8 @@ def test_028_indexes_investigation_members_by_user():
             return {i["name"]: i for i in sa.inspect(engine).get_indexes("investigation_members")}.get(
                 "ix_investigation_members_user")
         built = index()
-        _alembic(url, "downgrade", "-1")
+        # By name, for the reason test_027 gives.
+        _alembic(url, "downgrade", "027")
         dropped = index()
         _alembic(url, "upgrade", "head")
         _alembic(url, "stamp", "027")
@@ -405,5 +408,34 @@ def test_028_indexes_investigation_members_by_user():
     if built == "no-table":
         pytest.skip("fresh build has no investigation_members table")
     assert built is not None and built["column_names"] == ["user_id"]
+    assert dropped is None
+    assert again is not None
+
+
+def test_029_indexes_the_studio_owner_page_order():
+    """008 creates data_projects and nothing drops it, so a plain upgrade
+    builds the index in the exact keyset order the owner list pages on."""
+    with PostgresContainer("postgres:16-alpine") as pg:
+        url = pg.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
+        engine = sa.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        _alembic(url, "upgrade", "head")
+
+        def index():
+            return {i["name"]: i for i in sa.inspect(engine).get_indexes("data_projects")}.get(
+                "ix_data_projects_owner_page")
+
+        built = index()
+        _alembic(url, "downgrade", "028")
+        dropped = index()
+        _alembic(url, "upgrade", "head")
+        _alembic(url, "stamp", "028")
+        _alembic(url, "upgrade", "head")
+        again = index()
+        engine.dispose()
+    assert built is not None
+    assert built["column_names"] == ["created_by", "updated_at", "id"]
+    assert built["column_sorting"] == {"updated_at": ("desc",), "id": ("desc",)}
     assert dropped is None
     assert again is not None

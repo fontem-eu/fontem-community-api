@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from src.domain.data_project import DataPlot, DataProject, DataQuery
 
@@ -14,10 +15,18 @@ class DataProjectRepository(ABC):
     async def get_project(self, project_id: str) -> DataProject | None: ...
 
     @abstractmethod
-    async def list_for_user(self, user_id: str) -> list[DataProject]: ...
+    async def list_for_user(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[DataProject]:
+        """Newest first by (updated_at, id). ``before`` is exclusive."""
 
     @abstractmethod
-    async def list_by_investigation(self, investigation_id: str) -> list[DataProject]: ...
+    async def list_by_investigation(
+        self, investigation_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[DataProject]:
+        """Newest first by (updated_at, id). ``before`` is exclusive."""
 
     @abstractmethod
     async def set_investigation(

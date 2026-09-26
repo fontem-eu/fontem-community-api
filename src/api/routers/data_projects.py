@@ -15,6 +15,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from src.api.paging import decode_before
 from src.api.schemas.text import Label, SpecDocument
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
@@ -65,6 +66,15 @@ class ShareRequest(BaseModel):
     level: str = Field(default="viewer", max_length=20)
 
 
+#: Largest page a caller may ask for. A project carries its queries (up to
+#: 8,000 characters each) and plot specs, so this is lower than the
+#: investigations cap.
+MAX_LIST_PAGE_SIZE = 200
+
+#: What a caller gets without asking.
+DEFAULT_LIST_PAGE_SIZE = 30
+
+
 # ── projects ────────────────────────────────────────────────────
 @router.get("/projects")
 @inject
@@ -73,12 +83,24 @@ async def list_projects(
     svc: FromDishka[DataProjectService],
     user: Annotated[User, Depends(get_current_user)],
     investigation_id: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIST_PAGE_SIZE)] = DEFAULT_LIST_PAGE_SIZE,
+    before: str = "",
 ) -> list[dict]:
+    """The caller's projects — or an investigation's, with ``investigation_id``
+    — newest first, thirty at a time unless ``limit`` says otherwise.
+
+    Each project carries its queries and plots in full, so a page is not
+    small: on the DAST account's accumulated 1,147 projects the unpaged list
+    was 3.26 MB, and the nav rail fetched it on every page of the app. Pass
+    ``before=<updated_at>|<id>`` of the last row for the next page; a page
+    shorter than ``limit`` is the last. See ``src/api/paging.py``."""
+    cursor = decode_before(before)
     if investigation_id:
-        projects = await svc.list_for_investigation(user.id, investigation_id)
+        projects = await svc.list_for_investigation(
+            user.id, investigation_id, limit=limit, before=cursor)
         return [{**asdict(p), "my_access": await svc.access_flags(user.id, p)}
                 for p in projects]
-    projects = await svc.list_projects(user.id)  # owner-scoped
+    projects = await svc.list_projects(user.id, limit=limit, before=cursor)  # owner-scoped
     return [{**asdict(p), "my_access": OWNER_FLAGS} for p in projects]
 
 

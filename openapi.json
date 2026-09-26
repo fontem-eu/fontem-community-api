@@ -11221,7 +11221,7 @@
   },
   "/investigations": {
    "get": {
-    "description": "The investigations the caller belongs to, with their membership\n(capability flags) so the UI can show their role. Newest activity first.\n\nWithout ``limit`` it returns all of them, as it always has. With it, a\npage of that size; pass ``before=<updated_at>|<id>`` of the last row to\nget the next page. A page shorter than ``limit`` is the last one.",
+    "description": "The investigations the caller belongs to, with their membership\n(capability flags) so the UI can show their role. Newest activity first,\nten at a time unless ``limit`` says otherwise.\n\nPass ``before=<updated_at>|<id>`` of the last row to get the next page;\na page shorter than ``limit`` is the last one. See ``src/api/paging.py``.\nA caller that needs every investigation \u2014 a picker, say \u2014 pages through\nat ``limit=500``; there is no longer an unbounded form.",
     "operationId": "list_investigations_investigations_get",
     "parameters": [
      {
@@ -11229,17 +11229,11 @@
       "name": "limit",
       "required": false,
       "schema": {
-       "anyOf": [
-        {
-         "maximum": 500,
-         "minimum": 1,
-         "type": "integer"
-        },
-        {
-         "type": "null"
-        }
-       ],
-       "title": "Limit"
+       "default": 10,
+       "maximum": 500,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
       }
      },
      {
@@ -16841,6 +16835,7 @@
   },
   "/studio/projects": {
    "get": {
+    "description": "The caller's projects \u2014 or an investigation's, with ``investigation_id``\n\u2014 newest first, thirty at a time unless ``limit`` says otherwise.\n\nEach project carries its queries and plots in full, so a page is not\nsmall: on the DAST account's accumulated 1,147 projects the unpaged list\nwas 3.26 MB, and the nav rail fetched it on every page of the app. Pass\n``before=<updated_at>|<id>`` of the last row for the next page; a page\nshorter than ``limit`` is the last. See ``src/api/paging.py``.",
     "operationId": "list_projects_studio_projects_get",
     "parameters": [
      {
@@ -16857,6 +16852,28 @@
         }
        ],
        "title": "Investigation Id"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 30,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Before",
+       "type": "string"
       }
      },
      {

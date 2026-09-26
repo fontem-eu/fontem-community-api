@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.data_project import DataPlot, DataProject, DataQuery
@@ -60,23 +60,34 @@ class PgDataProjectRepository(DataProjectRepository):
         row = (await self._session.execute(stmt)).scalar_one_or_none()
         return self._project_to_domain(row) if row else None
 
-    async def list_for_user(self, user_id: str) -> list[DataProject]:
-        stmt = (
-            select(DataProjectModel)
-            .where(DataProjectModel.created_by == user_id)
-            .order_by(DataProjectModel.updated_at.desc())
-        )
+    async def _page(
+        self, where, *, limit: int | None, before: tuple[datetime, str] | None,
+    ) -> list[DataProject]:
+        """One keyset page, newest first. ``id`` breaks ties so that two
+        projects saved in the same microsecond neither repeat nor vanish at a
+        page boundary — ordering on ``updated_at`` alone, as this used to, is
+        not a total order."""
+        stmt = select(DataProjectModel).where(where)
+        if before is not None:
+            stmt = stmt.where(tuple_(DataProjectModel.updated_at, DataProjectModel.id) < before)
+        stmt = stmt.order_by(DataProjectModel.updated_at.desc(), DataProjectModel.id.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit)
         rows = (await self._session.execute(stmt)).scalars().all()
         return [self._project_to_domain(r) for r in rows]
 
-    async def list_by_investigation(self, investigation_id: str) -> list[DataProject]:
-        stmt = (
-            select(DataProjectModel)
-            .where(DataProjectModel.investigation_id == investigation_id)
-            .order_by(DataProjectModel.updated_at.desc())
-        )
-        rows = (await self._session.execute(stmt)).scalars().all()
-        return [self._project_to_domain(r) for r in rows]
+    async def list_for_user(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[DataProject]:
+        return await self._page(DataProjectModel.created_by == user_id, limit=limit, before=before)
+
+    async def list_by_investigation(
+        self, investigation_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[DataProject]:
+        return await self._page(
+            DataProjectModel.investigation_id == investigation_id, limit=limit, before=before)
 
     async def set_investigation(self, project_id: str, investigation_id: str | None) -> None:
         await self._session.execute(

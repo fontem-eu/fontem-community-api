@@ -75,3 +75,56 @@ class TestDataProjectsIntegration:
         assert client.get(f"/studio/projects/{pid}", headers=h).json()["investigation_id"] == iid
         assert [p["id"] for p in
                 client.get(f"/studio/projects?investigation_id={iid}", headers=h).json()] == [pid]
+
+
+class TestDataProjectsPagingOnPostgres:
+    """The keyset cursor against a real timestamptz column.
+
+    Unit tests page the in-memory repository, which compares Python tuples.
+    What only Postgres can show is whether the ``updated_at`` the API
+    serialises parses back into a value that ``(updated_at, id) < (...)``
+    compares correctly — a lost microsecond or a dropped offset would repeat
+    or skip a row at every page boundary.
+    """
+
+    def test_cursor_walks_every_project_exactly_once(self, client, user_id):
+        h = make_headers(user_id)
+        made = {client.post("/studio/projects", json={"name": f"page-{i}"}, headers=h).json()["id"]
+                for i in range(7)}
+        seen, before = [], ""
+        while True:
+            params = {"limit": 3, **({"before": before} if before else {})}
+            page = client.get("/studio/projects", params=params, headers=h).json()
+            seen += [p["id"] for p in page]
+            if len(page) < 3:
+                break
+            before = f'{page[-1]["updated_at"]}|{page[-1]["id"]}'
+        mine = [pid for pid in seen if pid in made]
+        assert len(mine) == len(set(mine)) == 7
+
+    def test_ties_on_updated_at_page_by_id(self, client, user_id, _postgres):
+        """Same instant for all five, set in the database itself, so the only
+        thing keeping pages apart is the id tie-break in the SQL."""
+        import sqlalchemy as sa  # pylint: disable=import-outside-toplevel
+
+        h = make_headers(user_id)
+        ids = [client.post("/studio/projects", json={"name": f"tie-{i}"}, headers=h).json()["id"]
+               for i in range(5)]
+        url = _postgres.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
+        engine = sa.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text("UPDATE data_projects SET updated_at = '2030-01-01T00:00:00+00' "
+                        "WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                {"ids": ids},
+            )
+        engine.dispose()
+        seen, before = [], ""
+        for _ in range(10):
+            params = {"limit": 2, **({"before": before} if before else {})}
+            page = client.get("/studio/projects", params=params, headers=h).json()
+            seen += [p["id"] for p in page if p["id"] in ids]
+            if len(page) < 2 or set(ids) <= set(seen):
+                break
+            before = f'{page[-1]["updated_at"]}|{page[-1]["id"]}'
+        assert sorted(seen) == sorted(ids)

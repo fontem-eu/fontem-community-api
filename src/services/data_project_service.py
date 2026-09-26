@@ -10,6 +10,8 @@ re-runnable recipes.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import json
 
 from src.domain.data_project import DataPlot, DataProject, DataQuery
@@ -176,14 +178,21 @@ class DataProjectService:
         raise NotFound(f"Plot {plot_id} not found")
 
     # ── projects ────────────────────────────────────────────────
-    async def list_projects(self, user_id: str) -> list[DataProject]:
-        return await self._repo.list_for_user(user_id)
+    async def list_projects(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[DataProject]:
+        """Unbounded unless ``limit`` is given: the HTTP list pages, the
+        assistant's studio tools read the lot."""
+        return await self._repo.list_for_user(user_id, limit=limit, before=before)
 
     async def list_for_investigation(
-        self, user_id: str, investigation_id: str
+        self, user_id: str, investigation_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
     ) -> list[DataProject]:
         await self._require_inv(user_id, investigation_id, Action.INVESTIGATIONS_READ)
-        return await self._repo.list_by_investigation(investigation_id)
+        return await self._repo.list_by_investigation(
+            investigation_id, limit=limit, before=before)
 
     async def get_project(self, user_id: str, project_id: str) -> DataProject:
         project = await self._load(project_id)
