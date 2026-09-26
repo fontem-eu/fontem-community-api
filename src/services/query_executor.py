@@ -13,6 +13,7 @@ case is bounded by the proxy, not by our own good intentions.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from dataclasses import dataclass, field
@@ -25,6 +26,24 @@ DEFAULT_BASE_URL = "http://fontem-api"
 # Slightly above the proxy's own 8s statement timeout, so a query that the
 # proxy kills comes back as its explanatory 504 rather than as our timeout.
 DEFAULT_TIMEOUT_S = 15.0
+
+#: Pauses before retrying a request that never reached the proxy.
+#:
+#: A connection that could not be made, or that the far end dropped before
+#: answering, means nothing ran — and every proxy is read-only — so a retry is
+#: always safe. It is also what a rollout looks like from here: a pod stops
+#: listening before the Service stops routing to it. On 2026-09-26 that window
+#: failed the promote gate's feed refresh (run 14316: "All connection attempts
+#: failed" across three queries, 37 s after every Deployment reported rolled
+#: out), and each failed refresh also ends the six-hourly CronJob's run.
+#:
+#: A read timeout is NOT retried: the query may be running, and repeating it
+#: doubles the load for a statement the proxy is already about to kill.
+#: Read at call time, so a test can shorten it.
+CONNECT_RETRY_DELAYS_S: tuple[float, ...] = (0.5, 1.5, 3.0)
+
+#: Transport failures that mean the request never reached the proxy.
+_NEVER_ARRIVED = (httpx.ConnectError, httpx.RemoteProtocolError)
 
 _PATHS = {
     "sql": "/query/sql",
@@ -60,6 +79,19 @@ class HttpQueryExecutor:
         self._base = (base_url or os.environ.get("GMR_API_INTERNAL", DEFAULT_BASE_URL)).rstrip("/")
         self._timeout = timeout
 
+    async def _post(self, url: str, payload: dict) -> httpx.Response:
+        """POST, retrying only failures where the request never arrived."""
+        delays = CONNECT_RETRY_DELAYS_S
+        for attempt in range(len(delays) + 1):
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    return await client.post(url, json=payload)
+            except _NEVER_ARRIVED:
+                if attempt == len(delays):
+                    raise
+                await asyncio.sleep(delays[attempt])
+        raise AssertionError("unreachable")  # pragma: no cover
+
     async def run(self, lang: str, query: str, params: dict | None = None) -> ExecResult:
         path = _PATHS.get(lang)
         if path is None:
@@ -74,8 +106,7 @@ class HttpQueryExecutor:
 
         started = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(f"{self._base}{path}", json=payload)
+            resp = await self._post(f"{self._base}{path}", payload)
         except httpx.HTTPError as exc:
             elapsed = int((time.monotonic() - started) * 1000)
             return ExecResult(duration_ms=elapsed, store_unreachable=True,
