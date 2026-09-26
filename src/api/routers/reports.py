@@ -8,6 +8,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.api.schemas.text import Label
 from src.api.auth import get_current_user, get_optional_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath, UuidStr
 from src.domain.user import User
@@ -52,7 +53,7 @@ class ReportSearchItem(ReportResponse):
 
 
 class CreateReportRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=300)
+    title: Label = Field(min_length=1, max_length=300)
     abstract: str | None = Field(default=None, max_length=4000)
     # UUID-shaped or absent. Lifts the schema-vs-impl gap that made
     # fuzz tooling 400 on plain-string parent_id inputs and flag the
@@ -69,7 +70,7 @@ class UpdateReportRequest(BaseModel):
     # state for a frame before the test's page.fill landed. Empty
     # title isn't ambiguous semantically (it just means "title is
     # empty"), so accept it here and keep the cap to bound DB writes.
-    title: str | None = Field(default=None, max_length=300)
+    title: Label | None = Field(default=None, max_length=300)
     abstract: str | None = Field(default=None, max_length=4000)
     visibility: Literal["private", "public_open", "public_auth"] | None = None
     # Optional NUTS region this story is about (any level) or "" to clear.
@@ -100,7 +101,7 @@ class SaveDocumentRequest(BaseModel):
 
 class SaveTranslationRequest(BaseModel):
     """Create/replace one language's translation of a story."""
-    title: str = Field(default="", max_length=300)
+    title: Label = Field(default="", max_length=300)
     abstract: str | None = Field(default=None, max_length=4000)
     tiptap: dict
     version: int = 2
@@ -527,7 +528,7 @@ async def restore_revision(
 class OpenReviewRequest(BaseModel):
     """Start a review of this article."""
     kind: str = Field(default="change", pattern="^(change|article)$")
-    title: str = Field(default="", max_length=200)
+    title: Label = Field(default="", max_length=200)
     body: str = Field(default="", max_length=4000)
 
 

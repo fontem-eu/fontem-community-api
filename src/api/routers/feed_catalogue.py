@@ -16,6 +16,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from src.api.schemas.text import Label
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.named_query import NamedQuery, QueryGroup
@@ -28,7 +29,7 @@ router = APIRouter(tags=["feed-catalogue"], responses=RESOURCE_RESPONSES)
 # ── request models ──────────────────────────────────────────────
 class CreateNamedQueryRequest(BaseModel):
     slug: str = Field(min_length=1, max_length=120)
-    name: str = Field(default="", max_length=300)
+    name: Label = Field(default="", max_length=300)
     description: str = Field(default="", max_length=4000)
     lang: str = Field(default="sql", max_length=20)
     # 8000 rather than the proxy's 8192 so a body that only just fits here
@@ -40,7 +41,7 @@ class CreateNamedQueryRequest(BaseModel):
 
 class UpdateNamedQueryRequest(BaseModel):
     slug: str | None = Field(default=None, max_length=120)
-    name: str | None = Field(default=None, max_length=300)
+    name: Label | None = Field(default=None, max_length=300)
     description: str | None = Field(default=None, max_length=4000)
     lang: str | None = Field(default=None, max_length=20)
     query: str | None = Field(default=None, max_length=8000)
@@ -58,7 +59,7 @@ class PreviewRequest(BaseModel):
 
 class CreateQueryGroupRequest(BaseModel):
     slug: str = Field(min_length=1, max_length=120)
-    name: str = Field(default="", max_length=300)
+    name: Label = Field(default="", max_length=300)
     description: str = Field(default="", max_length=4000)
     sort_order: int = 0
     visibility: str = Field(default="public", max_length=20)
@@ -66,7 +67,7 @@ class CreateQueryGroupRequest(BaseModel):
 
 class UpdateQueryGroupRequest(BaseModel):
     slug: str | None = Field(default=None, max_length=120)
-    name: str | None = Field(default=None, max_length=300)
+    name: Label | None = Field(default=None, max_length=300)
     description: str | None = Field(default=None, max_length=4000)
     sort_order: int | None = None
     visibility: str | None = Field(default=None, max_length=20)

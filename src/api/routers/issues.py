@@ -7,6 +7,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from src.api.schemas.text import Label
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/issues", tags=["issues"], responses=RESOURCE_RESPONS
 
 
 class CreateIssueRequest(BaseModel):
-    title: str
+    title: Label
     body: str = ""
     # incorrect_data, duplicate_entity, missing_connection, missing_entity, other
     issue_type: str = "other"

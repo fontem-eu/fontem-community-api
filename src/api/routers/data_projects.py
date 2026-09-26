@@ -15,6 +15,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from src.api.schemas.text import Label, SpecDocument
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
 from src.domain.user import User
@@ -24,34 +25,34 @@ router = APIRouter(prefix="/studio", tags=["studio"], responses=RESOURCE_RESPONS
 
 
 class CreateProjectRequest(BaseModel):
-    name: str = Field(default="", max_length=300)
+    name: Label = Field(default="", max_length=300)
     investigation_id: str | None = None
 
 
 class RenameProjectRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=300)
+    name: Label = Field(min_length=1, max_length=300)
 
 
 class CreateQueryRequest(BaseModel):
-    name: str = Field(default="", max_length=300)
+    name: Label = Field(default="", max_length=300)
     lang: str = Field(default="cypher", max_length=20)
     query: str = Field(default="", max_length=8000)
 
 
 class UpdateQueryRequest(BaseModel):
-    name: str | None = Field(default=None, max_length=300)
+    name: Label | None = Field(default=None, max_length=300)
     lang: str | None = Field(default=None, max_length=20)
     query: str | None = Field(default=None, max_length=8000)
 
 
 class CreatePlotRequest(BaseModel):
-    name: str = Field(default="", max_length=300)
-    spec: dict = Field(default_factory=dict)
+    name: Label = Field(default="", max_length=300)
+    spec: SpecDocument = Field(default_factory=dict)
 
 
 class UpdatePlotRequest(BaseModel):
-    name: str | None = Field(default=None, max_length=300)
-    spec: dict | None = None
+    name: Label | None = Field(default=None, max_length=300)
+    spec: SpecDocument | None = None
 
 
 class AttachRequest(BaseModel):
