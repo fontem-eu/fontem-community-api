@@ -383,6 +383,19 @@ PROPOSE_QUERY_TOOL: dict = {
                         "why (at most 500 characters)."
                     ),
                 },
+                "lang": {
+                    "type": "string",
+                    "enum": list(QUERY_LANGS),
+                    "description": (
+                        "The query language, which picks the store: cypher "
+                        "for the Neo4j graph (companies, contracts, "
+                        "authorities, lobbyists), sql for the statistics "
+                        "(Eurostat), sparql for Virtuoso (legislation, "
+                        "Wikidata and anything else only held as RDF). "
+                        "Omit to keep the open query's language; set it when "
+                        "the question needs a different store."
+                    ),
+                },
             },
             "required": ["project_id", "query_id", "query", "explanation"],
         },

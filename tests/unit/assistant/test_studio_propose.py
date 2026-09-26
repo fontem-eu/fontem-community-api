@@ -207,9 +207,58 @@ def test_a_query_the_engine_accepts_is_proposed_with_its_columns():
     out.pop("turn_status", None)
     assert out == {
         "proposed": True, "action": "propose_query",
-        "project_id": "p-1", "query_id": "q-1",
+        "project_id": "p-1", "query_id": "q-1", "lang": "cypher",
         "columns": ["n"], "warnings": [],
     }
+
+
+# ── the store is the assistant's choice ────────────────────────
+#
+# The user asks in words. Whether the answer lives in the Neo4j graph or
+# in Virtuoso (legislation, Wikidata) is for the assistant to decide, so a
+# proposal may change the open query's language as well as its text — and
+# it is checked by the engine it names, not the one the editor had.
+
+def test_a_proposal_may_switch_the_store_and_is_checked_by_that_engine():
+    engine = _Engine(_Resp(200, {"head": {"vars": ["act"]}, "results": {"bindings": []}}))
+    out = _propose({**GOOD, "lang": "sparql",
+                    "query": "SELECT ?act WHERE { ?act a ?t } LIMIT 5"}, client=engine)
+    assert out["proposed"] is True
+    assert out["lang"] == "sparql"
+    assert len(engine.posts) == 1
+    url, sent = engine.posts[0]
+    assert url.endswith("/sparql")
+    # SPARQL has no EXPLAIN: it is sent as written.
+    assert sent["query"].startswith("SELECT ?act")
+
+
+def test_without_a_language_the_open_query_keeps_its_own():
+    engine = _Engine()
+    out = _propose(GOOD, client=engine)
+    assert out["lang"] == "cypher"
+    assert len(engine.posts) == 1
+    url, sent = engine.posts[0]
+    assert url.endswith("/query/cypher") and sent["query"].startswith("EXPLAIN ")
+
+
+def test_an_unknown_language_is_refused_before_any_engine_is_asked():
+    engine = _Engine()
+    out = _propose({**GOOD, "lang": "gremlin"}, client=engine)
+    assert out["error"].startswith("unknown query language 'gremlin'")
+    assert not engine.posts
+
+
+def test_the_tool_offers_every_store():
+    params = studio_tools.PROPOSE_QUERY_TOOL["function"]["parameters"]
+    assert params["properties"]["lang"]["enum"] == ["cypher", "sql", "sparql"]
+    # Optional: omitting it must keep working for a model that does not care.
+    assert "lang" not in params["required"]
+
+
+def test_the_prompt_says_the_store_is_the_assistants_choice():
+    block = studio_context.system_context({"project_id": "p", "project_name": "P", "query": {
+        "id": "q", "name": "n", "lang": "cypher", "text": "MATCH (n) RETURN n"}})
+    assert "Pass `lang`" in block and "Virtuoso" in block
 
 
 def test_without_an_engine_it_is_proposed_unchecked_and_says_so():

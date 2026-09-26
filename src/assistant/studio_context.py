@@ -31,7 +31,12 @@ _PROPOSAL_GUIDE = (
     "it as a diff and accepts or rejects it as a whole — never assume it "
     "was applied; the next turn shows the current text. "
     "mcp__gmr__studio_update_query is refused for this query's text. To try "
-    "a candidate before proposing it, use mcp__gmr__query_graph (read-only)."
+    "a candidate before proposing it, use mcp__gmr__query_graph (read-only). "
+    "The language is yours to choose, not fixed by the open query: it picks "
+    "the store. Cypher for the Neo4j graph (companies, contracts, "
+    "authorities, lobbyists), sql for the statistics, sparql for Virtuoso "
+    "(legislation, Wikidata, anything only held as RDF). Pass `lang` when "
+    "the question needs a different store than the open query uses."
 )
 
 
