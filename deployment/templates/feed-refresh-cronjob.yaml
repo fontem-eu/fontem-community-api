@@ -26,6 +26,21 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: fontem-feed-refresh
+  annotations:
+    # A failed refresh must not read as a failed deploy. Argo CD's built-in
+    # CronJob health reports Degraded while the last Job failed, and that
+    # rolls up into this Application's health — which the promote and
+    # attest-staging gates wait on as "Healthy" before they run. So one
+    # failed refresh held promotion shut until the next scheduled run
+    # succeeded, up to six hours later: on 2026-09-26 the 11:00 run failed
+    # (the cluster had just restarted, fontem-api was not up) and promote
+    # run 14271 timed out at 14:15 waiting for Healthy on an app whose
+    # Deployment was fine.
+    #
+    # Nothing is hidden by this: the CronJob keeps its own status in Argo and
+    # its run rows in feed_runs, and the e2e gate runs every published query
+    # itself and fails by name when one breaks.
+    argocd.argoproj.io/ignore-healthcheck: "true"
 spec:
   schedule: {{ .Values.feedRefresh.schedule | quote }}
   timeZone: "Europe/Paris"
