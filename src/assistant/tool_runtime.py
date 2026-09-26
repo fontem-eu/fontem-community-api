@@ -642,7 +642,28 @@ def _proposal_refusal(args: dict, studio_editor: dict | None) -> dict | None:
                          f"{studio_tools.MAX_QUERY_CHARS} characters)"}
     if not str(args.get("explanation") or "").strip():
         return {"error": "explanation is required"}
+    return _lang_refusal(args)
+
+
+def _lang_refusal(args: dict) -> dict | None:
+    """A language the Studio has no engine for, named back to the model."""
+    lang = str(args.get("lang") or "").strip().lower()
+    if lang and lang not in studio_tools.QUERY_LANGS:
+        return {"error": f"unknown query language {lang!r}; use one of "
+                         f"{', '.join(studio_tools.QUERY_LANGS)}"}
     return None
+
+
+def _proposal_lang(args: dict, studio_editor: dict) -> str:
+    """The language a proposal is checked and applied in.
+
+    The model's choice when it made one: which store answers the question
+    is its decision — legislation lives in Virtuoso, contracts in Neo4j —
+    and the user asked in words, not in a query language. The open query's
+    language otherwise.
+    """
+    return (str(args.get("lang") or "").strip().lower()
+            or str(studio_editor.get("lang") or "").strip().lower())
 
 
 def _targets_open_query_text(name: str, args: dict,
@@ -1269,12 +1290,13 @@ class ToolRuntime:
         if refusal:
             return json.dumps(refusal)
         query = str(args.get("query") or "")
-        lang = str(studio_editor.get("lang") or "").strip().lower()
+        lang = _proposal_lang(args, studio_editor)
         receipt = {
             "proposed": True,
             "action": PROPOSAL_TOOL_ACTIONS[studio_tools.PROPOSE_QUERY_TOOL_NAME],
             "project_id": studio_editor["project_id"],
             "query_id": studio_editor["query_id"],
+            "lang": lang,
             "columns": [],
             "warnings": [],
         }
