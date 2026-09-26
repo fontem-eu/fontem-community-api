@@ -9,7 +9,6 @@ InvalidInput -> 400) via the app-level handlers.
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
 from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
@@ -17,6 +16,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from src.api.paging import decode_before
 from src.api.schemas.text import Label
 from src.api.auth import get_current_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath
@@ -74,17 +74,10 @@ async def create_investigation(
 #: Largest page a caller may ask for.
 MAX_LIST_PAGE_SIZE = 500
 
-
-def _decode_before(raw: str) -> tuple[datetime, str] | None:
-    """Parse an ``<updated_at iso>|<id>`` cursor; None when unusable, so a
-    garbled cursor returns the newest page rather than an error."""
-    stamp, _, inv_id = raw.partition("|")
-    if not stamp or not inv_id:
-        return None
-    try:
-        return datetime.fromisoformat(stamp), inv_id
-    except ValueError:
-        return None
+#: What a caller gets without asking. The list used to be unbounded, and the
+#: DAST account — which accumulates an investigation per scan on purpose, as
+#: a load canary — was fetching 1,149 of them, 436 KB, on every visit.
+DEFAULT_LIST_PAGE_SIZE = 10
 
 
 @router.get("")
@@ -93,17 +86,19 @@ async def list_investigations(
     *,
     svc: FromDishka[InvestigationService],
     user: Annotated[User, Depends(get_current_user)],
-    limit: Annotated[int | None, Query(ge=1, le=MAX_LIST_PAGE_SIZE)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIST_PAGE_SIZE)] = DEFAULT_LIST_PAGE_SIZE,
     before: str = "",
 ) -> list[dict]:
     """The investigations the caller belongs to, with their membership
-    (capability flags) so the UI can show their role. Newest activity first.
+    (capability flags) so the UI can show their role. Newest activity first,
+    ten at a time unless ``limit`` says otherwise.
 
-    Without ``limit`` it returns all of them, as it always has. With it, a
-    page of that size; pass ``before=<updated_at>|<id>`` of the last row to
-    get the next page. A page shorter than ``limit`` is the last one."""
+    Pass ``before=<updated_at>|<id>`` of the last row to get the next page;
+    a page shorter than ``limit`` is the last one. See ``src/api/paging.py``.
+    A caller that needs every investigation — a picker, say — pages through
+    at ``limit=500``; there is no longer an unbounded form."""
     rows = await svc.list_mine_with_membership(
-        user.id, limit=limit, before=_decode_before(before) if before else None,
+        user.id, limit=limit, before=decode_before(before),
     )
     return [_with_membership(asdict(inv), member) for inv, member in rows]
 

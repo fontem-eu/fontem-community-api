@@ -918,6 +918,13 @@ class DataProjectModel(Base):
     # ALTER in the app lifespan (create_all only creates new tables, it never
     # adds columns to existing ones) — see app.py.
     __tablename__ = "data_projects"
+    __table_args__ = (
+        # "My projects" is the Studio rail, drawn on every page: filter on the
+        # owner, walk newest-first a page at a time. Matches the keyset order
+        # in PgDataProjectRepository._page exactly, id included.
+        Index("ix_data_projects_owner_page", "created_by",
+              text("updated_at DESC"), text("id DESC")),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     name: Mapped[str] = mapped_column(Text, nullable=False, default="")

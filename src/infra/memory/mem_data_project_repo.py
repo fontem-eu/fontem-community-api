@@ -42,16 +42,30 @@ class InMemoryDataProjectRepository(DataProjectRepository):
     async def get_project(self, project_id: str) -> DataProject | None:
         return self._hydrate(project_id) if project_id in self._projects else None
 
-    async def list_for_user(self, user_id: str) -> list[DataProject]:
-        ids = [pid for pid, p in self._projects.items() if p.created_by == user_id]
-        projects = [self._hydrate(pid) for pid in ids]
-        return sorted(projects, key=lambda p: p.updated_at or _now(), reverse=True)
+    def _page(
+        self, keep, *, limit: int | None, before: tuple[datetime, str] | None,
+    ) -> list[DataProject]:
+        """Mirrors PgDataProjectRepository._page: (updated_at, id) descending,
+        ``before`` exclusive."""
+        epoch = datetime.min.replace(tzinfo=timezone.utc)
+        projects = [self._hydrate(pid) for pid, p in self._projects.items() if keep(p)]
+        projects.sort(key=lambda p: (p.updated_at or epoch, p.id or ""), reverse=True)
+        if before is not None:
+            projects = [p for p in projects if (p.updated_at or epoch, p.id or "") < before]
+        return projects[:limit] if limit is not None else projects
 
-    async def list_by_investigation(self, investigation_id: str) -> list[DataProject]:
-        ids = [pid for pid, p in self._projects.items()
-               if p.investigation_id == investigation_id]
-        projects = [self._hydrate(pid) for pid in ids]
-        return sorted(projects, key=lambda p: p.updated_at or _now(), reverse=True)
+    async def list_for_user(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[DataProject]:
+        return self._page(lambda p: p.created_by == user_id, limit=limit, before=before)
+
+    async def list_by_investigation(
+        self, investigation_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[DataProject]:
+        return self._page(lambda p: p.investigation_id == investigation_id,
+                          limit=limit, before=before)
 
     async def set_investigation(self, project_id: str, investigation_id: str | None) -> None:
         stored = self._projects.get(project_id)
