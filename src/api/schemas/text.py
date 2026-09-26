@@ -35,6 +35,7 @@ encoding, which is already in place.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from typing import Annotated, Any
 
 from pydantic import AfterValidator
@@ -63,6 +64,18 @@ def _label(value: str) -> str:
     return trimmed
 
 
+def _strings_in(node: Any, path: str = "") -> Iterator[tuple[str, str]]:
+    """Every string anywhere inside a spec document, with its dotted path."""
+    if isinstance(node, str):
+        yield path, node
+    elif isinstance(node, dict):
+        for key, item in node.items():
+            yield from _strings_in(item, f"{path}.{key}" if path else str(key))
+    elif isinstance(node, list):
+        for item in node:
+            yield from _strings_in(item, path)
+
+
 def _spec(value: dict | None) -> dict | None:
     """Reject markup anywhere inside a free-form spec document.
 
@@ -79,18 +92,8 @@ def _spec(value: dict | None) -> dict | None:
     """
     if value is None:
         return None
-
-    def walk(node: Any, path: str) -> None:
-        if isinstance(node, dict):
-            for key, item in node.items():
-                walk(item, f"{path}.{key}" if path else str(key))
-        elif isinstance(node, list):
-            for item in node:
-                walk(item, path)
-        elif isinstance(node, str):
-            _check(node, f"spec field {path!r}" if path else "the spec")
-
-    walk(value, "")
+    for path, text in _strings_in(value):
+        _check(text, f"spec field {path!r}" if path else "the spec")
     return value
 
 
