@@ -180,14 +180,6 @@ jobs:
           path: .ci-actions
           token: ${{ secrets.CI_READ_TOKEN }}
 
-      - id: sbom
-        name: Generate + upload SBOM
-        uses: ./.ci-actions/actions/sbom-generate
-        with:
-          language: python
-          project-name: fontem-community-api
-          project-version: ${{ github.sha }}
-
       - id: image
         name: Build, push, sign, attest
         uses: ./.ci-actions/actions/docker-build-sign
@@ -196,7 +188,9 @@ jobs:
           cosign-key: ${{ secrets.COSIGN_KEY }}
           registry-user: ${{ secrets.REGISTRY_USER }}
           registry-password: ${{ secrets.REGISTRY_PASSWORD }}
-          sbom-path: ${{ steps.sbom.outputs.sbom-path }}
+          # No shell, package manager or pip in the runtime image: fail the
+          # build if one comes back (e.g. with a new base).
+          minimal-enforce: "true"
 
       # Inline gitops-bump. void42/ci-actions's gitops-bump was
       # rewritten for the void42-templates layout that doesn't match
