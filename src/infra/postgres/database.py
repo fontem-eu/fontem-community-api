@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import (
 
 DATABASE_URL = os.environ["DATABASE_URL"]  # no fallback — must be set in env
 
-async_engine = create_async_engine(DATABASE_URL, echo=False)
+# pool_pre_ping: survive a Postgres restart (see src/api/di.py).
+async_engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 
 async_session_factory = async_sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False
