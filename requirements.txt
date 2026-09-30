@@ -7,7 +7,9 @@ uvicorn[standard]>=0.34
 # gives RS256 via `cryptography` only. History: python-jose 3.3 had
 # CVE-2024-33663 (alg-confusion → auth bypass,
 # CVSS 9.3) and CVE-2024-33664 (DoS via crafted token). Fixed in 3.4.0.
-PyJWT[crypto]>=2.13.0
+# 2.14.0 fixes the six advisories published 2026-09-29 (among them
+# GHSA-ffc3-869f-jxw9, CVSS 9.1); the security gate blocks anything older.
+PyJWT[crypto]>=2.14.0
 # pydantic 2.0 had several follow-on CVEs in pydantic-core; 2.4 is the
 # safer floor.
 pydantic[email]>=2.4

@@ -114,7 +114,11 @@ class DatabaseProvider(Provider):
 
     @provide(scope=Scope.APP)
     async def engine(self) -> AsyncIterator[AsyncEngine]:
-        engine = create_async_engine(self._database_url, echo=False)
+        # pool_pre_ping: a restarted Postgres leaves every pooled connection
+        # dead, and without a liveness check at checkout the first request
+        # on each one fails (then PendingRollbackError). See
+        # tests/integration/test_db_reconnect_integration.py.
+        engine = create_async_engine(self._database_url, echo=False, pool_pre_ping=True)
         yield engine
         await engine.dispose()
 
