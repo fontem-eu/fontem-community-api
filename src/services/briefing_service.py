@@ -23,6 +23,7 @@ from src.domain.named_query import QueryGroup
 from src.repositories.feed_repository import FeedRepository
 from src.repositories.named_query_repository import NamedQueryRepository
 from src.services.exceptions import InvalidInput, NotFound, PermissionDenied
+from src.services.title_translations import TitleTranslator, clean_lang, localise
 
 # How much history a feed shows. Four weeks so a reader that has been away for
 # a fortnight still sees what it missed, without the feed becoming an archive.
@@ -40,9 +41,13 @@ MAX_WATCHES = 60
 
 
 class BriefingService:
-    def __init__(self, catalogue: NamedQueryRepository, feed: FeedRepository) -> None:
+    def __init__(self, catalogue: NamedQueryRepository, feed: FeedRepository,
+                 translator: TitleTranslator | None = None) -> None:
         self._catalogue = catalogue
         self._feed = feed
+        # None: items are shown as stored (tests, and anything that does
+        # not render for a reader, like the Atom feed).
+        self._translator = translator
 
     # ── public catalogue ─────────────────────────────────────
     async def list_briefings(self) -> list[QueryGroup]:
@@ -68,16 +73,19 @@ class BriefingService:
         return group
 
     async def preview(self, slug: str, nuts: list[str] | None = None,
-                      volume: int = DEFAULT_VOLUME) -> list:
+                      volume: int = DEFAULT_VOLUME, lang: str | None = None) -> list:
         """What this briefing looks like for these regions, without watching it.
 
         Reads the materialised table, so it costs a query against our own
-        Postgres rather than an execution against the graph.
+        Postgres rather than an execution against the graph. With ``lang``,
+        contract and grant headlines are shown in that language where a
+        translation exists (see title_translations), the original kept.
         """
         group = await self.get_briefing(slug)
-        return await self._feed.rank_items(
+        items = await self._feed.rank_items(
             group.id, self._clean_regions(nuts), self._clean_volume(volume), FEED_WEEKS,
         )
+        return await localise(items, clean_lang(lang), self._translator)
 
     # ── watching ─────────────────────────────────────────────
     @staticmethod

@@ -85,6 +85,7 @@ from src.services.named_query_service import NamedQueryService
 from src.services.briefing_service import BriefingService
 from src.services.feed_runner import FeedRunner
 from src.services.query_executor import HttpQueryExecutor, QueryExecutor
+from src.services.title_translations import shared_translator
 from src.services.dossier_service import DossierService
 from src.services.issue_service import IssueService
 from src.services.activity_service import ActivityService
@@ -428,7 +429,9 @@ class ServiceProvider(Provider):
     def briefing_service(
         self, catalogue: NamedQueryRepository, feed: FeedRepository,
     ) -> BriefingService:
-        return BriefingService(catalogue=catalogue, feed=feed)
+        # The translator is process-wide (shared_translator): it holds the
+        # cache of looked-up titles, which a per-request one would discard.
+        return BriefingService(catalogue=catalogue, feed=feed, translator=shared_translator())
 
     @provide(scope=Scope.REQUEST)
     def feed_runner(
