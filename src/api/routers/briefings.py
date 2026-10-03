@@ -80,14 +80,16 @@ async def get_briefing(
     slug: str,
     nuts: Annotated[list[str] | None, Query()] = None,
     volume: Annotated[int, Query(ge=MIN_VOLUME, le=MAX_VOLUME)] = DEFAULT_VOLUME,
+    lang: Annotated[str | None, Query(max_length=8)] = None,
 ) -> dict:
     """The briefing, plus what it currently holds for these regions.
 
     Anonymous on purpose: deciding whether a briefing is worth watching
-    requires seeing what is in it.
+    requires seeing what is in it. ``lang`` (the reader's UI language)
+    shows contract and grant headlines translated where available.
     """
     group = await svc.get_briefing(slug)
-    items = await svc.preview(slug, nuts, volume)
+    items = await svc.preview(slug, nuts, volume, lang)
     return {**_briefing_json(group), "items": [_item_json(i) for i in items]}
 
 
