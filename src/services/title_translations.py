@@ -16,9 +16,9 @@ an unreachable graph API serves the items as they are.
 """
 from __future__ import annotations
 
+import copy
 import os
 import time
-from dataclasses import replace
 from functools import lru_cache
 from typing import Protocol
 
@@ -26,6 +26,7 @@ import httpx
 from loguru import logger
 
 from src.domain.feed import FeedItem
+from src.services.query_executor import DEFAULT_BASE_URL
 
 #: The 24 EU official languages, the only ones translations exist in.
 EU_LANGS = frozenset({
@@ -66,7 +67,8 @@ class HttpTitleTranslator:
 
     def __init__(self, base_url: str | None = None, *, ttl: float = CACHE_TTL_S,
                  transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self._base = (base_url or os.environ.get("GMR_API_INTERNAL", "http://fontem-api")).rstrip("/")
+        # The same in-cluster address the query proxies are reached at.
+        self._base = (base_url or os.environ.get("GMR_API_INTERNAL", DEFAULT_BASE_URL)).rstrip("/")
         self._ttl = ttl
         self._transport = transport  # tests only
         # (lang, bucket, key) -> (expires_at, title or None)
@@ -151,10 +153,12 @@ def _localised(item: FeedItem, bucket: str, translated: str | None) -> FeedItem:
     original = facets.get("headline") or item.summary
     if not translated or translated == original:
         return item
+    out = copy.copy(item)
     # A contract's summary is its title too; a grant's is its programme.
-    summary = translated if bucket == "contracts" and item.summary == original else item.summary
-    return replace(item, summary=summary, facets={
-        **facets, "headline": translated, "headline_original": original})
+    if bucket == "contracts" and item.summary == original:
+        out.summary = translated
+    out.facets = {**facets, "headline": translated, "headline_original": original}
+    return out
 
 
 async def localise(items: list[FeedItem], lang: str | None,
