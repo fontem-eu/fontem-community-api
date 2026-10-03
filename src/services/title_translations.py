@@ -144,6 +144,19 @@ def _key(item: FeedItem) -> tuple[str, str] | None:
     return None
 
 
+def _localised(item: FeedItem, bucket: str, translated: str | None) -> FeedItem:
+    """One item with its headline swapped for ``translated``, or the item
+    itself when there is nothing to swap."""
+    facets = item.facets or {}
+    original = facets.get("headline") or item.summary
+    if not translated or translated == original:
+        return item
+    # A contract's summary is its title too; a grant's is its programme.
+    summary = translated if bucket == "contracts" and item.summary == original else item.summary
+    return replace(item, summary=summary, facets={
+        **facets, "headline": translated, "headline_original": original})
+
+
 async def localise(items: list[FeedItem], lang: str | None,
                    translator: TitleTranslator | None) -> list[FeedItem]:
     """The items with their headline in ``lang`` where translated.
@@ -155,23 +168,12 @@ async def localise(items: list[FeedItem], lang: str | None,
     """
     if not lang or translator is None or not items:
         return items
+    keys = [_key(item) for item in items]
     wanted: dict[str, list[str]] = {"contracts": [], "cohesion": []}
-    for item in items:
-        if (key := _key(item)) is not None:
-            wanted[key[0]].append(key[1])
+    for key in filter(None, keys):
+        wanted[key[0]].append(key[1])
     if not any(wanted.values()):
         return items
     found = await translator.lookup(lang, wanted["contracts"], wanted["cohesion"])
-    out = []
-    for item in items:
-        key = _key(item)
-        translated = found.get(key[0], {}).get(key[1]) if key else None
-        facets = item.facets or {}
-        original = facets.get("headline") or item.summary
-        if not translated or translated == original:
-            out.append(item)
-            continue
-        summary = translated if key[0] == "contracts" and item.summary == original else item.summary
-        out.append(replace(item, summary=summary, facets={
-            **facets, "headline": translated, "headline_original": original}))
-    return out
+    return [_localised(item, key[0], found.get(key[0], {}).get(key[1])) if key else item
+            for item, key in zip(items, keys)]
