@@ -179,6 +179,10 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         found = self._revisions.get(revision_id)
         return deepcopy(found) if found else None
 
+    async def get_revisions(self, revision_ids: list[str]) -> dict[str, DocRevision]:
+        return {rid: deepcopy(self._revisions[rid])
+                for rid in revision_ids if rid in self._revisions}
+
     async def list_revisions(self, report_id: str, limit: int) -> list[DocRevision]:
         found = [r for r in self._revisions.values() if r.report_id == report_id]
         found.sort(key=lambda r: r.created_at or datetime.min, reverse=True)
@@ -250,12 +254,22 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
         self._reviews[stored.id] = stored
         return deepcopy(stored)
 
-    async def reviews_for_user(self, user_id: str) -> list[Review]:
+    async def reviews_for_user(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[Review]:
+        """Mirrors PgReportRepository.reviews_for_user: (updated_at, id)
+        descending, ``before`` exclusive."""
         invited = {r.review_id for r in self._reviewers
                    if r.user_id == user_id}
+        epoch = datetime.min.replace(tzinfo=timezone.utc)
         found = [r for r in self._reviews.values()
                  if r.author_id == user_id or r.id in invited]
-        found.sort(key=lambda r: r.updated_at or datetime.min, reverse=True)
+        found.sort(key=lambda r: (r.updated_at or epoch, r.id or ""), reverse=True)
+        if before is not None:
+            found = [r for r in found if (r.updated_at or epoch, r.id or "") < before]
+        if limit is not None:
+            found = found[:limit]
         return [deepcopy(r) for r in found]
 
     async def add_reviewer(self, reviewer: ReviewReviewer) -> ReviewReviewer:
@@ -270,6 +284,20 @@ class InMemoryReportRepository(ReportRepository):  # pylint: disable=too-many-pu
     async def list_reviewers(self, review_id: str) -> list[ReviewReviewer]:
         return [deepcopy(r) for r in self._reviewers
                 if r.review_id == review_id]
+
+    async def reviewers_of(
+        self, review_ids: list[str],
+    ) -> dict[str, list[ReviewReviewer]]:
+        wanted = set(review_ids)
+        out: dict[str, list[ReviewReviewer]] = {}
+        for r in self._reviewers:
+            if r.review_id in wanted:
+                out.setdefault(r.review_id, []).append(deepcopy(r))
+        return out
+
+    async def titles_of(self, report_ids: list[str]) -> dict[str, str]:
+        return {rid: self._reports[rid].title
+                for rid in report_ids if rid in self._reports}
 
     async def add_review_comment(self, comment: ReviewComment) -> ReviewComment:
         stored = deepcopy(comment)

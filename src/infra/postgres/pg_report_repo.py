@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -371,6 +371,15 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
         )).scalar_one_or_none()
         return self._revision_to_domain(row) if row else None
 
+    async def get_revisions(self, revision_ids: list[str]) -> dict[str, DocRevision]:
+        wanted = sorted({rid for rid in revision_ids if rid})
+        if not wanted:
+            return {}
+        rows = (await self._session.execute(
+            select(DocRevisionModel).where(DocRevisionModel.id.in_(wanted))
+        )).scalars().all()
+        return {row.id: self._revision_to_domain(row) for row in rows}
+
     async def list_revisions(self, report_id: str, limit: int) -> list[DocRevision]:
         result = await self._session.execute(
             select(DocRevisionModel)
@@ -538,17 +547,26 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
         await self._session.refresh(row)
         return self._review_to_domain(row)
 
-    async def reviews_for_user(self, user_id: str) -> list[Review]:
+    async def reviews_for_user(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[Review]:
         """Authored or invited — one list, because that is the question
-        being asked: what is waiting for me?"""
+        being asked: what is waiting for me?
+
+        One keyset page, newest activity first. ``id`` breaks ties so that
+        two reviews touched in the same instant neither repeat nor vanish
+        at a page boundary."""
         invited = select(ReviewReviewerModel.review_id).where(
             ReviewReviewerModel.user_id == user_id)
-        result = await self._session.execute(
-            select(ReviewModel)
-            .where(or_(ReviewModel.author_id == user_id,
-                       ReviewModel.id.in_(invited)))
-            .order_by(ReviewModel.updated_at.desc())
-        )
+        stmt = select(ReviewModel).where(or_(ReviewModel.author_id == user_id,
+                                             ReviewModel.id.in_(invited)))
+        if before is not None:
+            stmt = stmt.where(tuple_(ReviewModel.updated_at, ReviewModel.id) < before)
+        stmt = stmt.order_by(ReviewModel.updated_at.desc(), ReviewModel.id.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self._session.execute(stmt)
         return [self._review_to_domain(r) for r in result.scalars().all()]
 
     async def add_reviewer(self, reviewer: ReviewReviewer) -> ReviewReviewer:
@@ -575,6 +593,32 @@ class PgReportRepository(ReportRepository):  # pylint: disable=too-many-public-m
         return [ReviewReviewer(review_id=r.review_id, user_id=r.user_id,
                                invited_by=r.invited_by, invited_at=r.invited_at)
                 for r in result.scalars().all()]
+
+    async def reviewers_of(
+        self, review_ids: list[str],
+    ) -> dict[str, list[ReviewReviewer]]:
+        wanted = sorted(set(review_ids))
+        if not wanted:
+            return {}
+        result = await self._session.execute(
+            select(ReviewReviewerModel)
+            .where(ReviewReviewerModel.review_id.in_(wanted))
+            .order_by(ReviewReviewerModel.invited_at)
+        )
+        out: dict[str, list[ReviewReviewer]] = {}
+        for r in result.scalars().all():
+            out.setdefault(r.review_id, []).append(ReviewReviewer(
+                review_id=r.review_id, user_id=r.user_id,
+                invited_by=r.invited_by, invited_at=r.invited_at))
+        return out
+
+    async def titles_of(self, report_ids: list[str]) -> dict[str, str]:
+        wanted = sorted(set(report_ids))
+        if not wanted:
+            return {}
+        result = await self._session.execute(
+            select(ReportModel.id, ReportModel.title).where(ReportModel.id.in_(wanted)))
+        return dict(result.tuples().all())
 
     @staticmethod
     def _comment_to_domain(row: ReviewCommentModel) -> ReviewComment:

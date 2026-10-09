@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import date, datetime
 from typing import Annotated, Literal
+from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.api.paging import decode_before
 from src.api.schemas.text import Label
 from src.api.auth import get_current_user, get_optional_user
 from src.api.openapi_responses import RESOURCE_RESPONSES, UuidPath, UuidStr
@@ -200,15 +202,48 @@ async def list_reports(
 # rather than being parsed as a (non-UUID) report id.
 # Declared before /{report_id}: a literal segment that comes after a path
 # parameter is unreachable, and this repo has shipped that bug before.
+#: Largest page of my reviews a caller may ask for.
+MAX_REVIEWS_PAGE_SIZE = 200
+
+#: What a caller gets without asking.
+DEFAULT_REVIEWS_PAGE_SIZE = 30
+
+
 @router.get("/my-reviews")
 @inject
 async def my_reviews(
     *,
     svc: FromDishka[ReportService],
     user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=MAX_REVIEWS_PAGE_SIZE)] = DEFAULT_REVIEWS_PAGE_SIZE,
+    before: str = "",
 ) -> list[dict]:
-    """Everything this person started or was asked to read."""
-    return await svc.my_reviews(user.id)
+    """Everything this person started or was asked to read, most recently
+    active first, thirty at a time unless ``limit`` says otherwise.
+
+    It came back whole, and nothing ever leaves the list, so it grew with
+    every review: the e2e account's 1,513 took 22 seconds and failed the
+    promotion gate. Pass ``before=<updated_at>|<id>`` of the last row for
+    the next page; a page shorter than ``limit`` is the last. See
+    ``src/api/paging.py``."""
+    return await svc.my_reviews(user.id, limit=limit, before=_review_cursor(before))
+
+
+def _review_cursor(raw: str) -> tuple[datetime, str] | None:
+    """The ``before`` cursor, or the first page when it is unusable.
+
+    The id half is compared against a uuid column, so an id that is not
+    one would reach Postgres as a type error and come back a 400, where
+    ``decode_before`` promises that a cursor it cannot use means the
+    first page."""
+    cursor = decode_before(raw)
+    if cursor is None:
+        return None
+    try:
+        UUID(cursor[1])
+    except ValueError:
+        return None
+    return cursor
 
 
 @router.get("/search", openapi_extra={"security": []}, response_model=list[ReportSearchItem])

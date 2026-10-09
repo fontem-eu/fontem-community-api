@@ -6297,7 +6297,7 @@
   },
   "/briefings/{slug}": {
    "get": {
-    "description": "The briefing, plus what it currently holds for these regions.\n\nAnonymous on purpose: deciding whether a briefing is worth watching\nrequires seeing what is in it.",
+    "description": "The briefing, plus what it currently holds for these regions.\n\nAnonymous on purpose: deciding whether a briefing is worth watching\nrequires seeing what is in it. ``lang`` (the reader's UI language)\nshows contract and grant headlines translated where available.",
     "operationId": "get_briefing_briefings__slug__get",
     "parameters": [
      {
@@ -6756,9 +6756,31 @@
   },
   "/data-stories/my-reviews": {
    "get": {
-    "description": "Everything this person started or was asked to read.",
+    "description": "Everything this person started or was asked to read, most recently\nactive first, thirty at a time unless ``limit`` says otherwise.\n\nIt came back whole, and nothing ever leaves the list, so it grew with\nevery review: the e2e account's 1,513 took 22 seconds and failed the\npromotion gate. Pass ``before=<updated_at>|<id>`` of the last row for\nthe next page; a page shorter than ``limit`` is the last. See\n``src/api/paging.py``.",
     "operationId": "my_reviews_data_stories_my_reviews_get",
     "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 30,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Before",
+       "type": "string"
+      }
+     },
      {
       "in": "query",
       "name": "lang",
@@ -14042,9 +14064,31 @@
   "/reports/my-reviews": {
    "get": {
     "deprecated": true,
-    "description": "Everything this person started or was asked to read.",
+    "description": "Everything this person started or was asked to read, most recently\nactive first, thirty at a time unless ``limit`` says otherwise.\n\nIt came back whole, and nothing ever leaves the list, so it grew with\nevery review: the e2e account's 1,513 took 22 seconds and failed the\npromotion gate. Pass ``before=<updated_at>|<id>`` of the last row for\nthe next page; a page shorter than ``limit`` is the last. See\n``src/api/paging.py``.",
     "operationId": "my_reviews_reports_my_reviews_get",
     "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 30,
+       "maximum": 200,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "before",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Before",
+       "type": "string"
+      }
+     },
      {
       "in": "query",
       "name": "lang",
