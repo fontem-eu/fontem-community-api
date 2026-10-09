@@ -70,6 +70,19 @@ class TitleTranslator(Protocol):
         translation in ``lang``."""
 
 
+def _absorb(body: dict, out: dict[str, dict[str, Any]]) -> None:
+    """One fontem-api answer, added to ``out``: a title per contract and
+    grant; per buyer, the translation with the stored name beside it — the
+    stored name is what decides whether the card shows this buyer."""
+    for bucket in ("contracts", "cohesion"):
+        for key, hit in (body.get(bucket) or {}).items():
+            if isinstance(hit, dict) and hit.get("title"):
+                out[bucket][key] = hit["title"]
+    for key, hit in (body.get("buyers") or {}).items():
+        if isinstance(hit, dict) and hit.get("title") and hit.get("original"):
+            out["buyers"][key] = (hit["title"], hit["original"])
+
+
 class HttpTitleTranslator:
     """Asks fontem-api, through the same internal address the query proxies
     use, and remembers the answers for a while."""
@@ -117,16 +130,7 @@ class HttpTitleTranslator:
                     "buyer_contract_keys": buyer_keys[start:start + MAX_KEYS],
                 })
                 resp.raise_for_status()
-                body = resp.json()
-                for bucket in ("contracts", "cohesion"):
-                    for key, hit in (body.get(bucket) or {}).items():
-                        if isinstance(hit, dict) and hit.get("title"):
-                            out[bucket][key] = hit["title"]
-                # A buyer keeps the stored name beside the translation:
-                # it is what decides whether the card shows this buyer.
-                for key, hit in (body.get("buyers") or {}).items():
-                    if isinstance(hit, dict) and hit.get("title") and hit.get("original"):
-                        out["buyers"][key] = (hit["title"], hit["original"])
+                _absorb(resp.json(), out)
         return out
 
     async def lookup(self, lang: str, contract_keys: list[str],
