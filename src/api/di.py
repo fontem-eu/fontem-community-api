@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 from src.assistant.context import TurnLimits
@@ -34,6 +33,7 @@ from src.assistant.credential_repository import CredentialRepository, McpTokenRe
 from src.assistant.model_prefs import ModelPreferenceRepository
 from src.assistant.service import AssistantService, ProxyClient
 from src.infra.minio_client import MinioStorage
+from src.infra.postgres.engine import make_engine
 from src.infra.postgres.pg_authz_audit_repo import PgAuthzAuditRepository
 from src.infra.postgres.pg_group_repo import PgGroupRepository
 from src.infra.postgres.pg_investigation_repo import PgInvestigationRepository
@@ -115,11 +115,9 @@ class DatabaseProvider(Provider):
 
     @provide(scope=Scope.APP)
     async def engine(self) -> AsyncIterator[AsyncEngine]:
-        # pool_pre_ping: a restarted Postgres leaves every pooled connection
-        # dead, and without a liveness check at checkout the first request
-        # on each one fails (then PendingRollbackError). See
-        # tests/integration/test_db_reconnect_integration.py.
-        engine = create_async_engine(self._database_url, echo=False, pool_pre_ping=True)
+        # A restarted Postgres leaves every pooled connection dead; the
+        # engine checks each at checkout (see src/infra/postgres/engine.py).
+        engine = make_engine(self._database_url)
         yield engine
         await engine.dispose()
 
