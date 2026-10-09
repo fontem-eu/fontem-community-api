@@ -26,12 +26,13 @@ def _run(coro):
 
 
 class FakeTranslator:
-    def __init__(self, contracts=None, cohesion=None):
-        self.found = {"contracts": contracts or {}, "cohesion": cohesion or {}}
+    def __init__(self, contracts=None, cohesion=None, buyers=None):
+        self.found = {"contracts": contracts or {}, "cohesion": cohesion or {},
+                      "buyers": buyers or {}}
         self.calls = []
 
-    async def lookup(self, lang, contract_keys, cohesion_ids):
-        self.calls.append((lang, list(contract_keys), list(cohesion_ids)))
+    async def lookup(self, lang, contract_keys, cohesion_ids, buyer_keys=()):
+        self.calls.append((lang, list(contract_keys), list(cohesion_ids), list(buyer_keys)))
         return self.found
 
 
@@ -74,8 +75,8 @@ def test_untranslated_and_other_items_are_shown_as_stored():
     items = [_contract("k2"), lobby]
     fake = FakeTranslator()
     assert _run(localise(items, "en", fake)) == items
-    # Only contracts and grants are looked up.
-    assert fake.calls == [("en", ["k2"], [])]
+    # Only contracts and grants are looked up (and no buyer: _contract names none).
+    assert fake.calls == [("en", ["k2"], [], [])]
 
 
 def test_no_language_or_no_translator_means_no_lookup():
@@ -84,6 +85,45 @@ def test_no_language_or_no_translator_means_no_lookup():
     assert _run(localise(items, None, fake)) == items
     assert _run(localise(items, "en", None)) == items
     assert not fake.calls
+
+
+# ── a contract card's buyer ───────────────────────────────────────────
+
+def _with_buyer(key="k1", buyer="Ředitelství silnic a dálnic s. p."):
+    item = _contract(key)
+    item.facets = {**item.facets, "from": buyer, "from_more": 0}
+    return item
+
+
+def test_a_contract_cards_buyer_is_named_in_the_readers_language():
+    item = _with_buyer()
+    fake = FakeTranslator(buyers={"k1": ("Straßen- und Autobahndirektion",
+                                         "Ředitelství silnic a dálnic s. p.")})
+    [out] = _run(localise([item], "de", fake))
+    assert out.facets["from"] == "Straßen- und Autobahndirektion"
+    assert out.facets["from_original"] == "Ředitelství silnic a dálnic s. p."
+    # Looked up by the card's contract key; the stored item is not changed.
+    assert fake.calls == [("de", ["k1"], [], ["k1"])]
+    assert item.facets["from"] == "Ředitelství silnic a dálnic s. p."
+
+
+def test_a_buyer_is_left_alone_unless_it_is_the_one_the_card_names():
+    # The graph moved since the card was stored: its first buyer is now
+    # another authority. Translating that one would name the wrong buyer.
+    item = _with_buyer(buyer="Město Klatovy")
+    fake = FakeTranslator(buyers={"k1": ("Straßen- und Autobahndirektion",
+                                         "Ředitelství silnic a dálnic s. p.")})
+    [out] = _run(localise([item], "de", fake))
+    assert out.facets["from"] == "Město Klatovy"
+    assert "from_original" not in out.facets
+
+
+def test_the_headline_and_the_buyer_are_both_translated():
+    fake = FakeTranslator(contracts={"k1": "Medicinal product"},
+                          buyers={"k1": ("Roads Directorate", "Ředitelství silnic a dálnic s. p.")})
+    [out] = _run(localise([_with_buyer()], "en", fake))
+    assert (out.facets["headline"], out.facets["from"]) == ("Medicinal product",
+                                                            "Roads Directorate")
 
 
 # ── the HTTP client ───────────────────────────────────────────────────
@@ -102,8 +142,10 @@ def test_the_client_asks_fontem_api_once_and_remembers_hits_and_misses():
     client = HttpTitleTranslator(base_url="http://api", transport=_transport(seen))
     first = _run(client.lookup("en", ["k1", "k2", "k1"], []))
     again = _run(client.lookup("en", ["k1", "k2"], []))
-    assert first == again == {"contracts": {"k1": "Medicinal product"}, "cohesion": {}}
-    assert seen == [{"lang": "en", "contract_keys": ["k1", "k2"], "cohesion_ids": []}]
+    assert first == again == {"contracts": {"k1": "Medicinal product"}, "cohesion": {},
+                              "buyers": {}}
+    assert seen == [{"lang": "en", "contract_keys": ["k1", "k2"], "cohesion_ids": [],
+                     "buyer_contract_keys": []}]
     # Another language is another question.
     _run(client.lookup("de", ["k1"], []))
     assert len(seen) == 2
@@ -120,10 +162,23 @@ def test_the_client_splits_a_long_page_into_requests_fontem_api_accepts():
 def test_an_unreachable_api_costs_the_translations_not_the_page():
     seen = []
     client = HttpTitleTranslator(base_url="http://api", transport=_transport(seen, status=503))
-    assert _run(client.lookup("en", ["k1"], [])) == {"contracts": {}, "cohesion": {}}
+    assert _run(client.lookup("en", ["k1"], [])) == {"contracts": {}, "cohesion": {},
+                                                     "buyers": {}}
     # A failure is not remembered: the next page asks again.
     _run(client.lookup("en", ["k1"], []))
     assert len(seen) == 2
+
+
+def test_the_client_asks_for_buyers_and_keeps_the_stored_name_beside_each():
+    seen = []
+    client = HttpTitleTranslator(base_url="http://api", transport=_transport(seen, body={
+        "buyers": {"k1": {"title": "Straßen- und Autobahndirektion",
+                          "original": "Ředitelství silnic a dálnic s. p."}}}))
+    first = _run(client.lookup("de", [], [], ["k1", "k2"]))
+    again = _run(client.lookup("de", [], [], ["k1", "k2"]))
+    assert first["buyers"] == again["buyers"] == {
+        "k1": ("Straßen- und Autobahndirektion", "Ředitelství silnic a dálnic s. p.")}
+    assert [s["buyer_contract_keys"] for s in seen] == [["k1", "k2"]]
 
 
 # ── the briefing endpoint ─────────────────────────────────────────────
