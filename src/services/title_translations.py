@@ -13,6 +13,13 @@ page, keyed by what the item already names — a contract's ``contract_key``
 The original stays on the item as ``facets.headline_original`` so the card
 can always show what the source published. Nothing here can fail a page:
 an unreachable graph API serves the items as they are.
+
+A contract card's buyer (``facets.from``) is the same story with one more
+step: the item keeps only the buyer's name, as text, and translations are
+kept per authority. fontem-api finds the buyer from the contract key, picked
+as the public-contracts query picks it, and answers with the name it has
+stored; the card's name is swapped only when that is the name it shows, and
+the original stays as ``facets.from_original``.
 """
 from __future__ import annotations
 
@@ -20,7 +27,7 @@ import copy
 import os
 import time
 from functools import lru_cache
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 from loguru import logger
@@ -56,9 +63,11 @@ def clean_lang(value: str | None) -> str | None:
 
 class TitleTranslator(Protocol):
     async def lookup(self, lang: str, contract_keys: list[str],
-                     cohesion_ids: list[str]) -> dict[str, dict[str, str]]:
-        """``{"contracts": {key: title}, "cohesion": {id: title}}``, only
-        for what has a translation in ``lang``."""
+                     cohesion_ids: list[str],
+                     buyer_keys: list[str] = ()) -> dict[str, dict[str, Any]]:
+        """``{"contracts": {key: title}, "cohesion": {id: title}, "buyers":
+        {contract_key: (name, stored name)}}``, only for what has a
+        translation in ``lang``."""
 
 
 class HttpTitleTranslator:
@@ -71,8 +80,9 @@ class HttpTitleTranslator:
         self._base = (base_url or os.environ.get("GMR_API_INTERNAL", DEFAULT_BASE_URL)).rstrip("/")
         self._ttl = ttl
         self._transport = transport  # tests only
-        # (lang, bucket, key) -> (expires_at, title or None)
-        self._cache: dict[tuple[str, str, str], tuple[float, str | None]] = {}
+        # (lang, bucket, key) -> (expires_at, what was found or None): a
+        # title, or for a buyer its (name, stored name).
+        self._cache: dict[tuple[str, str, str], tuple[float, Any]] = {}
 
     def _cached(self, lang: str, bucket: str, keys: list[str], now: float):
         hits, misses = {}, []
@@ -86,7 +96,7 @@ class HttpTitleTranslator:
         return hits, misses
 
     def _remember(self, lang: str, bucket: str, asked: list[str],
-                  found: dict[str, str]) -> None:
+                  found: dict[str, Any]) -> None:
         if len(self._cache) > CACHE_MAX:
             self._cache.clear()
         expires = time.monotonic() + self._ttl
@@ -94,14 +104,17 @@ class HttpTitleTranslator:
             self._cache[(lang, bucket, key)] = (expires, found.get(key))
 
     async def _fetch(self, lang: str, contract_keys: list[str],
-                     cohesion_ids: list[str]) -> dict[str, dict[str, str]]:
-        out: dict[str, dict[str, str]] = {"contracts": {}, "cohesion": {}}
+                     cohesion_ids: list[str],
+                     buyer_keys: list[str]) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {"contracts": {}, "cohesion": {}, "buyers": {}}
+        longest = max(len(contract_keys), len(cohesion_ids), len(buyer_keys))
         async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=self._transport) as client:
-            for start in range(0, max(len(contract_keys), len(cohesion_ids)), MAX_KEYS):
+            for start in range(0, longest, MAX_KEYS):
                 resp = await client.post(f"{self._base}/translations/titles", json={
                     "lang": lang,
                     "contract_keys": contract_keys[start:start + MAX_KEYS],
                     "cohesion_ids": cohesion_ids[start:start + MAX_KEYS],
+                    "buyer_contract_keys": buyer_keys[start:start + MAX_KEYS],
                 })
                 resp.raise_for_status()
                 body = resp.json()
@@ -109,24 +122,33 @@ class HttpTitleTranslator:
                     for key, hit in (body.get(bucket) or {}).items():
                         if isinstance(hit, dict) and hit.get("title"):
                             out[bucket][key] = hit["title"]
+                # A buyer keeps the stored name beside the translation:
+                # it is what decides whether the card shows this buyer.
+                for key, hit in (body.get("buyers") or {}).items():
+                    if isinstance(hit, dict) and hit.get("title") and hit.get("original"):
+                        out["buyers"][key] = (hit["title"], hit["original"])
         return out
 
     async def lookup(self, lang: str, contract_keys: list[str],
-                     cohesion_ids: list[str]) -> dict[str, dict[str, str]]:
+                     cohesion_ids: list[str],
+                     buyer_keys: list[str] = ()) -> dict[str, dict[str, Any]]:
         now = time.monotonic()
-        contracts, contract_misses = self._cached(lang, "contracts", contract_keys, now)
-        grants, grant_misses = self._cached(lang, "cohesion", cohesion_ids, now)
-        if contract_misses or grant_misses:
+        asked = {"contracts": contract_keys, "cohesion": cohesion_ids,
+                 "buyers": list(buyer_keys)}
+        found, misses = {}, {}
+        for bucket, keys in asked.items():
+            found[bucket], misses[bucket] = self._cached(lang, bucket, keys, now)
+        if any(misses.values()):
             try:
-                fetched = await self._fetch(lang, contract_misses, grant_misses)
+                fetched = await self._fetch(lang, misses["contracts"], misses["cohesion"],
+                                            misses["buyers"])
             except (httpx.HTTPError, ValueError) as exc:
                 logger.warning("title translations unavailable ({}): {}", lang, exc)
-                return {"contracts": contracts, "cohesion": grants}
-            self._remember(lang, "contracts", contract_misses, fetched["contracts"])
-            self._remember(lang, "cohesion", grant_misses, fetched["cohesion"])
-            contracts.update(fetched["contracts"])
-            grants.update(fetched["cohesion"])
-        return {"contracts": contracts, "cohesion": grants}
+                return found
+            for bucket in asked:
+                self._remember(lang, bucket, misses[bucket], fetched[bucket])
+                found[bucket].update(fetched[bucket])
+        return found
 
 
 @lru_cache(maxsize=1)
@@ -161,6 +183,30 @@ def _localised(item: FeedItem, bucket: str, translated: str | None) -> FeedItem:
     return out
 
 
+def _buyer_key(item: FeedItem) -> str | None:
+    """The contract key a card's buyer is looked up by, or None when the
+    item names no buyer (grants, lobbying, a contract without a buyer)."""
+    facets = item.facets or {}
+    if facets.get("kind") == "contract" and facets.get("from") \
+            and not item.item_id.startswith(COHESION_PREFIX):
+        return item.item_id
+    return None
+
+
+def _with_buyer(item: FeedItem, buyer: tuple[str, str] | None) -> FeedItem:
+    """The item with its buyer named in the reader's language — only when
+    the buyer looked up carries the name the card shows."""
+    facets = item.facets or {}
+    if not buyer:
+        return item
+    name, original = buyer
+    if facets.get("from") != original or name == original:
+        return item
+    out = copy.copy(item)
+    out.facets = {**facets, "from": name, "from_original": original}
+    return out
+
+
 async def localise(items: list[FeedItem], lang: str | None,
                    translator: TitleTranslator | None) -> list[FeedItem]:
     """The items with their headline in ``lang`` where translated.
@@ -168,16 +214,25 @@ async def localise(items: list[FeedItem], lang: str | None,
     Returns new items; the ones passed in are never changed. A contract's
     ``summary`` is its title too and follows the headline; a grant's is its
     programme and stays. ``title`` (the sentence an Atom reader shows) is
-    left alone.
+    left alone. A contract's buyer is swapped too, keeping the original as
+    ``facets.from_original``.
     """
     if not lang or translator is None or not items:
         return items
     keys = [_key(item) for item in items]
+    buyer_keys = [_buyer_key(item) for item in items]
     wanted: dict[str, list[str]] = {"contracts": [], "cohesion": []}
     for key in filter(None, keys):
         wanted[key[0]].append(key[1])
-    if not any(wanted.values()):
+    buyers = [key for key in buyer_keys if key]
+    if not any(wanted.values()) and not buyers:
         return items
-    found = await translator.lookup(lang, wanted["contracts"], wanted["cohesion"])
-    return [_localised(item, key[0], found.get(key[0], {}).get(key[1])) if key else item
-            for item, key in zip(items, keys)]
+    found = await translator.lookup(lang, wanted["contracts"], wanted["cohesion"], buyers)
+    out = []
+    for item, key, buyer_key in zip(items, keys, buyer_keys):
+        if key:
+            item = _localised(item, key[0], found.get(key[0], {}).get(key[1]))
+        if buyer_key:
+            item = _with_buyer(item, found.get("buyers", {}).get(buyer_key))
+        out.append(item)
+    return out
