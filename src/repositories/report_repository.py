@@ -147,14 +147,34 @@ class ReportRepository(ABC):  # pylint: disable=too-many-public-methods
     async def update_review(self, review: Review) -> Review: ...
 
     @abstractmethod
-    async def reviews_for_user(self, user_id: str) -> list[Review]:
-        """Everything this person authored or was invited to read."""
+    async def reviews_for_user(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[Review]:
+        """Everything this person authored or was invited to read, newest
+        activity first by (updated_at, id). ``before`` is exclusive."""
+
+    @abstractmethod
+    async def get_revisions(self, revision_ids: list[str]) -> dict[str, DocRevision]:
+        """Several revisions in one read, keyed by id. An unknown id is
+        simply absent."""
 
     @abstractmethod
     async def add_reviewer(self, reviewer: ReviewReviewer) -> ReviewReviewer: ...
 
     @abstractmethod
     async def list_reviewers(self, review_id: str) -> list[ReviewReviewer]: ...
+
+    @abstractmethod
+    async def reviewers_of(
+        self, review_ids: list[str],
+    ) -> dict[str, list[ReviewReviewer]]:
+        """Who was asked to read each of these reviews, in one read. A
+        review nobody was invited to is absent."""
+
+    @abstractmethod
+    async def titles_of(self, report_ids: list[str]) -> dict[str, str]:
+        """Each article's title, keyed by id, in one read."""
 
     @abstractmethod
     async def add_review_comment(self, comment: ReviewComment) -> ReviewComment: ...

@@ -688,14 +688,40 @@ class ReportService:  # pylint: disable=too-many-public-methods
                 out.append(await self._review_view(review))
         return out
 
-    async def my_reviews(self, user_id: str) -> list[dict]:
-        """Everything this person started or was asked to read."""
-        rows = await self._reports.reviews_for_user(user_id)
+    async def my_reviews(
+        self, user_id: str, *, limit: int | None = None,
+        before: tuple[datetime, str] | None = None,
+    ) -> list[dict]:
+        """Everything this person started or was asked to read, newest
+        activity first, a page at a time when ``limit`` is given.
+
+        The same rows as :meth:`get_review` describes, read in a fixed
+        number of statements however long the history is: the page, then
+        its revisions, reviewers and article titles in one read each. It
+        used to build each row on its own — three to five statements a
+        review — and the e2e account, which keeps every review it starts,
+        reached 1,513 reviews, 5,595 statements and 22 seconds.
+
+        Only an open change review still costs more: how far the published
+        text has moved past it is a walk up the revision chain.
+        """
+        reviews = await self._reports.reviews_for_user(
+            user_id, limit=limit, before=before)
+        revisions = await self._reports.get_revisions([
+            rid for r in reviews if r.kind == "change"
+            for rid in (r.source_head, r.target_base) if rid])
+        reviewers = await self._reports.reviewers_of([r.id for r in reviews])
+        titles = await self._reports.titles_of([r.report_id for r in reviews])
         out = []
-        for review in rows:
-            view = await self._review_view(review)
-            report = await self._reports.get_by_id(review.report_id)
-            view["report_title"] = report.title if report else ""
+        for review in reviews:
+            view = self._review_row(
+                review,
+                pair=(revisions.get(review.target_base or ""),
+                      revisions.get(review.source_head)),
+                reviewers=reviewers.get(review.id, []),
+                behind=await self._behind_if_open(review),
+            )
+            view["report_title"] = titles.get(review.report_id, "")
             view["mine"] = review.author_id == user_id
             out.append(view)
         return out
@@ -734,20 +760,40 @@ class ReportService:  # pylint: disable=too-many-public-methods
 
     async def _review_view(self, review: Review) -> dict:
         """The row a reviewer reads, including whether it can be published."""
-        changes = {}
-        behind = 0
+        pair: tuple[DocRevision | None, DocRevision | None] = (None, None)
         if review.kind == "change":
-            base = (await self._reports.get_revision(review.target_base)
-                    if review.target_base else None)
-            source = await self._reports.get_revision(review.source_head)
+            pair = ((await self._reports.get_revision(review.target_base)
+                     if review.target_base else None),
+                    await self._reports.get_revision(review.source_head))
+        return self._review_row(
+            review, pair=pair,
+            reviewers=await self._reports.list_reviewers(review.id),
+            behind=await self._behind_if_open(review),
+        )
+
+    async def _behind_if_open(self, review: Review) -> int:
+        """How far an open proposal has fallen behind; nothing else can."""
+        if review.kind != "change" or review.state != "open":
+            return 0
+        return await self._behind_by(review.report_id, review.target_base)
+
+    @staticmethod
+    def _review_row(
+        review: Review, *,
+        pair: tuple[DocRevision | None, DocRevision | None],
+        reviewers: list[ReviewReviewer], behind: int,
+    ) -> dict:
+        """One review as a reader sees it, from what has already been read.
+
+        ``pair`` is (base, source): what a change would be merged into and
+        what it proposes. An article review has nothing to compare.
+        """
+        changes = {}
+        if review.kind == "change":
+            base, source = pair
             changes = doc_diff.summary(doc_diff.diff(
                 base.content_json if base else None,
                 source.content_json if source else None))
-            if review.state == "open":
-                behind = await self._behind_by(
-                    review.report_id, review.target_base)
-
-        reviewers = await self._reports.list_reviewers(review.id)
         return {
             "id": review.id,
             "report_id": review.report_id,
@@ -760,6 +806,9 @@ class ReportService:  # pylint: disable=too-many-public-methods
             "target_base": review.target_base,
             "created_at": (review.created_at.isoformat()
                            if review.created_at else None),
+            # With ``id``, the cursor for the next page of my reviews.
+            "updated_at": (review.updated_at.isoformat()
+                           if review.updated_at else None),
             "merged_at": (review.merged_at.isoformat()
                           if review.merged_at else None),
             "merged_by": review.merged_by,
